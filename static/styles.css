@@ -1,0 +1,187 @@
+/* ── Custom dark theme ──────────────────────────────────────────────────── */
+:root {
+  --card-bg: #161b22;
+  --card-border: #30363d;
+  --body-bg: #0d1117;
+  --input-bg: #0d1117;
+  --muted: #8b949e;
+}
+
+body {
+  background-color: var(--body-bg);
+  color: #e6edf3;
+}
+
+#navbar {
+  background-color: #161b22 !important;
+  border-bottom-color: var(--card-border) !important;
+}
+
+.card {
+  background-color: var(--card-bg);
+  border-color: var(--card-border);
+}
+
+.card-header {
+  background-color: rgba(255, 255, 255, 0.02);
+  border-bottom-color: var(--card-border);
+}
+
+.form-control,
+.input-group-text {
+  background-color: var(--input-bg);
+  border-color: var(--card-border);
+  color: #e6edf3;
+}
+
+.form-control:focus {
+  background-color: var(--input-bg);
+  border-color: #388bfd;
+  color: #e6edf3;
+  box-shadow: 0 0 0 0.2rem rgba(56, 139, 253, 0.2);
+}
+
+.form-control::placeholder {
+  color: #484f58;
+}
+
+textarea.form-control {
+  resize: vertical;
+  min-height: 120px;
+}
+
+.font-mono {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 0.78rem;
+}
+
+/* Nav tabs inside card header */
+.nav-tabs {
+  border-bottom: none;
+}
+
+.nav-tabs .nav-link {
+  color: var(--muted);
+  border-color: transparent;
+  font-size: 0.875rem;
+}
+
+.nav-tabs .nav-link:hover {
+  color: #e6edf3;
+  border-color: transparent;
+}
+
+.nav-tabs .nav-link.active {
+  color: #e6edf3;
+  background-color: var(--card-bg);
+  border-color: var(--card-border) var(--card-border) var(--card-bg);
+}
+
+/* Header rows */
+.header-row .form-control {
+  font-size: 0.8rem;
+}
+
+/* Download task cards */
+.task-card {
+  background-color: #0d1117;
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-bottom: 10px;
+  transition: border-color 0.15s ease;
+}
+
+.task-card:hover {
+  border-color: #444c56;
+}
+
+.task-url {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 0.72rem;
+  color: var(--muted);
+  word-break: break-all;
+  max-height: 2.4em;
+  overflow: hidden;
+}
+
+.progress {
+  background-color: #21262d;
+  border-radius: 4px;
+  height: 6px !important;
+}
+
+.progress-bar {
+  transition: width 0.4s ease;
+}
+
+/* Quality selector */
+.quality-option {
+  background-color: #0d1117;
+  border: 1px solid var(--card-border);
+  border-radius: 6px;
+  padding: 10px 14px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.quality-option:hover {
+  border-color: #388bfd;
+  background-color: rgba(56, 139, 253, 0.06);
+}
+
+.quality-option input[type="radio"] {
+  accent-color: #388bfd;
+}
+
+/* Stat dl */
+.stat-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 16px;
+  font-size: 0.875rem;
+}
+
+.stat-grid dt {
+  color: var(--muted);
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.stat-grid dd {
+  margin: 0;
+}
+
+/* Buttons */
+.btn-outline-secondary {
+  color: #8b949e;
+  border-color: #444c56;
+}
+
+.btn-outline-secondary:hover {
+  background-color: #21262d;
+  color: #e6edf3;
+  border-color: #6e7681;
+}
+
+/* Toast */
+.toast {
+  background-color: #161b22;
+  border-color: var(--card-border);
+  color: #e6edf3;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--body-bg);
+}
+
+::-webkit-scrollbar-thumb {
+  background: #30363d;
+  border-radius: 3px;
+}
