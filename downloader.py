@@ -1,11 +1,10 @@
 import re
+import uuid
 import asyncio
 import aiohttp
 import m3u8
 import shutil
-import tempfile
 import time
-import os
 from pathlib import Path
 from urllib.parse import urljoin
 from typing import AsyncGenerator, Dict, Any, Optional
@@ -44,6 +43,7 @@ class M3U8Downloader:
         quality: str = "best",
         concurrency: int = 8,
         retry: int = 3,
+        task_id: str = None,
     ):
         self.url = url
         self.headers = headers or {}
@@ -52,6 +52,7 @@ class M3U8Downloader:
         self.quality = quality
         self.concurrency = concurrency
         self.retry = retry
+        self.task_id = task_id or str(uuid.uuid4())
         self._cancel = False
         self._stop = False  # stop live recording but still merge
 
@@ -62,6 +63,12 @@ class M3U8Downloader:
         """Signal live stream to stop polling and proceed to merge."""
         self._stop = True
         self._cancel = True
+
+    def cleanup_cache(self):
+        """Remove the deterministic cache directory for this task."""
+        cache_dir = self.output_dir / ".cache" / self.task_id
+        if cache_dir.exists():
+            shutil.rmtree(cache_dir, ignore_errors=True)
 
     def _make_session(self):
         connector = aiohttp.TCPConnector(ssl=False, limit=self.concurrency * 4)
@@ -132,11 +139,10 @@ class M3U8Downloader:
 
     async def download(self) -> AsyncGenerator[Dict[str, Any], None]:
         """Download the M3U8 stream, yielding progress dicts."""
-        tmpdir = None
+        # Deterministic cache dir: survives server restarts for resume/preview
+        tmpdir_path = self.output_dir / ".cache" / self.task_id
+        tmpdir_path.mkdir(parents=True, exist_ok=True)
         try:
-            tmpdir = tempfile.mkdtemp(prefix="m3u8dl_")
-            tmpdir_path = Path(tmpdir)
-
             async with self._make_session() as session:
                 content = await self._fetch_text(session, self.url)
                 pl = m3u8.loads(content)
@@ -173,17 +179,22 @@ class M3U8Downloader:
                             )
 
                 # Download CMAF init segment(s) (EXT-X-MAP)
+                # Also save to disk so preview endpoint can serve it
                 init_data_map: Dict[str, bytes] = {}
                 if is_cmaf:
+                    init_disk = tmpdir_path / "init.mp4"
                     for seg in segments:
                         init_sec = getattr(seg, "init_section", None)
                         if init_sec and getattr(init_sec, "uri", None):
                             init_url = self._resolve(init_sec.uri, base_url)
                             if init_url not in init_data_map:
                                 try:
-                                    init_data_map[init_url] = await self._fetch_bytes(
-                                        session, init_url
-                                    )
+                                    if init_disk.exists() and init_disk.stat().st_size > 0:
+                                        init_data_map[init_url] = init_disk.read_bytes()
+                                    else:
+                                        init_bytes = await self._fetch_bytes(session, init_url)
+                                        init_data_map[init_url] = init_bytes
+                                        init_disk.write_bytes(init_bytes)
                                 except Exception:
                                     pass
 
@@ -221,6 +232,10 @@ class M3U8Downloader:
                         "bytes_downloaded": 0,
                         "speed_mbps": 0.0,
                         "elapsed_sec": 0,
+                        "tmpdir": str(tmpdir_path),
+                        "is_cmaf": is_cmaf,
+                        "seg_ext": seg_ext,
+                        "target_duration": pl.target_duration or 6,
                     }
 
                     while not self._cancel:
@@ -312,6 +327,10 @@ class M3U8Downloader:
                         "total": total,
                         "downloaded": 0,
                         "progress": 0,
+                        "tmpdir": str(tmpdir_path),
+                        "is_cmaf": is_cmaf,
+                        "seg_ext": seg_ext,
+                        "target_duration": pl.target_duration or 6,
                     }
 
                     downloaded = 0
@@ -320,6 +339,12 @@ class M3U8Downloader:
                     async def dl_one(idx: int, seg):
                         nonlocal downloaded, failed_count, bytes_downloaded
                         if self._cancel:
+                            return
+                        seg_path = tmpdir_path / f"seg_{idx:06d}{seg_ext}"
+                        # Resume: skip already-downloaded segments
+                        if seg_path.exists() and seg_path.stat().st_size > 0:
+                            downloaded += 1
+                            bytes_downloaded += seg_path.stat().st_size
                             return
                         seg_url = self._resolve(seg.uri, base_url)
                         async with semaphore:
@@ -332,7 +357,6 @@ class M3U8Downloader:
                                         data = self._decrypt_aes128(
                                             data, key, seg.key.iv
                                         )
-                                seg_path = tmpdir_path / f"seg_{idx:06d}{seg_ext}"
                                 seg_path.write_bytes(data)
                                 downloaded += 1
                                 bytes_downloaded += len(data)
@@ -407,8 +431,7 @@ class M3U8Downloader:
         except Exception as e:
             yield {"status": "failed", "error": str(e)}
         finally:
-            if tmpdir and os.path.exists(tmpdir):
-                shutil.rmtree(tmpdir, ignore_errors=True)
+            pass  # cache dir is kept for preview and resume; caller cleans up
 
     def _pick_quality(self, pl) -> str:
         streams = sorted(

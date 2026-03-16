@@ -307,9 +307,14 @@ function addTaskCard(taskId, url) {
     </div>
     <div class="d-flex justify-content-between align-items-center">
       <small class="task-info text-muted">正在准备...</small>
-      <button class="btn btn-sm btn-outline-danger task-action" data-id="${taskId}">
-        <i class="fas fa-times"></i> 取消
-      </button>
+      <div class="d-flex gap-2 align-items-center">
+        <button class="btn btn-sm btn-outline-info task-preview d-none" title="预览已下载片段">
+          <i class="fas fa-play-circle me-1"></i>预览
+        </button>
+        <button class="btn btn-sm btn-outline-danger task-action" data-id="${taskId}">
+          <i class="fas fa-times"></i> 取消
+        </button>
+      </div>
     </div>`;
 
   list.insertBefore(card, list.firstChild);
@@ -326,6 +331,7 @@ const STATUS_MAP = {
   completed:   { text: "已完成",  cls: "bg-success"   },
   failed:      { text: "失败",    cls: "bg-danger"    },
   cancelled:   { text: "已取消",  cls: "bg-secondary" },
+  interrupted: { text: "已中断",  cls: "bg-warning"   },
 };
 
 function updateTaskCard(taskId, task) {
@@ -338,7 +344,6 @@ function updateTaskCard(taskId, task) {
 
   const bar = card.querySelector(".task-bar");
   if (task.status === "recording") {
-    // Indeterminate pulsing bar for live
     bar.style.width = "100%";
     bar.className = "progress-bar task-bar bg-danger progress-bar-striped progress-bar-animated";
   } else if (task.status === "stopping") {
@@ -384,13 +389,33 @@ function updateTaskCard(taskId, task) {
       </a>
       ${task.duration_sec ? `<span class="ms-2 text-muted small">耗时 ${task.duration_sec}s</span>` : ""}`;
   } else if (task.status === "failed") {
-    info.textContent = `错误: ${task.error || "未知错误"}`;
-    info.className = "task-info small text-danger";
+    info.innerHTML = `<span class="text-danger">错误: ${esc(task.error || "未知错误")}</span>
+      <button class="btn btn-link btn-sm p-0 ms-2 text-warning" onclick="resumeTask('${taskId}')">
+        <i class="fas fa-redo me-1"></i>重试
+      </button>`;
+    info.className = "task-info small";
   } else if (task.status === "cancelled") {
     info.textContent = "已取消";
     info.className = "task-info small text-muted";
+  } else if (task.status === "interrupted") {
+    info.innerHTML = `<span class="text-warning"><i class="fas fa-exclamation-triangle me-1"></i>服务中断</span>
+      <button class="btn btn-link btn-sm p-0 ms-2 text-warning" onclick="resumeTask('${taskId}')">
+        <i class="fas fa-redo me-1"></i>断点续传
+      </button>`;
+    info.className = "task-info small";
   }
 
+  // ── Preview button: show when enough segments are available ──────────────
+  const previewBtn = card.querySelector(".task-preview");
+  if (previewBtn && task.tmpdir && (task.downloaded >= 5 || task.recorded_segments >= 5)) {
+    previewBtn.classList.remove("d-none");
+    if (!previewBtn.dataset.listenerAdded) {
+      previewBtn.dataset.listenerAdded = "1";
+      previewBtn.addEventListener("click", () => openPreview(taskId));
+    }
+  }
+
+  // ── Action button state ───────────────────────────────────────────────────
   if (task.status === "recording") {
     const btn = card.querySelector(".task-action");
     if (btn && btn.dataset.mode !== "stop") {
@@ -405,15 +430,29 @@ function updateTaskCard(taskId, task) {
       btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>合并中';
       btn.className = "btn btn-sm btn-secondary task-action";
     }
+  } else if (task.status === "interrupted") {
+    const btn = card.querySelector(".task-action");
+    if (btn && btn.dataset.mode !== "resume") {
+      btn.innerHTML = '<i class="fas fa-redo me-1"></i>恢复';
+      btn.className = "btn btn-sm btn-warning task-action";
+      btn.dataset.mode = "resume";
+      btn.disabled = false;
+      btn.replaceWith(btn.cloneNode(true));
+      card.querySelector(".task-action").addEventListener("click", () => resumeTask(taskId));
+    }
   } else if (["completed", "failed", "cancelled"].includes(task.status)) {
     const btn = card.querySelector(".task-action");
-    btn.innerHTML = '<i class="fas fa-trash"></i>';
-    btn.className = "btn btn-sm btn-outline-secondary task-action";
-    btn.replaceWith(btn.cloneNode(true));
-    card.querySelector(".task-action").addEventListener("click", () => {
-      card.remove();
-      updateTaskCount();
-    });
+    if (btn && btn.dataset.mode !== "trash") {
+      btn.innerHTML = '<i class="fas fa-trash"></i>';
+      btn.className = "btn btn-sm btn-outline-secondary task-action";
+      btn.dataset.mode = "trash";
+      btn.replaceWith(btn.cloneNode(true));
+      card.querySelector(".task-action").addEventListener("click", async () => {
+        await fetch(`/api/tasks/${taskId}`, { method: "DELETE" }).catch(() => {});
+        card.remove();
+        updateTaskCount();
+      });
+    }
   }
 }
 
@@ -425,7 +464,7 @@ function startPolling(taskId) {
       if (!res.ok) { stopPolling(taskId); return; }
       const task = await res.json();
       updateTaskCard(taskId, task);
-      if (["completed", "failed", "cancelled"].includes(task.status)) {
+      if (["completed", "failed", "cancelled", "interrupted"].includes(task.status)) {
         stopPolling(taskId);
         if (task.status === "completed")
           toast(`${task.output} 已完成`, "success");
@@ -442,8 +481,18 @@ function stopPolling(taskId) {
 }
 
 async function cancelTask(taskId) {
+  let data = {};
+  try {
+    const res = await fetch(`/api/tasks/${taskId}`, { method: "DELETE" });
+    data = await res.json();
+  } catch (_) {}
+
+  if (data.status === "stopping") {
+    // Live stream: server is merging — keep polling to completion
+    return;
+  }
+
   stopPolling(taskId);
-  await fetch(`/api/tasks/${taskId}`, { method: "DELETE" }).catch(() => {});
   const card = document.getElementById(`task-${taskId}`);
   if (card) {
     card.querySelector(".task-status").textContent = "已取消";
@@ -451,8 +500,10 @@ async function cancelTask(taskId) {
     const btn = card.querySelector(".task-action");
     btn.innerHTML = '<i class="fas fa-trash"></i>';
     btn.className = "btn btn-sm btn-outline-secondary task-action";
+    btn.dataset.mode = "trash";
     btn.replaceWith(btn.cloneNode(true));
-    card.querySelector(".task-action").addEventListener("click", () => {
+    card.querySelector(".task-action").addEventListener("click", async () => {
+      await fetch(`/api/tasks/${taskId}`, { method: "DELETE" }).catch(() => {});
       card.remove();
       updateTaskCount();
     });
@@ -460,12 +511,78 @@ async function cancelTask(taskId) {
 }
 
 // ── Clear completed ───────────────────────────────────────────────────────────
-document.getElementById("clearCompletedBtn").addEventListener("click", () => {
-  document.querySelectorAll(".task-card").forEach((card) => {
+document.getElementById("clearCompletedBtn").addEventListener("click", async () => {
+  const terminalTexts = ["已完成", "失败", "已取消"];
+  const toRemove = Array.from(document.querySelectorAll(".task-card")).filter((card) => {
     const s = card.querySelector(".task-status")?.textContent;
-    if (["已完成", "失败", "已取消"].includes(s)) card.remove();
+    return terminalTexts.includes(s);
   });
+  for (const card of toRemove) {
+    const taskId = card.id.replace("task-", "");
+    await fetch(`/api/tasks/${taskId}`, { method: "DELETE" }).catch(() => {});
+    card.remove();
+  }
   updateTaskCount();
+});
+
+// ── Resume task ────────────────────────────────────────────────────────────────
+async function resumeTask(taskId) {
+  try {
+    const res = await fetch(`/api/tasks/${taskId}/resume`, { method: "POST" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "恢复失败");
+    // Reset card to queued state
+    const card = document.getElementById(`task-${taskId}`);
+    if (card) {
+      card.querySelector(".task-status").textContent = "等待中";
+      card.querySelector(".task-status").className = "badge bg-secondary flex-shrink-0 task-status";
+      card.querySelector(".task-info").textContent = "正在准备...";
+      const btn = card.querySelector(".task-action");
+      btn.innerHTML = '<i class="fas fa-times"></i> 取消';
+      btn.className = "btn btn-sm btn-outline-danger task-action";
+      btn.dataset.mode = "";
+      btn.disabled = false;
+      btn.replaceWith(btn.cloneNode(true));
+      card.querySelector(".task-action").addEventListener("click", () => cancelTask(taskId));
+    }
+    startPolling(taskId);
+    toast("已开始断点续传", "info");
+  } catch (e) {
+    toast(e.message, "danger");
+  }
+}
+
+// ── Preview player (hls.js) ───────────────────────────────────────────────────
+let hlsInstance = null;
+
+function openPreview(taskId) {
+  const video = document.getElementById("previewVideo");
+  if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
+  video.pause();
+  video.removeAttribute("src");
+
+  const src = `/api/tasks/${taskId}/preview.m3u8`;
+  if (typeof Hls !== "undefined" && Hls.isSupported()) {
+    hlsInstance = new Hls({ enableWorker: false });
+    hlsInstance.loadSource(src);
+    hlsInstance.attachMedia(video);
+    hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => video.play().catch(() => {}));
+  } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+    video.src = src;
+    video.play().catch(() => {});
+  } else {
+    toast("浏览器不支持 HLS 预览，请使用 Chrome 并确保页面加载了 hls.js", "danger");
+    return;
+  }
+  new bootstrap.Modal(document.getElementById("previewModal")).show();
+}
+
+document.getElementById("previewModal").addEventListener("hidden.bs.modal", () => {
+  const video = document.getElementById("previewVideo");
+  if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
+  video.pause();
+  video.removeAttribute("src");
+  video.load();
 });
 
 // ── Load existing tasks on page load ─────────────────────────────────────────
