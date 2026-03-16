@@ -102,11 +102,17 @@ async def get_task(task_id: str):
 async def cancel_task(task_id: str):
     if task_id not in tasks:
         raise HTTPException(404, "Task not found")
-    tasks[task_id]["status"] = "cancelled"
     dl = downloaders.get(task_id)
-    if dl:
-        dl.cancel()
-    return {"status": "cancelled"}
+    if tasks[task_id].get("status") == "recording" and dl:
+        # Live stream: stop polling and merge recorded segments
+        tasks[task_id]["status"] = "stopping"
+        dl.stop_recording()
+        return {"status": "stopping"}
+    else:
+        tasks[task_id]["status"] = "cancelled"
+        if dl:
+            dl.cancel()
+        return {"status": "cancelled"}
 
 
 @app.get("/downloads/{filename}")
@@ -131,9 +137,11 @@ async def _run_download(task_id: str, req: DownloadRequest):
     downloaders[task_id] = dl
     try:
         async for progress in dl.download():
-            if tasks[task_id].get("status") == "cancelled":
+            status = tasks[task_id].get("status")
+            if status == "cancelled":
                 dl.cancel()
                 return
+            # "stopping" = live stop+merge in progress — let it run through
             tasks[task_id].update(progress)
     except Exception as e:
         tasks[task_id].update({"status": "failed", "error": str(e)})

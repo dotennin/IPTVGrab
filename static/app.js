@@ -321,6 +321,7 @@ const STATUS_MAP = {
   queued:      { text: "等待中",  cls: "bg-secondary" },
   downloading: { text: "下载中",  cls: "bg-primary"   },
   recording:   { text: "录制中",  cls: "bg-danger"    },
+  stopping:    { text: "合并中",  cls: "bg-info"      },
   merging:     { text: "合并中",  cls: "bg-info"      },
   completed:   { text: "已完成",  cls: "bg-success"   },
   failed:      { text: "失败",    cls: "bg-danger"    },
@@ -340,6 +341,9 @@ function updateTaskCard(taskId, task) {
     // Indeterminate pulsing bar for live
     bar.style.width = "100%";
     bar.className = "progress-bar task-bar bg-danger progress-bar-striped progress-bar-animated";
+  } else if (task.status === "stopping") {
+    bar.style.width = "100%";
+    bar.className = "progress-bar task-bar bg-info progress-bar-striped progress-bar-animated";
   } else {
     bar.style.width = `${task.progress || 0}%`;
     bar.className = `progress-bar task-bar${task.status === "failed" ? " bg-danger" : ""}`;
@@ -365,6 +369,9 @@ function updateTaskCard(taskId, task) {
       <span class="ms-2 text-primary">${task.speed_mbps || 0} MB/s</span>
       <span class="ms-2">${formatBytes(task.bytes_downloaded)}</span>`;
     info.className = "task-info small";
+  } else if (task.status === "stopping") {
+    info.innerHTML = '<i class="fas fa-cog fa-spin me-1"></i>正在合并已录制的片段...';
+    info.className = "task-info small text-info";
   } else if (task.status === "merging") {
     info.innerHTML = '<i class="fas fa-cog fa-spin me-1"></i>正在合并视频片段...';
     info.className = "task-info small text-info";
@@ -390,6 +397,13 @@ function updateTaskCard(taskId, task) {
       btn.innerHTML = '<i class="fas fa-stop me-1"></i>停止录制';
       btn.className = "btn btn-sm btn-danger task-action";
       btn.dataset.mode = "stop";
+    }
+  } else if (task.status === "stopping") {
+    const btn = card.querySelector(".task-action");
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>合并中';
+      btn.className = "btn btn-sm btn-secondary task-action";
     }
   } else if (["completed", "failed", "cancelled"].includes(task.status)) {
     const btn = card.querySelector(".task-action");
@@ -463,7 +477,7 @@ document.getElementById("clearCompletedBtn").addEventListener("click", () => {
     taskList.forEach((task) => {
       addTaskCard(task.id, task.url || "");
       updateTaskCard(task.id, task);
-      if (["downloading", "queued", "merging"].includes(task.status)) {
+      if (["downloading", "queued", "merging", "recording", "stopping"].includes(task.status)) {
         startPolling(task.id);
       }
     });

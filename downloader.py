@@ -53,8 +53,14 @@ class M3U8Downloader:
         self.concurrency = concurrency
         self.retry = retry
         self._cancel = False
+        self._stop = False  # stop live recording but still merge
 
     def cancel(self):
+        self._cancel = True
+
+    def stop_recording(self):
+        """Signal live stream to stop polling and proceed to merge."""
+        self._stop = True
         self._cancel = True
 
     def _make_session(self):
@@ -291,7 +297,9 @@ class M3U8Downloader:
                         except Exception:
                             pass  # keep polling on transient errors
 
-                    if self._cancel:
+                    # _stop = stop+merge (user clicked "停止录制")
+                    # _cancel only (no _stop) = true cancel, discard segments
+                    if self._cancel and not self._stop:
                         yield {"status": "cancelled"}
                         return
 
