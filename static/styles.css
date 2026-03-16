@@ -185,3 +185,18 @@ textarea.form-control {
   background: #30363d;
   border-radius: 3px;
 }
+
+/* Live recording badge */
+.live-badge {
+  animation: livePulse 1.2s ease-in-out infinite;
+}
+@keyframes livePulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.55; }
+}
+
+/* Header mode toggle */
+.btn-check + label {
+  font-size: 0.78rem;
+  padding: 2px 8px;
+}

@@ -121,6 +121,7 @@ class M3U8Downloader:
                 "segments": len(pl.segments),
                 "duration": round(duration, 2),
                 "encrypted": encrypted,
+                "is_live": not pl.is_endlist,
             }
 
     async def download(self) -> AsyncGenerator[Dict[str, Any], None]:
@@ -144,9 +145,16 @@ class M3U8Downloader:
                 segments = pl.segments
                 total = len(segments)
 
-                if total == 0:
+                is_live = not pl.is_endlist
+                if total == 0 and not is_live:
                     yield {"status": "failed", "error": "No segments found in playlist"}
                     return
+
+                # ── Format detection ──────────────────────────────────────────
+                # CMAF/fMP4 playlists carry an #EXT-X-MAP init segment and use
+                # .m4s/.mp4 fragments.  MPEG-TS playlists use .ts segments.
+                is_cmaf = self._detect_cmaf(segments)
+                seg_ext = ".m4s" if is_cmaf else ".ts"
 
                 # Pre-fetch AES-128 keys
                 keys_cache: Dict[str, bytes] = {}
@@ -158,80 +166,211 @@ class M3U8Downloader:
                                 session, key_url
                             )
 
-                yield {
-                    "status": "downloading",
-                    "total": total,
-                    "downloaded": 0,
-                    "progress": 0,
-                }
-
-                downloaded = 0
-                failed_count = 0
-                bytes_downloaded = 0
-                semaphore = asyncio.Semaphore(self.concurrency)
-                start_time = time.time()
-
-                async def dl_one(idx: int, seg):
-                    nonlocal downloaded, failed_count, bytes_downloaded
-                    if self._cancel:
-                        return
-                    seg_url = self._resolve(seg.uri, base_url)
-                    async with semaphore:
-                        try:
-                            data = await self._fetch_bytes(session, seg_url)
-                            if seg.key and seg.key.method == "AES-128":
-                                key_url = self._resolve(seg.key.uri, base_url)
-                                key = keys_cache.get(key_url)
-                                if key:
-                                    data = self._decrypt_aes128(
-                                        data, key, seg.key.iv
+                # Download CMAF init segment(s) (EXT-X-MAP)
+                init_data_map: Dict[str, bytes] = {}
+                if is_cmaf:
+                    for seg in segments:
+                        init_sec = getattr(seg, "init_section", None)
+                        if init_sec and getattr(init_sec, "uri", None):
+                            init_url = self._resolve(init_sec.uri, base_url)
+                            if init_url not in init_data_map:
+                                try:
+                                    init_data_map[init_url] = await self._fetch_bytes(
+                                        session, init_url
                                     )
-                            seg_path = tmpdir_path / f"seg_{idx:06d}.ts"
-                            seg_path.write_bytes(data)
-                            downloaded += 1
-                            bytes_downloaded += len(data)
+                                except Exception:
+                                    pass
+
+                start_time = time.time()
+                semaphore = asyncio.Semaphore(self.concurrency)
+                bytes_downloaded = 0
+
+                # ── LIVE recording ────────────────────────────────────────────
+                if is_live:
+                    seen_uris: set = set()
+                    seg_idx = 0
+                    poll_interval = max(1.0, (pl.target_duration or 6) / 2)
+                    current_pl = pl
+
+                    # Single coroutine reused across all batches
+                    async def dl_live_one(idx: int, seg):
+                        nonlocal bytes_downloaded
+                        seg_url = self._resolve(seg.uri, base_url)
+                        async with semaphore:
+                            try:
+                                data = await self._fetch_bytes(session, seg_url)
+                                if seg.key and seg.key.method == "AES-128":
+                                    ku = self._resolve(seg.key.uri, base_url)
+                                    k = keys_cache.get(ku)
+                                    if k:
+                                        data = self._decrypt_aes128(data, k, seg.key.iv)
+                                (tmpdir_path / f"seg_{idx:06d}{seg_ext}").write_bytes(data)
+                                bytes_downloaded += len(data)
+                            except Exception:
+                                pass
+
+                    yield {
+                        "status": "recording",
+                        "recorded_segments": 0,
+                        "bytes_downloaded": 0,
+                        "speed_mbps": 0.0,
+                        "elapsed_sec": 0,
+                    }
+
+                    while not self._cancel:
+                        new_segs = [
+                            s for s in current_pl.segments if s.uri not in seen_uris
+                        ]
+
+                        # Pre-fetch AES keys for new segments
+                        for seg in new_segs:
+                            if seg.key and seg.key.method == "AES-128" and seg.key.uri:
+                                ku = self._resolve(seg.key.uri, base_url)
+                                if ku not in keys_cache:
+                                    try:
+                                        keys_cache[ku] = await self._fetch_bytes(
+                                            session, ku
+                                        )
+                                    except Exception:
+                                        pass
+
+                        # Assign indices and mark seen before download
+                        batch = []
+                        for seg in new_segs:
+                            seen_uris.add(seg.uri)
+                            batch.append((seg_idx, seg))
+                            seg_idx += 1
+
+                        if batch:
+                            await asyncio.gather(
+                                *[
+                                    asyncio.create_task(dl_live_one(i, s))
+                                    for i, s in batch
+                                ],
+                                return_exceptions=True,
+                            )
+
+                        elapsed = time.time() - start_time
+                        yield {
+                            "status": "recording",
+                            "recorded_segments": seg_idx,
+                            "bytes_downloaded": bytes_downloaded,
+                            "speed_mbps": round(
+                                bytes_downloaded / elapsed / 1024 / 1024, 2
+                            )
+                            if elapsed > 0
+                            else 0.0,
+                            "elapsed_sec": round(elapsed),
+                        }
+
+                        if current_pl.is_endlist:
+                            break
+
+                        await asyncio.sleep(poll_interval)
+
+                        # Re-fetch playlist
+                        try:
+                            nc = await self._fetch_text(session, base_url)
+                            current_pl = m3u8.loads(nc)
+                            poll_interval = max(
+                                1.0, (current_pl.target_duration or 6) / 2
+                            )
+                            # Pick up any new CMAF init segments
+                            if is_cmaf:
+                                for seg in current_pl.segments:
+                                    init_sec = getattr(seg, "init_section", None)
+                                    if init_sec and getattr(init_sec, "uri", None):
+                                        iu = self._resolve(init_sec.uri, base_url)
+                                        if iu not in init_data_map:
+                                            try:
+                                                init_data_map[iu] = (
+                                                    await self._fetch_bytes(session, iu)
+                                                )
+                                            except Exception:
+                                                pass
                         except Exception:
-                            failed_count += 1
+                            pass  # keep polling on transient errors
 
-                all_tasks = [
-                    asyncio.create_task(dl_one(i, s))
-                    for i, s in enumerate(segments)
-                ]
+                    if self._cancel:
+                        yield {"status": "cancelled"}
+                        return
 
-                while True:
-                    done = sum(1 for t in all_tasks if t.done())
-                    elapsed = time.time() - start_time
-                    speed_mbps = (
-                        (bytes_downloaded / elapsed / 1024 / 1024)
-                        if elapsed > 0
-                        else 0
-                    )
+                    total = seg_idx  # for merge step below
+
+                else:
+                    # ── VOD download ──────────────────────────────────────────
                     yield {
                         "status": "downloading",
                         "total": total,
-                        "downloaded": downloaded,
-                        "failed": failed_count,
-                        "progress": int(done / total * 100) if total > 0 else 0,
-                        "speed_mbps": round(speed_mbps, 2),
-                        "bytes_downloaded": bytes_downloaded,
+                        "downloaded": 0,
+                        "progress": 0,
                     }
-                    if done >= total or self._cancel:
-                        break
-                    await asyncio.sleep(0.5)
 
-                await asyncio.gather(*all_tasks, return_exceptions=True)
+                    downloaded = 0
+                    failed_count = 0
 
-                if self._cancel:
-                    yield {"status": "cancelled"}
-                    return
+                    async def dl_one(idx: int, seg):
+                        nonlocal downloaded, failed_count, bytes_downloaded
+                        if self._cancel:
+                            return
+                        seg_url = self._resolve(seg.uri, base_url)
+                        async with semaphore:
+                            try:
+                                data = await self._fetch_bytes(session, seg_url)
+                                if seg.key and seg.key.method == "AES-128":
+                                    key_url = self._resolve(seg.key.uri, base_url)
+                                    key = keys_cache.get(key_url)
+                                    if key:
+                                        data = self._decrypt_aes128(
+                                            data, key, seg.key.iv
+                                        )
+                                seg_path = tmpdir_path / f"seg_{idx:06d}{seg_ext}"
+                                seg_path.write_bytes(data)
+                                downloaded += 1
+                                bytes_downloaded += len(data)
+                            except Exception:
+                                failed_count += 1
 
-                if failed_count > max(1, total * 0.1):
-                    yield {
-                        "status": "failed",
-                        "error": f"Too many segments failed ({failed_count}/{total})",
-                    }
-                    return
+                    all_tasks = [
+                        asyncio.create_task(dl_one(i, s))
+                        for i, s in enumerate(segments)
+                    ]
 
+                    while True:
+                        done = sum(1 for t in all_tasks if t.done())
+                        elapsed = time.time() - start_time
+                        speed_mbps = (
+                            (bytes_downloaded / elapsed / 1024 / 1024)
+                            if elapsed > 0
+                            else 0
+                        )
+                        yield {
+                            "status": "downloading",
+                            "total": total,
+                            "downloaded": downloaded,
+                            "failed": failed_count,
+                            "progress": int(done / total * 100) if total > 0 else 0,
+                            "speed_mbps": round(speed_mbps, 2),
+                            "bytes_downloaded": bytes_downloaded,
+                        }
+                        if done >= total or self._cancel:
+                            break
+                        await asyncio.sleep(0.5)
+
+                    await asyncio.gather(*all_tasks, return_exceptions=True)
+
+                    if self._cancel:
+                        yield {"status": "cancelled"}
+                        return
+
+                    if failed_count > max(1, total * 0.1):
+                        yield {
+                            "status": "failed",
+                            "error": f"Too many segments failed ({failed_count}/{total})",
+                        }
+                        return
+
+                # ── Merge (shared by live and VOD) ────────────────────────────
                 yield {"status": "merging", "progress": 99}
 
                 output_name = self.output_name or f"video_{int(time.time())}"
@@ -240,7 +379,13 @@ class M3U8Downloader:
                 self.output_dir.mkdir(parents=True, exist_ok=True)
                 output_path = self.output_dir / output_name
 
-                await self._merge(tmpdir_path, total, output_path)
+                if is_cmaf:
+                    init_data = next(iter(init_data_map.values()), b"")
+                    await self._merge_cmaf(
+                        tmpdir_path, total, init_data, seg_ext, output_path
+                    )
+                else:
+                    await self._merge(tmpdir_path, total, output_path)
 
                 size = output_path.stat().st_size if output_path.exists() else 0
                 yield {
@@ -273,6 +418,17 @@ class M3U8Downloader:
         else:
             chosen = streams[0]
         return self._resolve(chosen.uri, self.url)
+
+    def _detect_cmaf(self, segments) -> bool:
+        """Return True if segments are CMAF/fMP4 (not MPEG-TS)."""
+        if not segments:
+            return False
+        # EXT-X-MAP init section is definitive proof of fMP4
+        if any(getattr(seg, "init_section", None) for seg in segments):
+            return True
+        # Fallback: check first segment URI extension
+        uri = segments[0].uri.lower().split("?")[0]
+        return uri.endswith((".m4s", ".cmfv", ".cmfa", ".mp4"))
 
     def _decrypt_aes128(self, data: bytes, key: bytes, iv_str: Optional[str]) -> bytes:
         from Crypto.Cipher import AES
@@ -308,3 +464,43 @@ class M3U8Downloader:
         _, stderr = await proc.communicate()
         if proc.returncode != 0:
             raise RuntimeError(f"ffmpeg failed: {stderr.decode()[-500:]}")
+
+    async def _merge_cmaf(
+        self,
+        tmpdir: Path,
+        total: int,
+        init_data: bytes,
+        seg_ext: str,
+        output_path: Path,
+    ):
+        """
+        CMAF/fMP4 merge strategy:
+          1. Binary-concatenate init segment + all media fragments into a
+             single raw fMP4 file.
+          2. Re-mux with ffmpeg to produce a properly-structured MP4.
+        This avoids the concat demuxer which only handles MPEG-TS.
+        """
+        raw_path = tmpdir / "merged_raw.mp4"
+        with open(raw_path, "wb") as f:
+            if init_data:
+                f.write(init_data)
+            for i in range(total):
+                seg = tmpdir / f"seg_{i:06d}{seg_ext}"
+                if seg.exists():
+                    f.write(seg.read_bytes())
+
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", str(raw_path),
+            "-c", "copy",
+            "-movflags", "+faststart",
+            str(output_path),
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            raise RuntimeError(f"ffmpeg re-mux failed: {stderr.decode()[-500:]}")
