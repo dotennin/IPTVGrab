@@ -90,6 +90,8 @@ textarea.form-control {
   padding: 14px 16px;
   margin-bottom: 10px;
   transition: border-color 0.15s ease;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .task-card:hover {
@@ -103,6 +105,25 @@ textarea.form-control {
   word-break: break-all;
   max-height: 2.4em;
   overflow: hidden;
+}
+
+.task-info {
+  min-width: 0;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  flex: 1;
+}
+
+.task-error {
+  max-height: 3.6em;
+  overflow: hidden;
+  transition: max-height 0.3s ease;
+  cursor: pointer;
+}
+
+.task-error.expanded {
+  max-height: 200px;
+  overflow-y: auto;
 }
 
 .progress {

@@ -399,7 +399,10 @@ function addTaskCard(taskId, url) {
   card.id = `task-${taskId}`;
   card.innerHTML = `
     <div class="d-flex justify-content-between align-items-start mb-2 gap-2">
-      <div class="task-url flex-grow-1">${esc(url)}</div>
+      <div class="flex-grow-1 overflow-hidden">
+        <div class="task-url text-truncate">${esc(url)}</div>
+        <div class="task-filename text-muted small text-truncate d-none"></div>
+      </div>
       <span class="badge bg-secondary flex-shrink-0 task-status">等待中</span>
     </div>
     <div class="progress mb-2">
@@ -441,6 +444,21 @@ function updateTaskCard(taskId, task) {
   const { text, cls } = STATUS_MAP[task.status] || { text: task.status, cls: "bg-secondary" };
   card.querySelector(".task-status").className = `badge ${cls} flex-shrink-0 task-status`;
   card.querySelector(".task-status").textContent = text;
+
+  // ── Filename label (show expected name during download, actual name when done) ──
+  const filenameEl = card.querySelector(".task-filename");
+  if (filenameEl) {
+    let fname = task.output || null;
+    if (!fname && task.output_name) {
+      fname = task.output_name.endsWith(".mp4") ? task.output_name : task.output_name + ".mp4";
+    }
+    if (fname) {
+      filenameEl.textContent = "📄 " + fname;
+      filenameEl.classList.remove("d-none");
+    } else {
+      filenameEl.classList.add("d-none");
+    }
+  }
 
   const bar = card.querySelector(".task-bar");
   if (task.status === "recording") {
@@ -492,13 +510,16 @@ function updateTaskCard(taskId, task) {
         <i class="fas fa-redo me-1"></i>重新下载
       </button>`;
   } else if (task.status === "failed") {
-    info.innerHTML = `<span class="text-danger">错误: ${esc(task.error || "未知错误")}</span>
-      <button class="btn btn-link btn-sm p-0 ms-2 text-warning" onclick="resumeTask('${taskId}')">
-        <i class="fas fa-play me-1"></i>断点续传
-      </button>
-      <button class="btn btn-link btn-sm p-0 ms-2 text-info" onclick="restartTask('${taskId}')">
-        <i class="fas fa-sync me-1"></i>重新下载
-      </button>`;
+    info.innerHTML = `
+      <div class="task-error text-danger" title="点击展开/折叠" onclick="this.classList.toggle('expanded')">错误: ${esc(task.error || "未知错误")}</div>
+      <div class="mt-1">
+        <button class="btn btn-link btn-sm p-0 text-warning" onclick="resumeTask('${taskId}')">
+          <i class="fas fa-play me-1"></i>断点续传
+        </button>
+        <button class="btn btn-link btn-sm p-0 ms-2 text-info" onclick="restartTask('${taskId}')">
+          <i class="fas fa-sync me-1"></i>重新下载
+        </button>
+      </div>`;
     info.className = "task-info small";
   } else if (task.status === "cancelled") {
     info.innerHTML = `<span class="text-muted">已取消</span>
@@ -616,6 +637,14 @@ async function cancelTask(taskId) {
   if (card) {
     card.querySelector(".task-status").textContent = "已取消";
     card.querySelector(".task-status").className = "badge bg-secondary flex-shrink-0 task-status";
+    const info = card.querySelector(".task-info");
+    if (info) {
+      info.className = "task-info small";
+      info.innerHTML = `<span class="text-muted">已取消</span>
+        <button class="btn btn-link btn-sm p-0 ms-2 text-info" onclick="restartTask('${taskId}')">
+          <i class="fas fa-redo me-1"></i>重新下载
+        </button>`;
+    }
     const btn = card.querySelector(".task-action");
     btn.innerHTML = '<i class="fas fa-trash"></i>';
     btn.className = "btn btn-sm btn-outline-secondary task-action";
