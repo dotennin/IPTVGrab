@@ -148,7 +148,9 @@ class M3U8Downloader:
                 pl = m3u8.loads(content)
                 base_url = self.url
 
+                master_pl = None
                 if pl.is_variant:
+                    master_pl = pl
                     chosen_url = self._pick_quality(pl)
                     content = await self._fetch_text(session, chosen_url)
                     pl = m3u8.loads(content)
@@ -161,6 +163,14 @@ class M3U8Downloader:
                 if total == 0 and not is_live:
                     yield {"status": "failed", "error": "No segments found in playlist"}
                     return
+
+                # Detect separate audio rendition (demuxed CMAF streams carry
+                # video-only fragments; audio lives in a separate EXT-X-MEDIA playlist)
+                audio_url: Optional[str] = None
+                audio_tmpdir: Optional[Path] = None
+                audio_pl_initial = None
+                if master_pl is not None:
+                    audio_url = self._find_audio_playlist(master_pl)
 
                 # ── Format detection ──────────────────────────────────────────
                 # CMAF/fMP4 playlists carry an #EXT-X-MAP init segment and use
@@ -198,9 +208,33 @@ class M3U8Downloader:
                                 except Exception:
                                     pass
 
+                # Setup audio subdirectory and fetch audio init segment
+                if is_cmaf and audio_url:
+                    audio_tmpdir = tmpdir_path / "audio"
+                    audio_tmpdir.mkdir(exist_ok=True)
+                    try:
+                        audio_content = await self._fetch_text(session, audio_url)
+                        audio_pl_initial = m3u8.loads(audio_content)
+                        audio_init_disk = audio_tmpdir / "init.mp4"
+                        if not (audio_init_disk.exists() and audio_init_disk.stat().st_size > 0):
+                            for seg in audio_pl_initial.segments:
+                                init_sec = getattr(seg, "init_section", None)
+                                if init_sec and getattr(init_sec, "uri", None):
+                                    try:
+                                        ai_url = self._resolve(init_sec.uri, audio_url)
+                                        ai_bytes = await self._fetch_bytes(session, ai_url)
+                                        audio_init_disk.write_bytes(ai_bytes)
+                                    except Exception:
+                                        pass
+                                    break
+                    except Exception:
+                        audio_tmpdir = None
+                        audio_url = None
+
                 start_time = time.time()
                 semaphore = asyncio.Semaphore(self.concurrency)
                 bytes_downloaded = 0
+                total_audio = 0  # populated by whichever branch runs
 
                 # ── LIVE recording ────────────────────────────────────────────
                 if is_live:
@@ -208,6 +242,11 @@ class M3U8Downloader:
                     seg_idx = 0
                     poll_interval = max(1.0, (pl.target_duration or 6) / 2)
                     current_pl = pl
+
+                    # Audio live tracking
+                    audio_seen_uris: set = set()
+                    audio_seg_idx = 0
+                    current_audio_pl = audio_pl_initial  # may be None
 
                     # Single coroutine reused across all batches
                     async def dl_live_one(idx: int, seg):
@@ -222,6 +261,19 @@ class M3U8Downloader:
                                     if k:
                                         data = self._decrypt_aes128(data, k, seg.key.iv)
                                 (tmpdir_path / f"seg_{idx:06d}{seg_ext}").write_bytes(data)
+                                bytes_downloaded += len(data)
+                            except Exception:
+                                pass
+
+                    async def dl_audio_live_one(idx: int, seg):
+                        nonlocal bytes_downloaded
+                        if not audio_tmpdir or not audio_url:
+                            return
+                        au_url = self._resolve(seg.uri, audio_url)
+                        async with semaphore:
+                            try:
+                                data = await self._fetch_bytes(session, au_url)
+                                (audio_tmpdir / f"seg_{idx:06d}{seg_ext}").write_bytes(data)
                                 bytes_downloaded += len(data)
                             except Exception:
                                 pass
@@ -271,6 +323,26 @@ class M3U8Downloader:
                                 return_exceptions=True,
                             )
 
+                        # Download new audio segments in parallel
+                        if audio_tmpdir and current_audio_pl:
+                            new_audio_segs = [
+                                s for s in current_audio_pl.segments
+                                if s.uri not in audio_seen_uris
+                            ]
+                            audio_batch = []
+                            for seg in new_audio_segs:
+                                audio_seen_uris.add(seg.uri)
+                                audio_batch.append((audio_seg_idx, seg))
+                                audio_seg_idx += 1
+                            if audio_batch:
+                                await asyncio.gather(
+                                    *[
+                                        asyncio.create_task(dl_audio_live_one(i, s))
+                                        for i, s in audio_batch
+                                    ],
+                                    return_exceptions=True,
+                                )
+
                         elapsed = time.time() - start_time
                         yield {
                             "status": "recording",
@@ -289,7 +361,7 @@ class M3U8Downloader:
 
                         await asyncio.sleep(poll_interval)
 
-                        # Re-fetch playlist
+                        # Re-fetch video playlist
                         try:
                             nc = await self._fetch_text(session, base_url)
                             current_pl = m3u8.loads(nc)
@@ -312,6 +384,27 @@ class M3U8Downloader:
                         except Exception:
                             pass  # keep polling on transient errors
 
+                        # Re-fetch audio playlist
+                        if audio_tmpdir and audio_url:
+                            try:
+                                aac = await self._fetch_text(session, audio_url)
+                                current_audio_pl = m3u8.loads(aac)
+                                # Fetch new audio init if it changed
+                                audio_init_disk = audio_tmpdir / "init.mp4"
+                                if not (audio_init_disk.exists() and audio_init_disk.stat().st_size > 0):
+                                    for seg in current_audio_pl.segments:
+                                        init_sec = getattr(seg, "init_section", None)
+                                        if init_sec and getattr(init_sec, "uri", None):
+                                            try:
+                                                ai_url = self._resolve(init_sec.uri, audio_url)
+                                                ai_bytes = await self._fetch_bytes(session, ai_url)
+                                                audio_init_disk.write_bytes(ai_bytes)
+                                            except Exception:
+                                                pass
+                                            break
+                            except Exception:
+                                pass
+
                     # _stop = stop+merge (user clicked "停止录制")
                     # _cancel only (no _stop) = true cancel, discard segments
                     if self._cancel and not self._stop:
@@ -319,6 +412,7 @@ class M3U8Downloader:
                         return
 
                     total = seg_idx  # for merge step below
+                    total_audio = audio_seg_idx
 
                 else:
                     # ── VOD download ──────────────────────────────────────────
@@ -368,8 +462,36 @@ class M3U8Downloader:
                         for i, s in enumerate(segments)
                     ]
 
+                    # Audio download tasks (for demuxed CMAF streams)
+                    audio_vod_total = 0
+                    audio_vod_tasks = []
+                    if audio_tmpdir and audio_pl_initial:
+                        audio_vod_segs = audio_pl_initial.segments
+                        audio_vod_total = len(audio_vod_segs)
+
+                        async def dl_audio_one(idx: int, seg):
+                            nonlocal bytes_downloaded
+                            seg_path = audio_tmpdir / f"seg_{idx:06d}{seg_ext}"
+                            if seg_path.exists() and seg_path.stat().st_size > 0:
+                                bytes_downloaded += seg_path.stat().st_size
+                                return
+                            au_url = self._resolve(seg.uri, audio_url)
+                            async with semaphore:
+                                try:
+                                    data = await self._fetch_bytes(session, au_url)
+                                    seg_path.write_bytes(data)
+                                    bytes_downloaded += len(data)
+                                except Exception:
+                                    pass
+
+                        audio_vod_tasks = [
+                            asyncio.create_task(dl_audio_one(i, s))
+                            for i, s in enumerate(audio_vod_segs)
+                        ]
+
                     while True:
                         done = sum(1 for t in all_tasks if t.done())
+                        audio_done = sum(1 for t in audio_vod_tasks if t.done())
                         elapsed = time.time() - start_time
                         speed_mbps = (
                             (bytes_downloaded / elapsed / 1024 / 1024)
@@ -385,11 +507,11 @@ class M3U8Downloader:
                             "speed_mbps": round(speed_mbps, 2),
                             "bytes_downloaded": bytes_downloaded,
                         }
-                        if done >= total or self._cancel:
+                        if (done >= total and audio_done >= audio_vod_total) or self._cancel:
                             break
                         await asyncio.sleep(0.5)
 
-                    await asyncio.gather(*all_tasks, return_exceptions=True)
+                    await asyncio.gather(*all_tasks, *audio_vod_tasks, return_exceptions=True)
 
                     if self._cancel:
                         yield {"status": "cancelled"}
@@ -401,6 +523,8 @@ class M3U8Downloader:
                             "error": f"Too many segments failed ({failed_count}/{total})",
                         }
                         return
+
+                    total_audio = audio_vod_total
 
                 # ── Merge (shared by live and VOD) ────────────────────────────
                 yield {"status": "merging", "progress": 99}
@@ -414,7 +538,9 @@ class M3U8Downloader:
                 if is_cmaf:
                     init_data = next(iter(init_data_map.values()), b"")
                     await self._merge_cmaf(
-                        tmpdir_path, total, init_data, seg_ext, output_path
+                        tmpdir_path, total, init_data, seg_ext, output_path,
+                        audio_tmpdir=audio_tmpdir,
+                        audio_total=total_audio,
                     )
                 else:
                     await self._merge(tmpdir_path, total, output_path)
@@ -449,6 +575,44 @@ class M3U8Downloader:
         else:
             chosen = streams[0]
         return self._resolve(chosen.uri, self.url)
+
+    def _find_audio_playlist(self, master_pl) -> Optional[str]:
+        """Return the URI of the default audio rendition, or None.
+
+        CMAF streams with demuxed audio have #EXT-X-MEDIA TYPE=AUDIO entries
+        in the master playlist.  The video streams reference them via AUDIO=<group-id>.
+        We pick the DEFAULT=YES (or first available) audio rendition URI.
+        """
+        # Collect audio group IDs referenced by any video stream
+        audio_groups: set = set()
+        for variant in master_pl.playlists:
+            ag = getattr(variant.stream_info, "audio", None)
+            if ag:
+                audio_groups.add(ag)
+
+        if not audio_groups:
+            return None
+
+        # Prefer DEFAULT=YES audio rendition
+        for media in master_pl.media:
+            if (
+                getattr(media, "type", None) == "AUDIO"
+                and media.group_id in audio_groups
+                and getattr(media, "uri", None)
+                and str(getattr(media, "default", "") or "").upper() == "YES"
+            ):
+                return self._resolve(media.uri, self.url)
+
+        # Fallback: first audio rendition with a URI in a matching group
+        for media in master_pl.media:
+            if (
+                getattr(media, "type", None) == "AUDIO"
+                and media.group_id in audio_groups
+                and getattr(media, "uri", None)
+            ):
+                return self._resolve(media.uri, self.url)
+
+        return None
 
     def _detect_cmaf(self, segments) -> bool:
         """Return True if segments are CMAF/fMP4 (not MPEG-TS)."""
@@ -503,13 +667,15 @@ class M3U8Downloader:
         init_data: bytes,
         seg_ext: str,
         output_path: Path,
+        audio_tmpdir: Optional[Path] = None,
+        audio_total: int = 0,
     ):
         """
         CMAF/fMP4 merge strategy:
-          1. Binary-concatenate init segment + all media fragments into a
-             single raw fMP4 file.
-          2. Re-mux with ffmpeg to produce a properly-structured MP4.
-        This avoids the concat demuxer which only handles MPEG-TS.
+          1. Binary-concatenate init + fragments for video (and audio if separate).
+          2. Re-mux with ffmpeg:
+             - Single stream: -i raw_video -c copy
+             - Demuxed audio: -i raw_video -i raw_audio -map 0:v -map 1:a -c copy
         """
         raw_path = tmpdir / "merged_raw.mp4"
         with open(raw_path, "wb") as f:
@@ -520,13 +686,36 @@ class M3U8Downloader:
                 if seg.exists():
                     f.write(seg.read_bytes())
 
-        cmd = [
-            "ffmpeg", "-y",
-            "-i", str(raw_path),
-            "-c", "copy",
-            "-movflags", "+faststart",
-            str(output_path),
-        ]
+        has_audio = audio_tmpdir is not None and audio_total > 0
+        if has_audio:
+            audio_init_disk = audio_tmpdir / "init.mp4"
+            raw_audio_path = audio_tmpdir / "merged_audio.mp4"
+            with open(raw_audio_path, "wb") as f:
+                if audio_init_disk.exists():
+                    f.write(audio_init_disk.read_bytes())
+                for i in range(audio_total):
+                    seg = audio_tmpdir / f"seg_{i:06d}{seg_ext}"
+                    if seg.exists():
+                        f.write(seg.read_bytes())
+            cmd = [
+                "ffmpeg", "-y",
+                "-i", str(raw_path),
+                "-i", str(raw_audio_path),
+                "-map", "0:v",
+                "-map", "1:a",
+                "-c", "copy",
+                "-movflags", "+faststart",
+                str(output_path),
+            ]
+        else:
+            cmd = [
+                "ffmpeg", "-y",
+                "-i", str(raw_path),
+                "-c", "copy",
+                "-movflags", "+faststart",
+                str(output_path),
+            ]
+
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.DEVNULL,
