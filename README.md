@@ -1,56 +1,139 @@
 # M3U8 Downloader
 
-A web-based M3U8/HLS stream downloader with a browser UI. Paste an M3U8 URL (or a `curl` command), choose quality, and download the stream as a merged video file.
+A web-based HLS/M3U8 video downloader with a dark-theme browser UI.  
+Paste a URL or a raw `curl` command, choose quality, and download the stream as a merged MP4.
+
+---
 
 ## Features
 
-- Parse M3U8 playlists and select quality variants
-- Accept raw URLs or pasted `curl` commands (with headers)
-- Concurrent segment downloading with configurable concurrency
-- Real-time progress tracking with speed reporting
-- Cancel in-flight downloads
-- Serve completed files directly from the browser
+- **URL & cURL input** — paste a plain M3U8 URL or a full `curl` command copied from browser DevTools (with all headers)
+- **Master playlist** — auto-lists quality variants; pick the resolution you want
+- **Concurrent download** — configurable segment concurrency (1–32)
+- **AES-128 decryption** — transparent key fetch + CBC decrypt per segment
+- **CMAF / fMP4** — handles `#EXT-X-MAP` init segments; binary-concatenates + re-muxes via ffmpeg
+- **Live stream recording** — polls playlist, deduplicates segments, records until stopped, then merges to MP4
+- **Video preview** — in-browser HLS preview via hls.js after the first few segments are downloaded
+- **Resume /断点续传** — interrupted downloads resume from the last segment on server restart
+- **Task persistence** — task history survives server restarts (`tasks.json` inside the downloads dir)
+
+---
+
+## Quick start (Python)
+
+```bash
+# 1. Install dependencies
+pip install -r requirements.txt      # needs Python 3.9+
+
+# 2. Start (default port 8765, saves to ./downloads/)
+python run.py
+
+# 3. Custom port and download directory
+python run.py --port 9000 --downloads-dir /mnt/videos
+
+# 4. Development mode (auto-reload on code changes)
+python run.py --dev
+```
+
+Open **http://localhost:8765** in your browser.
+
+### CLI options
+
+| Flag | Short | Default | Description |
+|---|---|---|---|
+| `--port` | `-p` | `8765` | TCP port |
+| `--downloads-dir` | `-d` | `./downloads` | Where MP4 files are saved |
+| `--host` | | `0.0.0.0` | Bind address |
+| `--dev` | | off | Enable uvicorn `--reload` |
+
+Environment variables `PORT` and `DOWNLOADS_DIR` are also respected (CLI flags take precedence).
+
+---
+
+## Docker
+
+### Build & run
+
+```bash
+# Build image
+docker build -t m3u8-downloader .
+
+# Run (downloads saved to ./downloads on your host)
+docker run -d \
+  -p 8765:8765 \
+  -v "$(pwd)/downloads:/downloads" \
+  --name m3u8dl \
+  m3u8-downloader
+```
+
+### docker-compose (recommended)
+
+```bash
+docker compose up -d          # start in background
+docker compose logs -f        # follow logs
+docker compose down           # stop
+```
+
+The default `docker-compose.yml` mounts `./downloads` on the host to `/downloads` inside the container.  
+Edit the file to change the port or mount path:
+
+```yaml
+services:
+  m3u8-downloader:
+    build: .
+    ports:
+      - "8765:8765"        # change host port here
+    volumes:
+      - /your/path:/downloads   # change host path here
+    environment:
+      - DOWNLOADS_DIR=/downloads
+```
+
+### Environment variables (Docker)
+
+| Variable | Default | Description |
+|---|---|---|
+| `DOWNLOADS_DIR` | `/downloads` | Path inside the container for MP4 output |
+| `PORT` | `8765` | Port the server binds to |
+
+---
 
 ## Requirements
 
-- Python 3.9+
-- Dependencies listed in `requirements.txt`
+| Dependency | Notes |
+|---|---|
+| Python 3.9+ | 3.11+ recommended |
+| ffmpeg | Must be on `$PATH`; used for segment merging |
+| See `requirements.txt` | fastapi, uvicorn, aiohttp, m3u8, pycryptodome |
 
-## Setup
+---
 
-```bash
-pip install -r requirements.txt
-```
-
-## Usage
-
-```bash
-python run.py          # starts on port 8765
-python run.py 9000     # starts on a custom port
-```
-
-Then open `http://localhost:8765` in your browser.
-
-## API
+## API reference
 
 | Method | Path | Description |
-|--------|------|-------------|
+|---|---|---|
 | `POST` | `/api/parse` | Parse an M3U8 URL or curl command |
-| `POST` | `/api/download` | Start a download task |
-| `GET` | `/api/tasks` | List all tasks |
-| `GET` | `/api/tasks/{id}` | Get task status |
-| `DELETE` | `/api/tasks/{id}` | Cancel a task |
-| `GET` | `/downloads/{filename}` | Download a completed file |
+| `POST` | `/api/download` | Start a download / recording task |
+| `GET` | `/api/tasks` | List all tasks (persisted across restarts) |
+| `GET` | `/api/tasks/{id}` | Get task status & progress |
+| `DELETE` | `/api/tasks/{id}` | Cancel active task, or delete terminal task |
+| `POST` | `/api/tasks/{id}/resume` | Resume an interrupted or failed task |
+| `GET` | `/api/tasks/{id}/preview.m3u8` | HLS playlist for in-progress preview |
+| `GET` | `/api/tasks/{id}/seg/{filename}` | Serve an individual downloaded segment |
+| `GET` | `/downloads/{filename}` | Download a completed MP4 file |
 
 ### POST /api/parse
 
 ```json
 {
   "url": "https://example.com/stream.m3u8",
-  "headers": {},
+  "headers": { "referer": "https://example.com" },
   "curl_command": ""
 }
 ```
+
+Returns `{ "type": "master"|"media", "streams": [...] }` for master playlists, or  
+`{ "type": "media", "segments": N, "duration": 120.5, "encrypted": false, "is_live": false }` for media playlists.
 
 ### POST /api/download
 
@@ -64,14 +147,26 @@ Then open `http://localhost:8765` in your browser.
 }
 ```
 
-## Project Structure
+`quality`: `"best"` (default) · `"worst"` · integer index into the variant list.
+
+---
+
+## Project structure
 
 ```
 .
-├── main.py          # FastAPI app and API routes
-├── downloader.py    # M3U8Downloader class and curl parser
-├── run.py           # Server entry point
-├── static/          # Frontend (HTML, CSS, JS)
-├── downloads/       # Downloaded files (auto-created)
+├── main.py            # FastAPI app, API routes, task registry
+├── downloader.py      # M3U8Downloader class, curl parser
+├── run.py             # CLI entry point (argparse → uvicorn)
+├── static/
+│   ├── index.html     # Bootstrap 5 dark theme UI
+│   ├── app.js         # Frontend logic (hls.js preview, polling)
+│   └── styles.css
+├── downloads/         # Default output dir (auto-created)
+│   ├── tasks.json     # Persisted task history
+│   └── .cache/        # Segment cache for resume & preview
+├── Dockerfile
+├── docker-compose.yml
 └── requirements.txt
 ```
+

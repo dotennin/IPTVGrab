@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import re
 import shutil
 import time
@@ -16,8 +17,8 @@ from downloader import M3U8Downloader, parse_curl_command
 
 app = FastAPI(title="M3U8 Downloader")
 
-DOWNLOADS_DIR = Path("downloads")
-DOWNLOADS_DIR.mkdir(exist_ok=True)
+DOWNLOADS_DIR = Path(os.environ.get("DOWNLOADS_DIR", "downloads"))
+DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
 TASKS_FILE = DOWNLOADS_DIR / "tasks.json"
 
 # ── Task persistence ─────────────────────────────────────────────────────────
@@ -145,13 +146,19 @@ async def cancel_task(task_id: str):
         return {"status": "stopping"}
 
     if current_status not in ("completed", "failed", "cancelled", "interrupted"):
+        # Active task: cancel it and keep in registry so _run_download can finish
         tasks[task_id]["status"] = "cancelled"
         if dl:
             dl.cancel()
+        _cleanup_tmpdir(task_id)
+        save_tasks()
+        return {"status": "cancelled"}
 
+    # Terminal task: fully remove from registry and disk
     _cleanup_tmpdir(task_id)
+    del tasks[task_id]
     save_tasks()
-    return {"status": tasks[task_id]["status"]}
+    return {"status": "deleted"}
 
 
 @app.post("/api/tasks/{task_id}/resume")
@@ -231,12 +238,15 @@ async def serve_file(filename: str):
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
 def _cleanup_tmpdir(task_id: str):
-    tmpdir = tasks.get(task_id, {}).get("tmpdir")
+    task = tasks.get(task_id)
+    if not task:
+        return
+    tmpdir = task.get("tmpdir")
     if tmpdir:
         p = Path(tmpdir)
         if p.exists():
             shutil.rmtree(p, ignore_errors=True)
-        tasks[task_id]["tmpdir"] = None
+        task["tmpdir"] = None
 
 
 # ── Background task runner ───────────────────────────────────────────────────

@@ -1,0 +1,13 @@
+services:
+  m3u8-downloader:
+    build: .
+    image: m3u8-downloader:latest
+    ports:
+      - "8765:8765"
+    volumes:
+      # Downloaded MP4 files are written here on the host
+      - ./downloads:/downloads
+    environment:
+      - DOWNLOADS_DIR=/downloads
+      - PORT=8765
+    restart: unless-stopped
