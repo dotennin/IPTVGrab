@@ -8,7 +8,8 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -16,6 +17,17 @@ from pydantic import BaseModel
 from downloader import M3U8Downloader, parse_curl_command
 
 app = FastAPI(title="M3U8 Downloader")
+
+# Prevent browsers from caching JS/CSS so UI updates are always visible
+class NoCacheStaticMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        path = request.url.path
+        if path.endswith((".js", ".css")):
+            response.headers["Cache-Control"] = "no-store"
+        return response
+
+app.add_middleware(NoCacheStaticMiddleware)
 
 DOWNLOADS_DIR = Path(os.environ.get("DOWNLOADS_DIR", "downloads"))
 DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
@@ -176,6 +188,53 @@ async def resume_task(task_id: str, bg: BackgroundTasks):
         concurrency=task.get("concurrency", 8),
     )
     tasks[task_id].update({"status": "queued", "error": None, "progress": 0})
+    save_tasks()
+    bg.add_task(_run_download, task_id, req)
+    return {"task_id": task_id, "status": "queued"}
+
+
+@app.post("/api/tasks/{task_id}/restart")
+async def restart_task(task_id: str, bg: BackgroundTasks):
+    """Re-download from scratch: clear cache + output file and re-run."""
+    if task_id not in tasks:
+        raise HTTPException(404, "Task not found")
+    task = tasks[task_id]
+    if task.get("status") not in ("completed", "failed", "cancelled", "interrupted"):
+        raise HTTPException(400, "Task cannot be restarted in its current state")
+
+    # Remove cached segments
+    _cleanup_tmpdir(task_id)
+
+    # Remove previously downloaded output file
+    output = task.get("output")
+    if output:
+        out_path = DOWNLOADS_DIR / output
+        if out_path.exists():
+            try:
+                out_path.unlink()
+            except Exception:
+                pass
+
+    req = DownloadRequest(
+        url=task["url"],
+        headers=task.get("req_headers") or {},
+        output_name=task.get("output_name"),
+        quality=task.get("quality", "best"),
+        concurrency=task.get("concurrency", 8),
+    )
+    tasks[task_id].update({
+        "status": "queued",
+        "progress": 0,
+        "downloaded": 0,
+        "failed": 0,
+        "total": 0,
+        "bytes_downloaded": 0,
+        "speed_mbps": 0.0,
+        "output": None,
+        "size": 0,
+        "error": None,
+        "tmpdir": None,
+    })
     save_tasks()
     bg.add_task(_run_download, task_id, req)
     return {"task_id": task_id, "status": "queued"}

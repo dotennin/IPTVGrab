@@ -238,19 +238,32 @@ class M3U8Downloader:
 
                 # ── LIVE recording ────────────────────────────────────────────
                 if is_live:
+                    # Resume: start segment index from how many files already exist
+                    # so that new segments are APPENDED after old ones, not overwritten.
+                    existing_segs = sorted(tmpdir_path.glob(f"seg_*{seg_ext}"))
+                    seg_idx = len(existing_segs)
+
                     seen_uris: set = set()
-                    seg_idx = 0
                     poll_interval = max(1.0, (pl.target_duration or 6) / 2)
                     current_pl = pl
 
-                    # Audio live tracking
+                    # Audio live tracking (also resume-aware)
                     audio_seen_uris: set = set()
-                    audio_seg_idx = 0
+                    if audio_tmpdir:
+                        existing_audio_segs = sorted(audio_tmpdir.glob(f"seg_*{seg_ext}"))
+                        audio_seg_idx = len(existing_audio_segs)
+                    else:
+                        audio_seg_idx = 0
                     current_audio_pl = audio_pl_initial  # may be None
 
                     # Single coroutine reused across all batches
                     async def dl_live_one(idx: int, seg):
                         nonlocal bytes_downloaded
+                        seg_path = tmpdir_path / f"seg_{idx:06d}{seg_ext}"
+                        # Skip already-downloaded segments (e.g. on resume)
+                        if seg_path.exists() and seg_path.stat().st_size > 0:
+                            bytes_downloaded += seg_path.stat().st_size
+                            return
                         seg_url = self._resolve(seg.uri, base_url)
                         async with semaphore:
                             try:
@@ -260,7 +273,7 @@ class M3U8Downloader:
                                     k = keys_cache.get(ku)
                                     if k:
                                         data = self._decrypt_aes128(data, k, seg.key.iv)
-                                (tmpdir_path / f"seg_{idx:06d}{seg_ext}").write_bytes(data)
+                                seg_path.write_bytes(data)
                                 bytes_downloaded += len(data)
                             except Exception:
                                 pass
@@ -269,18 +282,22 @@ class M3U8Downloader:
                         nonlocal bytes_downloaded
                         if not audio_tmpdir or not audio_url:
                             return
+                        seg_path = audio_tmpdir / f"seg_{idx:06d}{seg_ext}"
+                        if seg_path.exists() and seg_path.stat().st_size > 0:
+                            bytes_downloaded += seg_path.stat().st_size
+                            return
                         au_url = self._resolve(seg.uri, audio_url)
                         async with semaphore:
                             try:
                                 data = await self._fetch_bytes(session, au_url)
-                                (audio_tmpdir / f"seg_{idx:06d}{seg_ext}").write_bytes(data)
+                                seg_path.write_bytes(data)
                                 bytes_downloaded += len(data)
                             except Exception:
                                 pass
 
                     yield {
                         "status": "recording",
-                        "recorded_segments": 0,
+                        "recorded_segments": seg_idx,
                         "bytes_downloaded": 0,
                         "speed_mbps": 0.0,
                         "elapsed_sec": 0,

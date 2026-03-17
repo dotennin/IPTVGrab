@@ -387,20 +387,32 @@ function updateTaskCard(taskId, task) {
          class="btn btn-sm btn-success">
         <i class="fas fa-download me-1"></i>${esc(task.output)}${sizeStr}
       </a>
-      ${task.duration_sec ? `<span class="ms-2 text-muted small">耗时 ${task.duration_sec}s</span>` : ""}`;
+      ${task.duration_sec ? `<span class="ms-2 text-muted small">耗时 ${task.duration_sec}s</span>` : ""}
+      <button class="btn btn-link btn-sm p-0 ms-2 text-info" onclick="restartTask('${taskId}')">
+        <i class="fas fa-redo me-1"></i>重新下载
+      </button>`;
   } else if (task.status === "failed") {
     info.innerHTML = `<span class="text-danger">错误: ${esc(task.error || "未知错误")}</span>
       <button class="btn btn-link btn-sm p-0 ms-2 text-warning" onclick="resumeTask('${taskId}')">
-        <i class="fas fa-redo me-1"></i>重试
+        <i class="fas fa-play me-1"></i>断点续传
+      </button>
+      <button class="btn btn-link btn-sm p-0 ms-2 text-info" onclick="restartTask('${taskId}')">
+        <i class="fas fa-sync me-1"></i>重新下载
       </button>`;
     info.className = "task-info small";
   } else if (task.status === "cancelled") {
-    info.textContent = "已取消";
-    info.className = "task-info small text-muted";
+    info.innerHTML = `<span class="text-muted">已取消</span>
+      <button class="btn btn-link btn-sm p-0 ms-2 text-info" onclick="restartTask('${taskId}')">
+        <i class="fas fa-redo me-1"></i>重新下载
+      </button>`;
+    info.className = "task-info small";
   } else if (task.status === "interrupted") {
     info.innerHTML = `<span class="text-warning"><i class="fas fa-exclamation-triangle me-1"></i>服务中断</span>
       <button class="btn btn-link btn-sm p-0 ms-2 text-warning" onclick="resumeTask('${taskId}')">
         <i class="fas fa-redo me-1"></i>断点续传
+      </button>
+      <button class="btn btn-link btn-sm p-0 ms-2 text-info" onclick="restartTask('${taskId}')">
+        <i class="fas fa-sync me-1"></i>重新下载
       </button>`;
     info.className = "task-info small";
   }
@@ -430,22 +442,13 @@ function updateTaskCard(taskId, task) {
       btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>合并中';
       btn.className = "btn btn-sm btn-secondary task-action";
     }
-  } else if (task.status === "interrupted") {
-    const btn = card.querySelector(".task-action");
-    if (btn && btn.dataset.mode !== "resume") {
-      btn.innerHTML = '<i class="fas fa-redo me-1"></i>恢复';
-      btn.className = "btn btn-sm btn-warning task-action";
-      btn.dataset.mode = "resume";
-      btn.disabled = false;
-      btn.replaceWith(btn.cloneNode(true));
-      card.querySelector(".task-action").addEventListener("click", () => resumeTask(taskId));
-    }
-  } else if (["completed", "failed", "cancelled"].includes(task.status)) {
+  } else if (["completed", "failed", "cancelled", "interrupted"].includes(task.status)) {
     const btn = card.querySelector(".task-action");
     if (btn && btn.dataset.mode !== "trash") {
       btn.innerHTML = '<i class="fas fa-trash"></i>';
       btn.className = "btn btn-sm btn-outline-secondary task-action";
       btn.dataset.mode = "trash";
+      btn.disabled = false;
       btn.replaceWith(btn.cloneNode(true));
       card.querySelector(".task-action").addEventListener("click", async () => {
         await fetch(`/api/tasks/${taskId}`, { method: "DELETE" }).catch(() => {});
@@ -512,7 +515,7 @@ async function cancelTask(taskId) {
 
 // ── Clear completed ───────────────────────────────────────────────────────────
 document.getElementById("clearCompletedBtn").addEventListener("click", async () => {
-  const terminalTexts = ["已完成", "失败", "已取消"];
+  const terminalTexts = ["已完成", "失败", "已取消", "已中断"];
   const toRemove = Array.from(document.querySelectorAll(".task-card")).filter((card) => {
     const s = card.querySelector(".task-status")?.textContent;
     return terminalTexts.includes(s);
@@ -530,7 +533,7 @@ async function resumeTask(taskId) {
   try {
     const res = await fetch(`/api/tasks/${taskId}/resume`, { method: "POST" });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || "恢复失败");
+    if (!res.ok) throw new Error(data.detail || "断点续传失败");
     // Reset card to queued state
     const card = document.getElementById(`task-${taskId}`);
     if (card) {
@@ -547,6 +550,34 @@ async function resumeTask(taskId) {
     }
     startPolling(taskId);
     toast("已开始断点续传", "info");
+  } catch (e) {
+    toast(e.message, "danger");
+  }
+}
+
+// ── Restart task (re-download from scratch) ────────────────────────────────────
+async function restartTask(taskId) {
+  try {
+    const res = await fetch(`/api/tasks/${taskId}/restart`, { method: "POST" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "重新下载失败");
+    const card = document.getElementById(`task-${taskId}`);
+    if (card) {
+      card.querySelector(".task-status").textContent = "等待中";
+      card.querySelector(".task-status").className = "badge bg-secondary flex-shrink-0 task-status";
+      card.querySelector(".task-info").textContent = "正在准备...";
+      const bar = card.querySelector(".task-bar");
+      if (bar) { bar.style.width = "0%"; bar.textContent = ""; }
+      const btn = card.querySelector(".task-action");
+      btn.innerHTML = '<i class="fas fa-times"></i> 取消';
+      btn.className = "btn btn-sm btn-outline-danger task-action";
+      btn.dataset.mode = "";
+      btn.disabled = false;
+      btn.replaceWith(btn.cloneNode(true));
+      card.querySelector(".task-action").addEventListener("click", () => cancelTask(taskId));
+    }
+    startPolling(taskId);
+    toast("已开始重新下载", "info");
   } catch (e) {
     toast(e.message, "danger");
   }
