@@ -53,6 +53,106 @@ document.getElementById("concurrency").addEventListener("input", (e) => {
   document.getElementById("concurrencyVal").textContent = e.target.value;
 });
 
+// ── Batch tab: toggle common output settings visibility ───────────────────────
+function parseBatchText(text) {
+  const items = [];
+  let currentTitle = null;
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (line.toUpperCase().startsWith("#EXTINF:")) {
+      // Standard M3U: #EXTINF:-1 group-title="x",Title Here
+      const commaPos = line.lastIndexOf(",");
+      if (commaPos !== -1) {
+        const title = line.slice(commaPos + 1).trim();
+        currentTitle = title || null;
+      }
+    } else if (line.startsWith("#")) {
+      currentTitle = line.slice(1).trim() || null;
+    } else if (line.startsWith("http://") || line.startsWith("https://")) {
+      items.push({ title: currentTitle, url: line });
+      currentTitle = null;
+    }
+  }
+  return items;
+}
+
+document.getElementById("batch-tab").addEventListener("shown.bs.tab", () => {
+  document.getElementById("outputSettingsRow").classList.add("d-none");
+  document.getElementById("parseBtnGroup").classList.add("d-none");
+});
+
+["url-tab", "curl-tab"].forEach((id) => {
+  document.getElementById(id).addEventListener("shown.bs.tab", () => {
+    document.getElementById("outputSettingsRow").classList.remove("d-none");
+    document.getElementById("parseBtnGroup").classList.remove("d-none");
+  });
+});
+
+// Live parse hint
+document.getElementById("batchInput").addEventListener("input", () => {
+  const items = parseBatchText(document.getElementById("batchInput").value);
+  const hint = document.getElementById("batchHint");
+  if (items.length === 0) {
+    hint.textContent = "";
+  } else {
+    hint.innerHTML = `<i class="fas fa-check-circle text-success me-1"></i>发现 <strong>${items.length}</strong> 个 URL`;
+  }
+});
+
+// Batch concurrency slider
+document.getElementById("batchConcurrency").addEventListener("input", (e) => {
+  document.getElementById("batchConcurrencyVal").textContent = e.target.value;
+});
+
+// Batch start button
+document.getElementById("batchStartBtn").addEventListener("click", async () => {
+  const text = document.getElementById("batchInput").value.trim();
+  const items = parseBatchText(text);
+  if (items.length === 0) {
+    toast("未找到有效 URL，请检查输入格式", "danger");
+    return;
+  }
+
+  const btn = document.getElementById("batchStartBtn");
+  btn.disabled = true;
+  btn.innerHTML = `<i class="fas fa-spinner fa-spin me-1"></i>提交中 (0/${items.length})`;
+
+  let submitted = 0;
+  try {
+    const quality = document.getElementById("batchQuality").value;
+    const concurrency = parseInt(document.getElementById("batchConcurrency").value, 10);
+
+    const res = await fetch("/api/batch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ batch_text: text, headers: {}, quality, task_parallelism: concurrency }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "批量提交失败");
+
+    submitted = data.count;
+    // Add a card for each new task
+    for (const taskId of data.task_ids) {
+      const taskRes = await fetch(`/api/tasks/${taskId}`);
+      if (!taskRes.ok) continue;
+      const task = await taskRes.json();
+      addTaskCard(task.id, task.url || "");
+      updateTaskCard(task.id, task);
+      startPolling(task.id);
+    }
+
+    toast(`已提交 ${submitted} 个下载任务`, "success");
+    document.getElementById("batchInput").value = "";
+    document.getElementById("batchHint").textContent = "";
+  } catch (e) {
+    toast(e.message, "danger");
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-play me-1"></i>开始批量下载';
+  }
+});
+
 // ── Header rows ───────────────────────────────────────────────────────────────
 function addHeaderRow(key = "", val = "") {
   const list = document.getElementById("headersList");
@@ -417,13 +517,29 @@ function updateTaskCard(taskId, task) {
     info.className = "task-info small";
   }
 
-  // ── Preview button: show when enough segments are available ──────────────
+  // ── Preview button ────────────────────────────────────────────────────────
   const previewBtn = card.querySelector(".task-preview");
-  if (previewBtn && task.tmpdir && (task.downloaded >= 5 || task.recorded_segments >= 5)) {
-    previewBtn.classList.remove("d-none");
-    if (!previewBtn.dataset.listenerAdded) {
-      previewBtn.dataset.listenerAdded = "1";
-      previewBtn.addEventListener("click", () => openPreview(taskId));
+  if (previewBtn) {
+    const canLive = task.tmpdir && (task.downloaded >= 5 || task.recorded_segments >= 5);
+    const canDirect = task.status === "completed" && task.output;
+    if (canLive || canDirect) {
+      previewBtn.classList.remove("d-none");
+      // Keep data-output-url in sync so click handler always uses latest value
+      if (canDirect) {
+        previewBtn.dataset.outputUrl = `/downloads/${task.output}`;
+      } else {
+        delete previewBtn.dataset.outputUrl;
+      }
+      if (!previewBtn.dataset.listenerAdded) {
+        previewBtn.dataset.listenerAdded = "1";
+        previewBtn.addEventListener("click", () => {
+          if (previewBtn.dataset.outputUrl) {
+            openPreviewDirect(previewBtn.dataset.outputUrl);
+          } else {
+            openPreview(taskId);
+          }
+        });
+      }
     }
   }
 
@@ -585,6 +701,15 @@ async function restartTask(taskId) {
 
 // ── Preview player (hls.js) ───────────────────────────────────────────────────
 let hlsInstance = null;
+
+function openPreviewDirect(url) {
+  const video = document.getElementById("previewVideo");
+  if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
+  video.pause();
+  video.src = url;
+  new bootstrap.Modal(document.getElementById("previewModal")).show();
+  video.play().catch(() => {});
+}
 
 function openPreview(taskId) {
   const video = document.getElementById("previewVideo");

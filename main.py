@@ -80,6 +80,14 @@ class DownloadRequest(BaseModel):
     concurrency: int = 8
 
 
+class BatchRequest(BaseModel):
+    batch_text: str
+    headers: dict = {}
+    quality: str = "best"
+    task_parallelism: int = 3   # how many tasks download simultaneously
+    concurrency: int = 4        # per-task segment concurrency
+
+
 # ── API routes ───────────────────────────────────────────────────────────────
 
 @app.post("/api/parse")
@@ -131,6 +139,91 @@ async def start_download(req: DownloadRequest, bg: BackgroundTasks):
     return {"task_id": task_id}
 
 
+def _parse_batch_text(text: str):
+    """Parse batch text into [(title, url)] pairs.
+
+    Supports two formats:
+      1. Standard M3U:   #EXTINF:-1 group-title="x",Title Here
+                         https://example.com/stream.m3u8
+      2. Simple custom:  #optional title
+                         https://example.com/stream.m3u8
+
+    A URL without a preceding title line gets None (auto-generated name).
+    """
+    items = []
+    current_title = None
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if line.upper().startswith("#EXTINF:"):
+            # Standard M3U: title is everything after the last comma
+            comma_pos = line.rfind(",")
+            if comma_pos != -1:
+                title = line[comma_pos + 1:].strip()
+                current_title = title if title else None
+        elif line.startswith("#"):
+            # Simple custom: strip the leading #
+            current_title = line[1:].strip() or None
+        elif line.startswith(("http://", "https://")):
+            items.append((current_title, line))
+            current_title = None  # title consumed by this URL
+    return items
+
+
+@app.post("/api/batch")
+async def batch_download(req: BatchRequest):
+    """Parse a batch text block and start all downloads in parallel (up to task_parallelism)."""
+    items = _parse_batch_text(req.batch_text)
+    if not items:
+        raise HTTPException(400, "批量文本中未找到有效 URL")
+
+    task_ids = []
+    now = time.time()
+    sem = asyncio.Semaphore(req.task_parallelism)
+
+    for idx, (title, url) in enumerate(items):
+        task_id = str(uuid.uuid4())
+        dl_req = DownloadRequest(
+            url=url,
+            headers=req.headers,
+            output_name=title or None,
+            quality=req.quality,
+            concurrency=req.concurrency,
+        )
+        tasks[task_id] = {
+            "id": task_id,
+            "url": url,
+            "status": "queued",
+            "progress": 0,
+            "total": 0,
+            "downloaded": 0,
+            "failed": 0,
+            "speed_mbps": 0.0,
+            "bytes_downloaded": 0,
+            "output": None,
+            "size": 0,
+            "error": None,
+            "created_at": now + idx * 0.001,
+            "req_headers": req.headers,
+            "output_name": title or None,
+            "quality": req.quality,
+            "concurrency": req.concurrency,
+        }
+        task_ids.append((task_id, dl_req))
+
+    save_tasks()
+
+    async def run_with_sem(tid: str, r: DownloadRequest):
+        async with sem:
+            await _run_download(tid, r)
+
+    for tid, r in task_ids:
+        asyncio.create_task(run_with_sem(tid, r))
+
+    return {"task_ids": [t for t, _ in task_ids], "count": len(task_ids)}
+
+
 @app.get("/api/tasks")
 async def list_tasks():
     return sorted(tasks.values(), key=lambda t: t.get("created_at", 0), reverse=True)
@@ -166,8 +259,13 @@ async def cancel_task(task_id: str):
         save_tasks()
         return {"status": "cancelled"}
 
-    # Terminal task: fully remove from registry and disk
+    # Terminal task: fully remove from registry, tmpdir, and output file
     _cleanup_tmpdir(task_id)
+    output = task.get("output")
+    if output:
+        out_path = DOWNLOADS_DIR / output
+        if out_path.exists():
+            out_path.unlink(missing_ok=True)
     del tasks[task_id]
     save_tasks()
     return {"status": "deleted"}
