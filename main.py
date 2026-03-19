@@ -84,7 +84,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         if path.startswith("/api/"):
-            return JSONResponse({"detail": "未授权，请先登录"}, status_code=401)
+            return JSONResponse({"detail": "Unauthorized. Please log in."}, status_code=401)
 
         return RedirectResponse("/login")
 
@@ -183,7 +183,7 @@ async def login(req: LoginRequest, request: Request, response: Response):
     locked, remaining = _check_lock(ip)
     if locked:
         raise HTTPException(
-            429, f"登录尝试次数过多，请在 {remaining} 秒后重试"
+            429, f"Too many attempts. Try again in {remaining} seconds"
         )
 
     if req.password != AUTH_PASSWORD:
@@ -192,10 +192,10 @@ async def login(req: LoginRequest, request: Request, response: Response):
         if now_locked:
             raise HTTPException(
                 429,
-                f"密码连续错误 {_MAX_ATTEMPTS} 次，该 IP 已被锁定 {_LOCK_SECONDS // 60} 分钟"
+                f"Too many failed attempts. This IP is locked for {_LOCK_SECONDS // 60} minutes"
             )
         left = _MAX_ATTEMPTS - entry.get("count", 0)
-        raise HTTPException(401, f"密码错误，还有 {left} 次机会")
+        raise HTTPException(401, f"Incorrect password. {left} attempt(s) remaining")
 
     # Success — clear failure record and issue session
     _login_failures.pop(ip, None)
@@ -307,7 +307,7 @@ async def batch_download(req: BatchRequest):
     """Parse a batch text block and start all downloads in parallel (up to task_parallelism)."""
     items = _parse_batch_text(req.batch_text)
     if not items:
-        raise HTTPException(400, "批量文本中未找到有效 URL")
+        raise HTTPException(400, "No valid URLs found in batch text")
 
     task_ids = []
     now = time.time()

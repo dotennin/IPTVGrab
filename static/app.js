@@ -128,7 +128,7 @@ document.getElementById("batchInput").addEventListener("input", () => {
   if (items.length === 0) {
     hint.textContent = "";
   } else {
-    hint.innerHTML = `<i class="fas fa-check-circle text-success me-1"></i>发现 <strong>${items.length}</strong> 个 URL`;
+    hint.innerHTML = `<i class="fas fa-check-circle text-success me-1"></i>Found <strong>${items.length}</strong> URL(s)`;
   }
 });
 
@@ -142,13 +142,13 @@ document.getElementById("batchStartBtn").addEventListener("click", async () => {
   const text = document.getElementById("batchInput").value.trim();
   const items = parseBatchText(text);
   if (items.length === 0) {
-    toast("未找到有效 URL，请检查输入格式", "danger");
+    toast("No valid URLs found. Check the input format.", "danger");
     return;
   }
 
   const btn = document.getElementById("batchStartBtn");
   btn.disabled = true;
-  btn.innerHTML = `<i class="fas fa-spinner fa-spin me-1"></i>提交中 (0/${items.length})`;
+  btn.innerHTML = `<i class="fas fa-spinner fa-spin me-1"></i>Submitting (0/${items.length})`;
 
   let submitted = 0;
   try {
@@ -161,7 +161,7 @@ document.getElementById("batchStartBtn").addEventListener("click", async () => {
       body: JSON.stringify({ batch_text: text, headers: {}, quality, task_parallelism: concurrency }),
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || "批量提交失败");
+    if (!res.ok) throw new Error(data.detail || "Batch submit failed");
 
     submitted = data.count;
     // Add a card for each new task
@@ -174,14 +174,14 @@ document.getElementById("batchStartBtn").addEventListener("click", async () => {
       startPolling(task.id);
     }
 
-    toast(`已提交 ${submitted} 个下载任务`, "success");
+    toast(`${submitted} download task(s) submitted`, "success");
     document.getElementById("batchInput").value = "";
     document.getElementById("batchHint").textContent = "";
   } catch (e) {
     toast(e.message, "danger");
   } finally {
     btn.disabled = false;
-    btn.innerHTML = '<i class="fas fa-play me-1"></i>开始批量下载';
+    btn.innerHTML = '<i class="fas fa-play me-1"></i>Start batch';
   }
 });
 
@@ -191,8 +191,8 @@ function addHeaderRow(key = "", val = "") {
   const row = document.createElement("div");
   row.className = "input-group input-group-sm mb-2 header-row";
   row.innerHTML = `
-    <input type="text" class="form-control header-key font-mono" placeholder="Header 名称" value="${esc(key)}" />
-    <input type="text" class="form-control header-val font-mono" placeholder="值" value="${esc(val)}" />
+    <input type="text" class="form-control header-key font-mono" placeholder="Header name" value="${esc(key)}" />
+    <input type="text" class="form-control header-val font-mono" placeholder="Value" value="${esc(val)}" />
     <button class="btn btn-outline-danger" type="button" tabindex="-1"
             onclick="this.closest('.header-row').remove()">
       <i class="fas fa-times"></i>
@@ -229,20 +229,20 @@ document.getElementById("parseBtn").addEventListener("click", async () => {
   if (curlActive) {
     curlCommand = document.getElementById("curlInput").value.trim();
     if (!curlCommand) {
-      toast("请粘贴 cURL 命令", "danger");
+      toast("Please paste a cURL command", "danger");
       return;
     }
   } else {
     url = document.getElementById("urlInput").value.trim();
     if (!url) {
-      toast("请输入 M3U8 URL", "danger");
+      toast("Please enter an M3U8 URL", "danger");
       return;
     }
     headers = collectHeaders();
   }
 
   btn.disabled = true;
-  btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>解析中...';
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Parsing...';
 
   try {
     const res = await apiFetch("/api/parse", {
@@ -251,7 +251,7 @@ document.getElementById("parseBtn").addEventListener("click", async () => {
       body: JSON.stringify({ url, headers, curl_command: curlCommand }),
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || "解析失败");
+    if (!res.ok) throw new Error(data.detail || "Parse failed");
 
     currentRequest = { url: data.url, headers: data.headers || headers };
     currentStreamInfo = data;
@@ -262,13 +262,13 @@ document.getElementById("parseBtn").addEventListener("click", async () => {
 
     showStreamInfo(data);
     document.getElementById("clearInfoBtn").classList.remove("d-none");
-    toast("解析成功", "success");
+    toast("Parsed successfully", "success");
   } catch (e) {
     toast(e.message, "danger");
     showError(e.message);
   } finally {
     btn.disabled = false;
-    btn.innerHTML = '<i class="fas fa-search me-1"></i>解析流';
+    btn.innerHTML = '<i class="fas fa-search me-1"></i>Parse stream';
   }
 });
 
@@ -284,7 +284,7 @@ function resetStreamInfo() {
   document.getElementById("streamInfoBody").innerHTML = `
     <div class="text-center text-muted py-5" id="streamPlaceholder">
       <i class="fas fa-play-circle fa-3x mb-3 d-block opacity-25"></i>
-      <p class="mb-0">解析 M3U8 后在此显示流信息</p>
+      <p class="mb-0">Stream info will appear here after parsing</p>
     </div>`;
 }
 
@@ -300,9 +300,9 @@ function showStreamInfo(info) {
   const body = document.getElementById("streamInfoBody");
 
   if (info.type === "master") {
-    badge.innerHTML = `<span class="badge bg-info">主播放列表</span>`;
+    badge.innerHTML = `<span class="badge bg-info">Master playlist</span>`;
     let html = `<p class="text-muted small mb-3">
-      <i class="fas fa-layer-group me-1"></i>包含 ${info.streams.length} 个质量选项，请选择下载画质：
+      <i class="fas fa-layer-group me-1"></i>${info.streams.length} quality option(s). Select a stream to download:
     </p>`;
 
     info.streams.forEach((s, i) => {
@@ -318,7 +318,7 @@ function showStreamInfo(info) {
               ${s.codecs ? ` · ${esc(s.codecs)}` : ""}
             </div>
           </div>
-          ${i === 0 ? '<span class="badge bg-success">最高画质</span>' : ""}
+          ${i === 0 ? '<span class="badge bg-success">Best</span>' : ""}
         </label>`;
     });
 
@@ -327,19 +327,19 @@ function showStreamInfo(info) {
     const isLive = info.is_live === true;
     badge.innerHTML = isLive
       ? `<span class="badge bg-danger live-badge"><i class="fas fa-circle me-1" style="font-size:.6em"></i>LIVE</span>`
-      : `<span class="badge bg-success">媒体播放列表</span>`;
+      : `<span class="badge bg-success">Media playlist</span>`;
     body.innerHTML = `
       <dl class="stat-grid mb-3">
         ${isLive
-          ? `<dt>直播状态</dt><dd><span class="text-danger fw-semibold">持续录制，直到手动停止</span></dd>`
-          : `<dt>片段数量</dt><dd>${info.segments} 个</dd>
-             <dt>视频时长</dt><dd>${formatDuration(info.duration)}</dd>`
+          ? `<dt>Status</dt><dd><span class="text-danger fw-semibold">Live — records until stopped</span></dd>`
+          : `<dt>Segments</dt><dd>${info.segments}</dd>
+             <dt>Duration</dt><dd>${formatDuration(info.duration)}</dd>`
         }
-        <dt>AES 加密</dt>
+        <dt>Encryption</dt>
         <dd>${
           info.encrypted
             ? '<span class="badge bg-warning text-dark">AES-128</span>'
-            : '<span class="text-muted">无</span>'
+            : '<span class="text-muted">None</span>'
         }</dd>
       </dl>` + downloadButton(isLive);
   }
@@ -358,13 +358,13 @@ function downloadButton(isLive = false) {
   return isLive
     ? `<div class="mt-3 pt-3 border-top">
          <button class="btn btn-danger px-4" id="startDownloadBtn" type="button">
-           <i class="fas fa-circle me-2"></i>开始录制
+           <i class="fas fa-circle me-2"></i>Start recording
          </button>
-         <span class="ms-3 text-muted small">停止录制后自动合并为 MP4</span>
+         <span class="ms-3 text-muted small">Merges to MP4 automatically when stopped</span>
        </div>`
     : `<div class="mt-3 pt-3 border-top">
          <button class="btn btn-success px-4" id="startDownloadBtn" type="button">
-           <i class="fas fa-download me-2"></i>开始下载
+           <i class="fas fa-download me-2"></i>Start download
          </button>
        </div>`;
 }
@@ -372,7 +372,7 @@ function downloadButton(isLive = false) {
 // ── Start download ────────────────────────────────────────────────────────────
 async function startDownload() {
   if (!currentRequest.url) {
-    toast("请先解析流", "danger");
+    toast("Parse a stream first", "danger");
     return;
   }
 
@@ -387,7 +387,7 @@ async function startDownload() {
 
   const btn = document.getElementById("startDownloadBtn");
   btn.disabled = true;
-  btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>提交中...';
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Submitting...';
 
   try {
     const res = await apiFetch("/api/download", {
@@ -406,12 +406,12 @@ async function startDownload() {
 
     addTaskCard(data.task_id, currentRequest.url);
     startPolling(data.task_id);
-    toast("下载任务已添加", "info");
+    toast("Download task added", "info");
   } catch (e) {
     toast(e.message, "danger");
   } finally {
     btn.disabled = false;
-    btn.innerHTML = '<i class="fas fa-download me-2"></i>开始下载';
+    btn.innerHTML = '<i class="fas fa-download me-2"></i>Start download';
   }
 }
 
@@ -435,19 +435,19 @@ function addTaskCard(taskId, url) {
         <div class="task-url text-truncate">${esc(url)}</div>
         <div class="task-filename text-muted small text-truncate d-none"></div>
       </div>
-      <span class="badge bg-secondary flex-shrink-0 task-status">等待中</span>
+      <span class="badge bg-secondary flex-shrink-0 task-status">Queued</span>
     </div>
     <div class="progress mb-2">
       <div class="progress-bar task-bar" role="progressbar" style="width:0%"></div>
     </div>
     <div class="d-flex justify-content-between align-items-center">
-      <small class="task-info text-muted">正在准备...</small>
+      <small class="task-info text-muted">Preparing...</small>
       <div class="d-flex gap-2 align-items-center">
-        <button class="btn btn-sm btn-outline-info task-preview d-none" title="预览已下载片段">
-          <i class="fas fa-play-circle me-1"></i>预览
+        <button class="btn btn-sm btn-outline-info task-preview d-none" title="Preview downloaded segments">
+          <i class="fas fa-play-circle me-1"></i>Preview
         </button>
         <button class="btn btn-sm btn-outline-danger task-action" data-id="${taskId}">
-          <i class="fas fa-times"></i> 取消
+          <i class="fas fa-times"></i> Cancel
         </button>
       </div>
     </div>`;
@@ -458,15 +458,15 @@ function addTaskCard(taskId, url) {
 }
 
 const STATUS_MAP = {
-  queued:      { text: "等待中",  cls: "bg-secondary" },
-  downloading: { text: "下载中",  cls: "bg-primary"   },
-  recording:   { text: "录制中",  cls: "bg-danger"    },
-  stopping:    { text: "合并中",  cls: "bg-info"      },
-  merging:     { text: "合并中",  cls: "bg-info"      },
-  completed:   { text: "已完成",  cls: "bg-success"   },
-  failed:      { text: "失败",    cls: "bg-danger"    },
-  cancelled:   { text: "已取消",  cls: "bg-secondary" },
-  interrupted: { text: "已中断",  cls: "bg-warning"   },
+  queued:      { text: "Queued",      cls: "bg-secondary" },
+  downloading: { text: "Downloading", cls: "bg-primary"   },
+  recording:   { text: "Recording",   cls: "bg-danger"    },
+  stopping:    { text: "Merging",     cls: "bg-info"      },
+  merging:     { text: "Merging",     cls: "bg-info"      },
+  completed:   { text: "Completed",   cls: "bg-success"   },
+  failed:      { text: "Failed",      cls: "bg-danger"    },
+  cancelled:   { text: "Cancelled",   cls: "bg-secondary" },
+  interrupted: { text: "Interrupted", cls: "bg-warning"   },
 };
 
 function updateTaskCard(taskId, task) {
@@ -514,21 +514,21 @@ function updateTaskCard(taskId, task) {
       <span class="text-danger fw-semibold">
         <i class="fas fa-circle fa-beat me-1" style="font-size:.6em"></i>${mm}:${ss}
       </span>
-      <span class="ms-2">${task.recorded_segments || 0} 片段</span>
+      <span class="ms-2">${task.recorded_segments || 0} segs</span>
       <span class="ms-2">${formatBytes(task.bytes_downloaded)}</span>
       <span class="ms-2 text-muted">${task.speed_mbps || 0} MB/s</span>`;
     info.className = "task-info small";
   } else if (task.status === "downloading") {
     info.innerHTML = `
-      <span>${task.downloaded || 0} / ${task.total || 0} 片段</span>
+      <span>${task.downloaded || 0} / ${task.total || 0} segs</span>
       <span class="ms-2 text-primary">${task.speed_mbps || 0} MB/s</span>
       <span class="ms-2">${formatBytes(task.bytes_downloaded)}</span>`;
     info.className = "task-info small";
   } else if (task.status === "stopping") {
-    info.innerHTML = '<i class="fas fa-cog fa-spin me-1"></i>正在合并已录制的片段...';
+    info.innerHTML = '<i class="fas fa-cog fa-spin me-1"></i>Merging recorded segments...';
     info.className = "task-info small text-info";
   } else if (task.status === "merging") {
-    info.innerHTML = '<i class="fas fa-cog fa-spin me-1"></i>正在合并视频片段...';
+    info.innerHTML = '<i class="fas fa-cog fa-spin me-1"></i>Merging segments...';
     info.className = "task-info small text-info";
   } else if (task.status === "completed" && task.output) {
     const sizeStr = task.size ? ` (${formatBytes(task.size)})` : "";
@@ -537,35 +537,35 @@ function updateTaskCard(taskId, task) {
          class="btn btn-sm btn-success">
         <i class="fas fa-download me-1"></i>${esc(task.output)}${sizeStr}
       </a>
-      ${task.duration_sec ? `<span class="ms-2 text-muted small">耗时 ${task.duration_sec}s</span>` : ""}
+      ${task.duration_sec ? `<span class="ms-2 text-muted small">${task.duration_sec}s elapsed</span>` : ""}
       <button class="btn btn-link btn-sm p-0 ms-2 text-info" onclick="restartTask('${taskId}')">
-        <i class="fas fa-redo me-1"></i>重新下载
+        <i class="fas fa-redo me-1"></i>Restart
       </button>`;
   } else if (task.status === "failed") {
     info.innerHTML = `
-      <div class="task-error text-danger" title="点击展开/折叠" onclick="this.classList.toggle('expanded')">错误: ${esc(task.error || "未知错误")}</div>
+      <div class="task-error text-danger" title="Click to expand/collapse" onclick="this.classList.toggle('expanded')">Error: ${esc(task.error || "Unknown error")}</div>
       <div class="mt-1">
         <button class="btn btn-link btn-sm p-0 text-warning" onclick="resumeTask('${taskId}')">
-          <i class="fas fa-play me-1"></i>断点续传
+          <i class="fas fa-play me-1"></i>Resume
         </button>
         <button class="btn btn-link btn-sm p-0 ms-2 text-info" onclick="restartTask('${taskId}')">
-          <i class="fas fa-sync me-1"></i>重新下载
+          <i class="fas fa-sync me-1"></i>Restart
         </button>
       </div>`;
     info.className = "task-info small";
   } else if (task.status === "cancelled") {
-    info.innerHTML = `<span class="text-muted">已取消</span>
+    info.innerHTML = `<span class="text-muted">Cancelled</span>
       <button class="btn btn-link btn-sm p-0 ms-2 text-info" onclick="restartTask('${taskId}')">
-        <i class="fas fa-redo me-1"></i>重新下载
+        <i class="fas fa-redo me-1"></i>Restart
       </button>`;
     info.className = "task-info small";
   } else if (task.status === "interrupted") {
-    info.innerHTML = `<span class="text-warning"><i class="fas fa-exclamation-triangle me-1"></i>服务中断</span>
+    info.innerHTML = `<span class="text-warning"><i class="fas fa-exclamation-triangle me-1"></i>Interrupted</span>
       <button class="btn btn-link btn-sm p-0 ms-2 text-warning" onclick="resumeTask('${taskId}')">
-        <i class="fas fa-redo me-1"></i>断点续传
+        <i class="fas fa-redo me-1"></i>Resume
       </button>
       <button class="btn btn-link btn-sm p-0 ms-2 text-info" onclick="restartTask('${taskId}')">
-        <i class="fas fa-sync me-1"></i>重新下载
+        <i class="fas fa-sync me-1"></i>Restart
       </button>`;
     info.className = "task-info small";
   }
@@ -600,7 +600,7 @@ function updateTaskCard(taskId, task) {
   if (task.status === "recording") {
     const btn = card.querySelector(".task-action");
     if (btn && btn.dataset.mode !== "stop") {
-      btn.innerHTML = '<i class="fas fa-stop me-1"></i>停止录制';
+      btn.innerHTML = '<i class="fas fa-stop me-1"></i>Stop recording';
       btn.className = "btn btn-sm btn-danger task-action";
       btn.dataset.mode = "stop";
     }
@@ -608,7 +608,7 @@ function updateTaskCard(taskId, task) {
     const btn = card.querySelector(".task-action");
     if (btn) {
       btn.disabled = true;
-      btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>合并中';
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Merging';
       btn.className = "btn btn-sm btn-secondary task-action";
     }
   } else if (["completed", "failed", "cancelled", "interrupted"].includes(task.status)) {
@@ -639,9 +639,9 @@ function startPolling(taskId) {
       if (["completed", "failed", "cancelled", "interrupted"].includes(task.status)) {
         stopPolling(taskId);
         if (task.status === "completed")
-          toast(`${task.output} 已完成`, "success");
+          toast(`${task.output} — completed`, "success");
         else if (task.status === "failed")
-          toast(`失败: ${task.error}`, "danger");
+          toast(`Failed: ${task.error}`, "danger");
       }
     } catch (_) { /* network hiccup – keep polling */ }
   }, 600);
@@ -667,14 +667,14 @@ async function cancelTask(taskId) {
   stopPolling(taskId);
   const card = document.getElementById(`task-${taskId}`);
   if (card) {
-    card.querySelector(".task-status").textContent = "已取消";
+    card.querySelector(".task-status").textContent = "Cancelled";
     card.querySelector(".task-status").className = "badge bg-secondary flex-shrink-0 task-status";
     const info = card.querySelector(".task-info");
     if (info) {
       info.className = "task-info small";
-      info.innerHTML = `<span class="text-muted">已取消</span>
+      info.innerHTML = `<span class="text-muted">Cancelled</span>
         <button class="btn btn-link btn-sm p-0 ms-2 text-info" onclick="restartTask('${taskId}')">
-          <i class="fas fa-redo me-1"></i>重新下载
+          <i class="fas fa-redo me-1"></i>Restart
         </button>`;
     }
     const btn = card.querySelector(".task-action");
@@ -692,7 +692,7 @@ async function cancelTask(taskId) {
 
 // ── Clear completed ───────────────────────────────────────────────────────────
 document.getElementById("clearCompletedBtn").addEventListener("click", async () => {
-  const terminalTexts = ["已完成", "失败", "已取消", "已中断"];
+  const terminalTexts = ["Completed", "Failed", "Cancelled", "Interrupted"];
   const toRemove = Array.from(document.querySelectorAll(".task-card")).filter((card) => {
     const s = card.querySelector(".task-status")?.textContent;
     return terminalTexts.includes(s);
@@ -710,15 +710,15 @@ async function resumeTask(taskId) {
   try {
     const res = await apiFetch(`/api/tasks/${taskId}/resume`, { method: "POST" });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || "断点续传失败");
+    if (!res.ok) throw new Error(data.detail || "Resume failed");
     // Reset card to queued state
     const card = document.getElementById(`task-${taskId}`);
     if (card) {
-      card.querySelector(".task-status").textContent = "等待中";
+      card.querySelector(".task-status").textContent = "Queued";
       card.querySelector(".task-status").className = "badge bg-secondary flex-shrink-0 task-status";
-      card.querySelector(".task-info").textContent = "正在准备...";
+      card.querySelector(".task-info").textContent = "Preparing...";
       const btn = card.querySelector(".task-action");
-      btn.innerHTML = '<i class="fas fa-times"></i> 取消';
+      btn.innerHTML = '<i class="fas fa-times"></i> Cancel';
       btn.className = "btn btn-sm btn-outline-danger task-action";
       btn.dataset.mode = "";
       btn.disabled = false;
@@ -726,7 +726,7 @@ async function resumeTask(taskId) {
       card.querySelector(".task-action").addEventListener("click", () => cancelTask(taskId));
     }
     startPolling(taskId);
-    toast("已开始断点续传", "info");
+    toast("Resume started", "info");
   } catch (e) {
     toast(e.message, "danger");
   }
@@ -737,16 +737,16 @@ async function restartTask(taskId) {
   try {
     const res = await apiFetch(`/api/tasks/${taskId}/restart`, { method: "POST" });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || "重新下载失败");
+    if (!res.ok) throw new Error(data.detail || "Restart failed");
     const card = document.getElementById(`task-${taskId}`);
     if (card) {
-      card.querySelector(".task-status").textContent = "等待中";
+      card.querySelector(".task-status").textContent = "Queued";
       card.querySelector(".task-status").className = "badge bg-secondary flex-shrink-0 task-status";
-      card.querySelector(".task-info").textContent = "正在准备...";
+      card.querySelector(".task-info").textContent = "Preparing...";
       const bar = card.querySelector(".task-bar");
       if (bar) { bar.style.width = "0%"; bar.textContent = ""; }
       const btn = card.querySelector(".task-action");
-      btn.innerHTML = '<i class="fas fa-times"></i> 取消';
+      btn.innerHTML = '<i class="fas fa-times"></i> Cancel';
       btn.className = "btn btn-sm btn-outline-danger task-action";
       btn.dataset.mode = "";
       btn.disabled = false;
@@ -754,7 +754,7 @@ async function restartTask(taskId) {
       card.querySelector(".task-action").addEventListener("click", () => cancelTask(taskId));
     }
     startPolling(taskId);
-    toast("已开始重新下载", "info");
+    toast("Download restarted", "info");
   } catch (e) {
     toast(e.message, "danger");
   }
@@ -788,7 +788,7 @@ function openPreview(taskId) {
     video.src = src;
     video.play().catch(() => {});
   } else {
-    toast("浏览器不支持 HLS 预览，请使用 Chrome 并确保页面加载了 hls.js", "danger");
+    toast("HLS preview requires Chrome with hls.js loaded", "danger");
     return;
   }
   new bootstrap.Modal(document.getElementById("previewModal")).show();

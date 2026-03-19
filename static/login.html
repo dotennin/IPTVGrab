@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-bs-theme="dark">
+<html lang="en" data-bs-theme="dark">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>登录 — M3U8 Downloader</title>
+  <title>Login — M3U8 Downloader</title>
   <link
     href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
     rel="stylesheet"
@@ -41,34 +41,34 @@
         <i class="fas fa-film"></i>
       </div>
       <h5 class="fw-semibold mb-0">M3U8 Downloader</h5>
-      <p class="text-muted small mt-1">请输入访问密码</p>
+      <p class="text-muted small mt-1">Enter your access password</p>
     </div>
 
     <div id="errorAlert" class="alert alert-danger py-2 small d-none" role="alert">
       <i class="fas fa-exclamation-circle me-1"></i>
-      <span id="errorMsg">密码错误，请重试</span>
+      <span id="errorMsg">Incorrect password, please try again</span>
     </div>
     <div id="lockAlert" class="alert alert-warning py-2 small d-none" role="alert">
       <i class="fas fa-lock me-1"></i>
-      该 IP 已被锁定，请 <strong id="lockCountdown">--</strong> 秒后重试
+      This IP is locked. Try again in <strong id="lockCountdown">--</strong> seconds
     </div>
 
     <form id="loginForm" autocomplete="off">
       <div class="mb-3">
-        <label class="form-label text-muted small" for="passwordInput">密码</label>
+        <label class="form-label text-muted small" for="passwordInput">Password</label>
         <input
           type="password"
           class="form-control"
           id="passwordInput"
-          placeholder="输入访问密码"
+          placeholder="Enter access password"
           autofocus
           required
         />
       </div>
       <button type="submit" class="btn btn-primary w-100" id="loginBtn">
-        <span id="loginBtnText"><i class="fas fa-sign-in-alt me-1"></i>登录</span>
+        <span id="loginBtnText"><i class="fas fa-sign-in-alt me-1"></i>Sign in</span>
         <span id="loginBtnSpinner" class="d-none">
-          <span class="spinner-border spinner-border-sm me-1" role="status"></span>验证中…
+          <span class="spinner-border spinner-border-sm me-1" role="status"></span>Verifying…
         </span>
       </button>
     </form>
@@ -127,17 +127,17 @@
           window.location.replace("/");
         } else if (res.status === 429) {
           const data = await res.json().catch(() => ({}));
-          // Extract remaining seconds from error message (e.g. "请在 270 秒后重试")
-          const match = (data.detail || "").match(/(\d+)\s*秒/);
+          // Extract remaining seconds from English backend message (e.g. "Try again in 270 seconds")
+          const match = (data.detail || "").match(/(\d+)\s*second/);
           const secs = match ? parseInt(match[1]) : 300;
           startLockCountdown(secs);
         } else {
           const data = await res.json().catch(() => ({}));
-          errorMsg.textContent = data.detail || "密码错误，请重试";
+          errorMsg.textContent = data.detail || "Incorrect password, please try again";
           errorAlert.classList.remove("d-none");
         }
       } catch {
-        errorMsg.textContent = "网络错误，请稍后重试";
+        errorMsg.textContent = "Network error, please try again";
         errorAlert.classList.remove("d-none");
       } finally {
         if (!lockAlert.classList.contains("d-none") === false) {

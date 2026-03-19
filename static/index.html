@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-bs-theme="dark">
+<html lang="en" data-bs-theme="dark">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -21,14 +21,14 @@
       <i class="fas fa-film me-2 text-primary"></i>M3U8 Downloader
     </span>
     <div class="d-flex align-items-center gap-3">
-      <span class="text-muted small">HLS 视频下载工具</span>
+      <span class="text-muted small">HLS Video Downloader</span>
       <button
         class="btn btn-sm btn-outline-secondary d-none"
         id="logoutBtn"
         type="button"
-        title="退出登录"
+        title="Sign out"
       >
-        <i class="fas fa-sign-out-alt me-1"></i>退出
+        <i class="fas fa-sign-out-alt me-1"></i>Sign out
       </button>
     </div>
   </nav>
@@ -61,7 +61,7 @@
                   type="button"
                   role="tab"
                 >
-                  <i class="fas fa-terminal me-1"></i>cURL 命令
+                  <i class="fas fa-terminal me-1"></i>cURL
                 </button>
               </li>
               <li class="nav-item" role="presentation">
@@ -73,7 +73,7 @@
                   type="button"
                   role="tab"
                 >
-                  <i class="fas fa-list me-1"></i>批量下载
+                  <i class="fas fa-list me-1"></i>Batch
                 </button>
               </li>
             </ul>
@@ -92,19 +92,19 @@
                     spellcheck="false"
                   />
                 </div>
-                <label class="form-label text-muted small">自定义 Headers</label>
+                <label class="form-label text-muted small">Custom Headers</label>
                 <div id="headersList"></div>
                 <button
                   class="btn btn-sm btn-outline-secondary mt-2"
                   id="addHeaderBtn"
                   type="button"
                 >
-                  <i class="fas fa-plus me-1"></i>添加 Header
+                  <i class="fas fa-plus me-1"></i>Add Header
                 </button>
               </div>
               <!-- cURL tab -->
               <div class="tab-pane fade" id="curlPane" role="tabpanel">
-                <label class="form-label text-muted small">粘贴浏览器复制的 cURL 命令</label>
+                <label class="form-label text-muted small">Paste cURL command copied from browser DevTools</label>
                 <textarea
                   class="form-control font-mono"
                   id="curlInput"
@@ -116,34 +116,34 @@
               <!-- Batch tab -->
               <div class="tab-pane fade" id="batchPane" role="tabpanel">
                 <label class="form-label text-muted small">
-                  批量下载列表 &mdash; <code>#标题</code> 行设置下一个 URL 的文件名（可选）
+                  Batch URLs — add <code>#name</code> before a URL to set its output filename
                 </label>
                 <textarea
                   class="form-control font-mono"
                   id="batchInput"
                   rows="7"
-                  placeholder="#第一集&#10;https://example.com/ep1/index.m3u8&#10;#第二集&#10;https://example.com/ep2/index.m3u8&#10;https://example.com/ep3/index.m3u8"
+                  placeholder="#Episode 1&#10;https://example.com/ep1/index.m3u8&#10;#Episode 2&#10;https://example.com/ep2/index.m3u8&#10;https://example.com/ep3/index.m3u8"
                   spellcheck="false"
                 ></textarea>
                 <div id="batchHint" class="form-text text-muted mt-1"></div>
                 <div class="row g-2 align-items-end mt-2">
                   <div class="col-sm-5">
-                    <label class="form-label text-muted small">画质</label>
+                    <label class="form-label text-muted small">Quality</label>
                     <select class="form-select form-select-sm bg-dark text-light border-secondary" id="batchQuality">
-                      <option value="best" selected>最高画质</option>
-                      <option value="worst">最低画质</option>
+                      <option value="best" selected>Best quality</option>
+                      <option value="worst">Worst quality</option>
                     </select>
                   </div>
                   <div class="col-sm-7">
                     <label class="form-label text-muted small">
-                      同时下载: <span id="batchConcurrencyVal">3</span> 个任务
+                      Parallel tasks: <span id="batchConcurrencyVal">3</span>
                     </label>
                     <input type="range" class="form-range" id="batchConcurrency" min="1" max="10" value="3" />
                   </div>
                 </div>
                 <div class="mt-3">
                   <button class="btn btn-primary" id="batchStartBtn" type="button">
-                    <i class="fas fa-play me-1"></i>开始批量下载
+                    <i class="fas fa-play me-1"></i>Start batch
                   </button>
                 </div>
               </div>
@@ -154,7 +154,7 @@
             <!-- Output settings (hidden when batch tab is active) -->
             <div class="row g-3 align-items-end" id="outputSettingsRow">
               <div class="col-sm-7">
-                <label class="form-label text-muted small">输出文件名（可选）</label>
+                <label class="form-label text-muted small">Output filename (optional)</label>
                 <div class="input-group">
                   <input
                     type="text"
@@ -167,7 +167,7 @@
               </div>
               <div class="col-sm-5">
                 <label class="form-label text-muted small">
-                  并发数: <span id="concurrencyVal">8</span>
+                  Concurrency: <span id="concurrencyVal">8</span>
                 </label>
                 <input
                   type="range"
@@ -182,14 +182,14 @@
 
             <div class="mt-3 d-flex gap-2" id="parseBtnGroup">
               <button class="btn btn-primary" id="parseBtn" type="button">
-                <i class="fas fa-search me-1"></i>解析流
+                <i class="fas fa-search me-1"></i>Parse stream
               </button>
               <button
                 class="btn btn-outline-secondary d-none"
                 id="clearInfoBtn"
                 type="button"
               >
-                <i class="fas fa-times me-1"></i>清除
+                <i class="fas fa-times me-1"></i>Clear
               </button>
             </div>
           </div>
@@ -200,13 +200,13 @@
       <div class="col-xl-6">
         <div class="card h-100" id="streamInfoCard">
           <div class="card-header d-flex align-items-center justify-content-between">
-            <span><i class="fas fa-info-circle me-2"></i>流信息</span>
+            <span><i class="fas fa-info-circle me-2"></i>Stream info</span>
             <span id="streamTypeBadge"></span>
           </div>
           <div class="card-body" id="streamInfoBody">
             <div class="text-center text-muted py-5" id="streamPlaceholder">
               <i class="fas fa-play-circle fa-3x mb-3 d-block opacity-25"></i>
-              <p class="mb-0">解析 M3U8 后在此显示流信息</p>
+              <p class="mb-0">Stream info will appear here after parsing</p>
             </div>
           </div>
         </div>
@@ -221,7 +221,7 @@
             class="card-header d-flex justify-content-between align-items-center"
           >
             <span>
-              <i class="fas fa-download me-2"></i>下载任务
+              <i class="fas fa-download me-2"></i>Downloads
               <span class="badge bg-secondary ms-1" id="taskCountBadge">0</span>
             </span>
             <button
@@ -229,13 +229,13 @@
               id="clearCompletedBtn"
               type="button"
             >
-              <i class="fas fa-trash me-1"></i>清除已完成
+              <i class="fas fa-trash me-1"></i>Clear completed
             </button>
           </div>
           <div class="card-body p-3" id="downloadsList">
             <div class="text-center text-muted py-4" id="tasksPlaceholder">
               <i class="fas fa-inbox fa-2x mb-2 d-block opacity-25"></i>
-              <p class="mb-0 small">暂无下载任务</p>
+              <p class="mb-0 small">No tasks yet</p>
             </div>
           </div>
         </div>
@@ -249,7 +249,7 @@
       <div class="modal-content">
         <div class="modal-header py-2">
           <h6 class="modal-title mb-0">
-            <i class="fas fa-play-circle me-2 text-primary"></i>视频预览
+            <i class="fas fa-play-circle me-2 text-primary"></i>Preview
           </h6>
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
@@ -257,7 +257,7 @@
           <video id="previewVideo" controls style="width:100%;max-height:72vh;display:block"></video>
         </div>
         <div class="modal-footer py-2">
-          <small class="text-muted">预览当前已下载的片段 · 关闭后自动停止播放</small>
+          <small class="text-muted">Preview downloaded segments · Playback stops when modal closes</small>
         </div>
       </div>
     </div>
