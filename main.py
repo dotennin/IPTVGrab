@@ -26,6 +26,43 @@ sessions: set = set()  # valid session tokens (in-memory)
 
 _STATIC_EXTS = {".js", ".css", ".ico", ".png", ".svg", ".woff", ".woff2", ".ttf", ".map"}
 
+# ── Login rate limiting ───────────────────────────────────────────────────────
+
+_MAX_ATTEMPTS = 5
+_LOCK_SECONDS = 300  # 5 minutes
+
+# { ip: {"count": int, "lock_until": float} }
+_login_failures: dict = {}
+
+
+def _get_client_ip(request: Request) -> str:
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def _check_lock(ip: str) -> tuple[bool, int]:
+    """Return (is_locked, remaining_seconds). Clears expired locks."""
+    entry = _login_failures.get(ip)
+    if not entry or entry["count"] < _MAX_ATTEMPTS:
+        return False, 0
+    remaining = int(entry["lock_until"] - time.time())
+    if remaining <= 0:
+        _login_failures.pop(ip, None)
+        return False, 0
+    return True, remaining
+
+
+def _record_failure(ip: str) -> tuple[bool, int]:
+    """Record a failed attempt. Returns (now_locked, remaining_seconds)."""
+    entry = _login_failures.setdefault(ip, {"count": 0, "lock_until": 0.0})
+    entry["count"] += 1
+    if entry["count"] >= _MAX_ATTEMPTS:
+        entry["lock_until"] = time.time() + _LOCK_SECONDS
+        return True, _LOCK_SECONDS
+    return False, 0
+
 
 class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
@@ -126,16 +163,42 @@ class BatchRequest(BaseModel):
 
 # ── Auth routes ──────────────────────────────────────────────────────────────
 
+@app.get("/login")
+async def login_page():
+    return FileResponse("static/login.html")
+
+
 class LoginRequest(BaseModel):
     password: str
 
 
 @app.post("/api/login")
-async def login(req: LoginRequest, response: Response):
+async def login(req: LoginRequest, request: Request, response: Response):
     if not AUTH_PASSWORD:
         return {"ok": True, "message": "auth disabled"}
+
+    ip = _get_client_ip(request)
+
+    # Check if already locked
+    locked, remaining = _check_lock(ip)
+    if locked:
+        raise HTTPException(
+            429, f"登录尝试次数过多，请在 {remaining} 秒后重试"
+        )
+
     if req.password != AUTH_PASSWORD:
-        raise HTTPException(401, "密码错误")
+        now_locked, lock_remaining = _record_failure(ip)
+        entry = _login_failures.get(ip, {})
+        if now_locked:
+            raise HTTPException(
+                429,
+                f"密码连续错误 {_MAX_ATTEMPTS} 次，该 IP 已被锁定 {_LOCK_SECONDS // 60} 分钟"
+            )
+        left = _MAX_ATTEMPTS - entry.get("count", 0)
+        raise HTTPException(401, f"密码错误，还有 {left} 次机会")
+
+    # Success — clear failure record and issue session
+    _login_failures.pop(ip, None)
     token = secrets.token_hex(32)
     sessions.add(token)
     response.set_cookie("session", token, httponly=True, samesite="strict")

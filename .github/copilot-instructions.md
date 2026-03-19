@@ -25,6 +25,7 @@ main.py          FastAPI app — API routes + background task runner
 downloader.py    M3U8Downloader class + parse_curl_command()
 static/
   index.html     Bootstrap 5 dark theme shell
+  login.html     Login page (served by GET /login route)
   app.js         All frontend logic (no framework, no build)
   styles.css     Custom dark theme styles
 downloads/       Output MP4 files (served via /downloads/<filename>)
@@ -41,6 +42,21 @@ downloads/       Output MP4 files (served via /downloads/<filename>)
 `queued` → `downloading` (VOD) or `recording` (live) → `merging` → `completed` / `failed` / `cancelled`
 
 ## Key conventions
+
+### Authentication
+Controlled by the `AUTH_PASSWORD` environment variable. If unset, auth is fully disabled (all requests pass through).
+
+- `GET /login` → serves `static/login.html` (explicit route; StaticFiles does not auto-map `/login` → `login.html`)
+- `POST /api/login` → validates password, issues `session` cookie (HMAC token stored in `sessions: set`)
+- `POST /api/logout` → removes token from `sessions`, deletes cookie
+- `AuthMiddleware` runs before routes; always allows `/login`, `/api/login`, `/api/logout`, and static asset extensions (`.js`, `.css`, etc.)
+
+**IP-based brute-force protection** (`_login_failures` dict):
+- 5 consecutive wrong passwords → IP locked for 300 seconds (5 minutes)
+- `_check_lock(ip)` returns `(is_locked, remaining_seconds)` and auto-clears expired locks
+- `_record_failure(ip)` increments count and sets `lock_until` timestamp on the 5th failure
+- Successful login clears `_login_failures[ip]`
+- On 429 response, `login.html` shows a live countdown and disables the form until the lock expires
 
 ### Static files mount must be last
 In `main.py`, `app.mount("/", StaticFiles(...))` **must remain the last statement**. If placed before any `@app.` route, the API routes become unreachable (FastAPI matches the mount first).

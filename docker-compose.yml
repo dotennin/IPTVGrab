@@ -10,4 +10,5 @@ services:
     environment:
       - DOWNLOADS_DIR=/downloads
       - PORT=8765
+      - AUTH_PASSWORD=
     restart: unless-stopped

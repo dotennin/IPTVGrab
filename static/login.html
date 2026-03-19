@@ -48,6 +48,10 @@
       <i class="fas fa-exclamation-circle me-1"></i>
       <span id="errorMsg">密码错误，请重试</span>
     </div>
+    <div id="lockAlert" class="alert alert-warning py-2 small d-none" role="alert">
+      <i class="fas fa-lock me-1"></i>
+      该 IP 已被锁定，请 <strong id="lockCountdown">--</strong> 秒后重试
+    </div>
 
     <form id="loginForm" autocomplete="off">
       <div class="mb-3">
@@ -77,6 +81,32 @@
     const btnSpinner = document.getElementById("loginBtnSpinner");
     const errorAlert = document.getElementById("errorAlert");
     const errorMsg = document.getElementById("errorMsg");
+    const lockAlert = document.getElementById("lockAlert");
+    const lockCountdown = document.getElementById("lockCountdown");
+    let countdownTimer = null;
+
+    function startLockCountdown(seconds) {
+      lockAlert.classList.remove("d-none");
+      errorAlert.classList.add("d-none");
+      form.querySelector("input").disabled = true;
+      btn.disabled = true;
+
+      let remaining = seconds;
+      lockCountdown.textContent = remaining;
+
+      clearInterval(countdownTimer);
+      countdownTimer = setInterval(() => {
+        remaining -= 1;
+        lockCountdown.textContent = remaining;
+        if (remaining <= 0) {
+          clearInterval(countdownTimer);
+          lockAlert.classList.add("d-none");
+          form.querySelector("input").disabled = false;
+          btn.disabled = false;
+          form.querySelector("input").focus();
+        }
+      }, 1000);
+    }
 
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -95,6 +125,12 @@
         });
         if (res.ok) {
           window.location.replace("/");
+        } else if (res.status === 429) {
+          const data = await res.json().catch(() => ({}));
+          // Extract remaining seconds from error message (e.g. "请在 270 秒后重试")
+          const match = (data.detail || "").match(/(\d+)\s*秒/);
+          const secs = match ? parseInt(match[1]) : 300;
+          startLockCountdown(secs);
         } else {
           const data = await res.json().catch(() => ({}));
           errorMsg.textContent = data.detail || "密码错误，请重试";
@@ -104,7 +140,9 @@
         errorMsg.textContent = "网络错误，请稍后重试";
         errorAlert.classList.remove("d-none");
       } finally {
-        btn.disabled = false;
+        if (!lockAlert.classList.contains("d-none") === false) {
+          btn.disabled = false;
+        }
         btnText.classList.remove("d-none");
         btnSpinner.classList.add("d-none");
       }
