@@ -6,7 +6,7 @@ services:
       - "8765:8765"
     volumes:
       # Downloaded MP4 files are written here on the host
-      - ./downloads:/downloads
+      - /Volumes/100GB/Downloads:/downloads
     environment:
       - DOWNLOADS_DIR=/downloads
       - PORT=8765
