@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import re
+import secrets
 import shutil
 import time
 import uuid
@@ -10,13 +11,48 @@ from typing import Optional
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from starlette.middleware.base import BaseHTTPMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from downloader import M3U8Downloader, parse_curl_command
 
 app = FastAPI(title="M3U8 Downloader")
+
+# ── Auth ─────────────────────────────────────────────────────────────────────
+
+AUTH_PASSWORD = os.environ.get("AUTH_PASSWORD", "")
+sessions: set = set()  # valid session tokens (in-memory)
+
+_STATIC_EXTS = {".js", ".css", ".ico", ".png", ".svg", ".woff", ".woff2", ".ttf", ".map"}
+
+
+class AuthMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        if not AUTH_PASSWORD:
+            return await call_next(request)
+
+        path = request.url.path
+
+        # Always allow login page and login/logout API
+        if path in ("/login", "/api/login", "/api/logout"):
+            return await call_next(request)
+
+        # Always allow static assets (needed by login page)
+        if Path(path).suffix.lower() in _STATIC_EXTS:
+            return await call_next(request)
+
+        token = request.cookies.get("session")
+        if token and token in sessions:
+            return await call_next(request)
+
+        if path.startswith("/api/"):
+            return JSONResponse({"detail": "未授权，请先登录"}, status_code=401)
+
+        return RedirectResponse("/login")
+
+# AuthMiddleware must be added before NoCacheStaticMiddleware
+app.add_middleware(AuthMiddleware)
 
 # Prevent browsers from caching JS/CSS so UI updates are always visible
 class NoCacheStaticMiddleware(BaseHTTPMiddleware):
@@ -86,6 +122,38 @@ class BatchRequest(BaseModel):
     quality: str = "best"
     task_parallelism: int = 3   # how many tasks download simultaneously
     concurrency: int = 4        # per-task segment concurrency
+
+
+# ── Auth routes ──────────────────────────────────────────────────────────────
+
+class LoginRequest(BaseModel):
+    password: str
+
+
+@app.post("/api/login")
+async def login(req: LoginRequest, response: Response):
+    if not AUTH_PASSWORD:
+        return {"ok": True, "message": "auth disabled"}
+    if req.password != AUTH_PASSWORD:
+        raise HTTPException(401, "密码错误")
+    token = secrets.token_hex(32)
+    sessions.add(token)
+    response.set_cookie("session", token, httponly=True, samesite="strict")
+    return {"ok": True}
+
+
+@app.post("/api/logout")
+async def logout(request: Request, response: Response):
+    token = request.cookies.get("session")
+    if token:
+        sessions.discard(token)
+    response.delete_cookie("session")
+    return {"ok": True}
+
+
+@app.get("/api/auth/status")
+async def auth_status():
+    return {"auth_required": bool(AUTH_PASSWORD)}
 
 
 # ── API routes ───────────────────────────────────────────────────────────────

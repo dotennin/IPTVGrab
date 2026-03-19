@@ -6,6 +6,38 @@ let currentRequest = { url: "", headers: {} };
 let currentStreamInfo = null;
 const pollingTimers = {};
 
+// ── Auth helpers ─────────────────────────────────────────────────────────────
+async function apiFetch(url, options = {}) {
+  const res = await fetch(url, options);
+  if (res.status === 401) {
+    window.location.replace("/login");
+    // Return a never-resolving promise to stop further execution
+    return new Promise(() => {});
+  }
+  return res;
+}
+
+async function initAuth() {
+  try {
+    const res = await fetch("/api/auth/status");
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.auth_required) {
+      const btn = document.getElementById("logoutBtn");
+      if (btn) btn.classList.remove("d-none");
+    }
+  } catch {
+    // ignore
+  }
+}
+
+document.getElementById("logoutBtn")?.addEventListener("click", async () => {
+  await fetch("/api/logout", { method: "POST" }).catch(() => {});
+  window.location.replace("/login");
+});
+
+initAuth();
+
 // ── Utilities ────────────────────────────────────────────────────────────────
 function esc(str) {
   return String(str)
@@ -123,7 +155,7 @@ document.getElementById("batchStartBtn").addEventListener("click", async () => {
     const quality = document.getElementById("batchQuality").value;
     const concurrency = parseInt(document.getElementById("batchConcurrency").value, 10);
 
-    const res = await fetch("/api/batch", {
+    const res = await apiFetch("/api/batch", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ batch_text: text, headers: {}, quality, task_parallelism: concurrency }),
@@ -134,7 +166,7 @@ document.getElementById("batchStartBtn").addEventListener("click", async () => {
     submitted = data.count;
     // Add a card for each new task
     for (const taskId of data.task_ids) {
-      const taskRes = await fetch(`/api/tasks/${taskId}`);
+      const taskRes = await apiFetch(`/api/tasks/${taskId}`);
       if (!taskRes.ok) continue;
       const task = await taskRes.json();
       addTaskCard(task.id, task.url || "");
@@ -213,7 +245,7 @@ document.getElementById("parseBtn").addEventListener("click", async () => {
   btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>解析中...';
 
   try {
-    const res = await fetch("/api/parse", {
+    const res = await apiFetch("/api/parse", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ url, headers, curl_command: curlCommand }),
@@ -358,7 +390,7 @@ async function startDownload() {
   btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>提交中...';
 
   try {
-    const res = await fetch("/api/download", {
+    const res = await apiFetch("/api/download", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -588,7 +620,7 @@ function updateTaskCard(taskId, task) {
       btn.disabled = false;
       btn.replaceWith(btn.cloneNode(true));
       card.querySelector(".task-action").addEventListener("click", async () => {
-        await fetch(`/api/tasks/${taskId}`, { method: "DELETE" }).catch(() => {});
+        await apiFetch(`/api/tasks/${taskId}`, { method: "DELETE" }).catch(() => {});
         card.remove();
         updateTaskCount();
       });
@@ -600,7 +632,7 @@ function updateTaskCard(taskId, task) {
 function startPolling(taskId) {
   pollingTimers[taskId] = setInterval(async () => {
     try {
-      const res = await fetch(`/api/tasks/${taskId}`);
+      const res = await apiFetch(`/api/tasks/${taskId}`);
       if (!res.ok) { stopPolling(taskId); return; }
       const task = await res.json();
       updateTaskCard(taskId, task);
@@ -623,7 +655,7 @@ function stopPolling(taskId) {
 async function cancelTask(taskId) {
   let data = {};
   try {
-    const res = await fetch(`/api/tasks/${taskId}`, { method: "DELETE" });
+    const res = await apiFetch(`/api/tasks/${taskId}`, { method: "DELETE" });
     data = await res.json();
   } catch (_) {}
 
@@ -651,7 +683,7 @@ async function cancelTask(taskId) {
     btn.dataset.mode = "trash";
     btn.replaceWith(btn.cloneNode(true));
     card.querySelector(".task-action").addEventListener("click", async () => {
-      await fetch(`/api/tasks/${taskId}`, { method: "DELETE" }).catch(() => {});
+      await apiFetch(`/api/tasks/${taskId}`, { method: "DELETE" }).catch(() => {});
       card.remove();
       updateTaskCount();
     });
@@ -667,7 +699,7 @@ document.getElementById("clearCompletedBtn").addEventListener("click", async () 
   });
   for (const card of toRemove) {
     const taskId = card.id.replace("task-", "");
-    await fetch(`/api/tasks/${taskId}`, { method: "DELETE" }).catch(() => {});
+    await apiFetch(`/api/tasks/${taskId}`, { method: "DELETE" }).catch(() => {});
     card.remove();
   }
   updateTaskCount();
@@ -676,7 +708,7 @@ document.getElementById("clearCompletedBtn").addEventListener("click", async () 
 // ── Resume task ────────────────────────────────────────────────────────────────
 async function resumeTask(taskId) {
   try {
-    const res = await fetch(`/api/tasks/${taskId}/resume`, { method: "POST" });
+    const res = await apiFetch(`/api/tasks/${taskId}/resume`, { method: "POST" });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || "断点续传失败");
     // Reset card to queued state
@@ -703,7 +735,7 @@ async function resumeTask(taskId) {
 // ── Restart task (re-download from scratch) ────────────────────────────────────
 async function restartTask(taskId) {
   try {
-    const res = await fetch(`/api/tasks/${taskId}/restart`, { method: "POST" });
+    const res = await apiFetch(`/api/tasks/${taskId}/restart`, { method: "POST" });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || "重新下载失败");
     const card = document.getElementById(`task-${taskId}`);
@@ -773,7 +805,7 @@ document.getElementById("previewModal").addEventListener("hidden.bs.modal", () =
 // ── Load existing tasks on page load ─────────────────────────────────────────
 (async () => {
   try {
-    const res = await fetch("/api/tasks");
+    const res = await apiFetch("/api/tasks");
     if (!res.ok) return;
     const taskList = await res.json();
     taskList.forEach((task) => {
