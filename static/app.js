@@ -446,6 +446,7 @@ function addTaskCard(taskId, url) {
         <button class="btn btn-sm btn-outline-info task-preview d-none" title="Preview downloaded segments">
           <i class="fas fa-play-circle me-1"></i>Preview
         </button>
+        <div class="d-flex gap-1 task-recording-extras d-none"></div>
         <button class="btn btn-sm btn-outline-danger task-action" data-id="${taskId}">
           <i class="fas fa-times"></i> Cancel
         </button>
@@ -476,6 +477,15 @@ function updateTaskCard(taskId, task) {
   const { text, cls } = STATUS_MAP[task.status] || { text: task.status, cls: "bg-secondary" };
   card.querySelector(".task-status").className = `badge ${cls} flex-shrink-0 task-status`;
   card.querySelector(".task-status").textContent = text;
+
+  // Hide recording-only extra buttons when not recording
+  if (task.status !== "recording") {
+    const extras = card.querySelector(".task-recording-extras");
+    if (extras) {
+      extras.classList.add("d-none");
+      extras.removeAttribute("data-populated");
+    }
+  }
 
   // ── Filename label (show expected name during download, actual name when done) ──
   const filenameEl = card.querySelector(".task-filename");
@@ -600,9 +610,25 @@ function updateTaskCard(taskId, task) {
   if (task.status === "recording") {
     const btn = card.querySelector(".task-action");
     if (btn && btn.dataset.mode !== "stop") {
-      btn.innerHTML = '<i class="fas fa-stop me-1"></i>Stop recording';
+      btn.innerHTML = '<i class="fas fa-stop me-1"></i>Stop';
       btn.className = "btn btn-sm btn-danger task-action";
       btn.dataset.mode = "stop";
+    }
+    const extras = card.querySelector(".task-recording-extras");
+    if (extras && !extras.dataset.populated) {
+      extras.classList.remove("d-none");
+      extras.innerHTML = `
+        <button class="btn btn-sm btn-outline-warning"
+                title="Delete all recorded segments and start fresh"
+                onclick="restartRecording('${taskId}')">
+          <i class="fas fa-redo me-1"></i>Restart
+        </button>
+        <button class="btn btn-sm btn-outline-info"
+                title="Keep &amp; merge current segments, then start a new recording"
+                onclick="forkRecording('${taskId}')">
+          <i class="fas fa-code-branch me-1"></i>Stop &amp; New
+        </button>`;
+      extras.dataset.populated = "1";
     }
   } else if (task.status === "stopping") {
     const btn = card.querySelector(".task-action");
@@ -755,6 +781,55 @@ async function restartTask(taskId) {
     }
     startPolling(taskId);
     toast("Download restarted", "info");
+  } catch (e) {
+    toast(e.message, "danger");
+  }
+}
+
+// ── Restart live recording (discard segments, start fresh) ────────────────────
+let _restartRecordingTaskId = null;
+let _restartRecordingModal = null;
+
+function restartRecording(taskId) {
+  _restartRecordingTaskId = taskId;
+  if (!_restartRecordingModal) {
+    _restartRecordingModal = new bootstrap.Modal(
+      document.getElementById("confirmRestartRecordingModal")
+    );
+  }
+  _restartRecordingModal.show();
+}
+
+document.getElementById("confirmRestartRecordingBtn").addEventListener("click", async () => {
+  _restartRecordingModal.hide();
+  const taskId = _restartRecordingTaskId;
+  if (!taskId) return;
+  try {
+    const res = await apiFetch(`/api/tasks/${taskId}/recording-restart`, { method: "POST" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Restart failed");
+    stopPolling(taskId);
+    const oldCard = document.getElementById(`task-${taskId}`);
+    if (oldCard) oldCard.remove();
+    updateTaskCount();
+    addTaskCard(data.new_task_id, data.url);
+    startPolling(data.new_task_id);
+    toast("Recording restarted", "info");
+  } catch (e) {
+    toast(e.message, "danger");
+  }
+});
+
+// ── Fork live recording (merge current, start new in parallel) ────────────────
+async function forkRecording(taskId) {
+  try {
+    const res = await apiFetch(`/api/tasks/${taskId}/fork`, { method: "POST" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Fork failed");
+    // Old card stays — polling will pick up the stopping → merging → completed transition
+    addTaskCard(data.new_task_id, data.url);
+    startPolling(data.new_task_id);
+    toast("New recording started", "info");
   } catch (e) {
     toast(e.message, "danger");
   }

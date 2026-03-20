@@ -245,26 +245,7 @@ async def parse_stream(req: ParseRequest):
 @app.post("/api/download")
 async def start_download(req: DownloadRequest, bg: BackgroundTasks):
     task_id = str(uuid.uuid4())
-    tasks[task_id] = {
-        "id": task_id,
-        "url": req.url,
-        "status": "queued",
-        "progress": 0,
-        "total": 0,
-        "downloaded": 0,
-        "failed": 0,
-        "speed_mbps": 0.0,
-        "bytes_downloaded": 0,
-        "output": None,
-        "size": 0,
-        "error": None,
-        "created_at": time.time(),
-        # Stored for resume capability
-        "req_headers": req.headers,
-        "output_name": req.output_name,
-        "quality": req.quality,
-        "concurrency": req.concurrency,
-    }
+    tasks[task_id] = _make_task_dict(task_id, req)
     save_tasks()
     bg.add_task(_run_download, task_id, req)
     return {"task_id": task_id}
@@ -322,25 +303,9 @@ async def batch_download(req: BatchRequest):
             quality=req.quality,
             concurrency=req.concurrency,
         )
-        tasks[task_id] = {
-            "id": task_id,
-            "url": url,
-            "status": "queued",
-            "progress": 0,
-            "total": 0,
-            "downloaded": 0,
-            "failed": 0,
-            "speed_mbps": 0.0,
-            "bytes_downloaded": 0,
-            "output": None,
-            "size": 0,
-            "error": None,
-            "created_at": now + idx * 0.001,
-            "req_headers": req.headers,
-            "output_name": title or None,
-            "quality": req.quality,
-            "concurrency": req.concurrency,
-        }
+        task_dict = _make_task_dict(task_id, dl_req)
+        task_dict["created_at"] = now + idx * 0.001
+        tasks[task_id] = task_dict
         task_ids.append((task_id, dl_req))
 
     save_tasks()
@@ -420,6 +385,87 @@ async def resume_task(task_id: str, bg: BackgroundTasks):
     save_tasks()
     bg.add_task(_run_download, task_id, req)
     return {"task_id": task_id, "status": "queued"}
+
+
+def _make_task_dict(task_id: str, req: DownloadRequest) -> dict:
+    return {
+        "id": task_id,
+        "url": req.url,
+        "status": "queued",
+        "progress": 0,
+        "total": 0,
+        "downloaded": 0,
+        "failed": 0,
+        "speed_mbps": 0.0,
+        "bytes_downloaded": 0,
+        "output": None,
+        "size": 0,
+        "error": None,
+        "created_at": time.time(),
+        "req_headers": req.headers,
+        "output_name": req.output_name,
+        "quality": req.quality,
+        "concurrency": req.concurrency,
+    }
+
+
+@app.post("/api/tasks/{task_id}/recording-restart")
+async def recording_restart(task_id: str, bg: BackgroundTasks):
+    """Cancel a live recording (discard segments) and immediately start a fresh one."""
+    if task_id not in tasks:
+        raise HTTPException(404, "Task not found")
+    task = tasks[task_id]
+    if task.get("status") != "recording":
+        raise HTTPException(400, "Task is not currently recording")
+
+    dl = downloaders.get(task_id)
+    if dl:
+        dl.cancel()
+    _cleanup_tmpdir(task_id)
+    tasks[task_id]["status"] = "cancelled"
+    save_tasks()
+
+    req = DownloadRequest(
+        url=task["url"],
+        headers=task.get("req_headers") or {},
+        output_name=task.get("output_name"),
+        quality=task.get("quality", "best"),
+        concurrency=task.get("concurrency", 8),
+    )
+    new_task_id = str(uuid.uuid4())
+    tasks[new_task_id] = _make_task_dict(new_task_id, req)
+    save_tasks()
+    bg.add_task(_run_download, new_task_id, req)
+    return {"new_task_id": new_task_id, "url": req.url}
+
+
+@app.post("/api/tasks/{task_id}/fork")
+async def fork_recording(task_id: str, bg: BackgroundTasks):
+    """Stop a live recording (keep & merge segments) and start a fresh recording."""
+    if task_id not in tasks:
+        raise HTTPException(404, "Task not found")
+    task = tasks[task_id]
+    if task.get("status") != "recording":
+        raise HTTPException(400, "Task is not currently recording")
+
+    dl = downloaders.get(task_id)
+    if dl:
+        dl.stop_recording()
+    tasks[task_id]["status"] = "stopping"
+    save_tasks()
+
+    req = DownloadRequest(
+        url=task["url"],
+        headers=task.get("req_headers") or {},
+        output_name=task.get("output_name"),
+        quality=task.get("quality", "best"),
+        concurrency=task.get("concurrency", 8),
+    )
+    new_task_id = str(uuid.uuid4())
+    tasks[new_task_id] = _make_task_dict(new_task_id, req)
+    save_tasks()
+    bg.add_task(_run_download, new_task_id, req)
+    return {"new_task_id": new_task_id, "url": req.url}
 
 
 @app.post("/api/tasks/{task_id}/restart")
