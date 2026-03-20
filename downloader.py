@@ -376,7 +376,17 @@ class M3U8Downloader:
                         if current_pl.is_endlist:
                             break
 
-                        await asyncio.sleep(poll_interval)
+                        # Interruptible sleep: check _cancel every 0.3 s so
+                        # stop_recording() takes effect almost immediately.
+                        deadline = asyncio.get_event_loop().time() + poll_interval
+                        while not self._cancel:
+                            remaining = deadline - asyncio.get_event_loop().time()
+                            if remaining <= 0:
+                                break
+                            await asyncio.sleep(min(0.3, remaining))
+
+                        if self._cancel:
+                            break
 
                         # Re-fetch video playlist
                         try:
@@ -544,7 +554,7 @@ class M3U8Downloader:
                     total_audio = audio_vod_total
 
                 # ── Merge (shared by live and VOD) ────────────────────────────
-                yield {"status": "merging", "progress": 99}
+                yield {"status": "merging", "progress": 0}
 
                 output_name = self.output_name or f"video_{int(time.time())}"
                 if not output_name.endswith(".mp4"):
@@ -552,15 +562,19 @@ class M3U8Downloader:
                 self.output_dir.mkdir(parents=True, exist_ok=True)
                 output_path = self.output_dir / output_name
 
+                total_secs = total * (pl.target_duration or 6)
                 if is_cmaf:
                     init_data = next(iter(init_data_map.values()), b"")
-                    await self._merge_cmaf(
+                    async for pct in self._merge_cmaf(
                         tmpdir_path, total, init_data, seg_ext, output_path,
                         audio_tmpdir=audio_tmpdir,
                         audio_total=total_audio,
-                    )
+                        total_secs=total_secs,
+                    ):
+                        yield {"status": "merging", "progress": pct}
                 else:
-                    await self._merge(tmpdir_path, total, output_path)
+                    async for pct in self._merge(tmpdir_path, total, output_path, total_secs=total_secs):
+                        yield {"status": "merging", "progress": pct}
 
                 size = output_path.stat().st_size if output_path.exists() else 0
                 yield {
@@ -652,13 +666,19 @@ class M3U8Downloader:
         cipher = AES.new(key[:16], AES.MODE_CBC, iv)
         return cipher.decrypt(data)
 
-    async def _merge(self, tmpdir: Path, total: int, output_path: Path):
+    async def _merge(self, tmpdir: Path, total: int, output_path: Path, total_secs: float = 0):
+        """Async generator: merge MPEG-TS segments via ffmpeg, yielding progress (0–98)."""
+        loop = asyncio.get_event_loop()
         list_file = tmpdir / "concat.txt"
-        with open(list_file, "w") as f:
-            for i in range(total):
-                seg = tmpdir / f"seg_{i:06d}.ts"
-                if seg.exists():
-                    f.write(f"file '{seg.absolute()}'\n")
+
+        def _write_concat():
+            with open(list_file, "w") as f:
+                for i in range(total):
+                    seg = tmpdir / f"seg_{i:06d}.ts"
+                    if seg.exists():
+                        f.write(f"file '{seg.absolute()}'\n")
+
+        await loop.run_in_executor(None, _write_concat)
 
         cmd = [
             "ffmpeg", "-y",
@@ -673,9 +693,18 @@ class M3U8Downloader:
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
         )
-        _, stderr = await proc.communicate()
+        stderr_lines = []
+        async for raw_line in proc.stderr:
+            line = raw_line.decode(errors="replace")
+            stderr_lines.append(line)
+            if total_secs > 0:
+                m = re.search(r"time=(\d+):(\d+):([\d.]+)", line)
+                if m:
+                    done = int(m[1]) * 3600 + int(m[2]) * 60 + float(m[3])
+                    yield min(98, int(done / total_secs * 100))
+        await proc.wait()
         if proc.returncode != 0:
-            raise RuntimeError(f"ffmpeg failed: {stderr.decode()[-500:]}")
+            raise RuntimeError(f"ffmpeg failed: {''.join(stderr_lines)[-500:]}")
 
     async def _merge_cmaf(
         self,
@@ -686,34 +715,44 @@ class M3U8Downloader:
         output_path: Path,
         audio_tmpdir: Optional[Path] = None,
         audio_total: int = 0,
+        total_secs: float = 0,
     ):
         """
-        CMAF/fMP4 merge strategy:
-          1. Binary-concatenate init + fragments for video (and audio if separate).
-          2. Re-mux with ffmpeg:
-             - Single stream: -i raw_video -c copy
-             - Demuxed audio: -i raw_video -i raw_audio -map 0:v -map 1:a -c copy
+        Async generator: CMAF/fMP4 merge strategy, yielding progress (0–98).
+
+          1. Binary-concatenate init + fragments in a thread pool so the event
+             loop stays responsive for other API requests.
+          2. Re-mux with ffmpeg; parse stderr for real-time progress updates.
         """
+        loop = asyncio.get_event_loop()
         raw_path = tmpdir / "merged_raw.mp4"
-        with open(raw_path, "wb") as f:
-            if init_data:
-                f.write(init_data)
-            for i in range(total):
-                seg = tmpdir / f"seg_{i:06d}{seg_ext}"
-                if seg.exists():
-                    f.write(seg.read_bytes())
+
+        def _concat_video():
+            with open(raw_path, "wb") as f:
+                if init_data:
+                    f.write(init_data)
+                for i in range(total):
+                    seg = tmpdir / f"seg_{i:06d}{seg_ext}"
+                    if seg.exists():
+                        f.write(seg.read_bytes())
+
+        await loop.run_in_executor(None, _concat_video)
 
         has_audio = audio_tmpdir is not None and audio_total > 0
         if has_audio:
             audio_init_disk = audio_tmpdir / "init.mp4"
             raw_audio_path = audio_tmpdir / "merged_audio.mp4"
-            with open(raw_audio_path, "wb") as f:
-                if audio_init_disk.exists():
-                    f.write(audio_init_disk.read_bytes())
-                for i in range(audio_total):
-                    seg = audio_tmpdir / f"seg_{i:06d}{seg_ext}"
-                    if seg.exists():
-                        f.write(seg.read_bytes())
+
+            def _concat_audio():
+                with open(raw_audio_path, "wb") as f:
+                    if audio_init_disk.exists():
+                        f.write(audio_init_disk.read_bytes())
+                    for i in range(audio_total):
+                        seg = audio_tmpdir / f"seg_{i:06d}{seg_ext}"
+                        if seg.exists():
+                            f.write(seg.read_bytes())
+
+            await loop.run_in_executor(None, _concat_audio)
             cmd = [
                 "ffmpeg", "-y",
                 "-i", str(raw_path),
@@ -738,6 +777,15 @@ class M3U8Downloader:
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
         )
-        _, stderr = await proc.communicate()
+        stderr_lines = []
+        async for raw_line in proc.stderr:
+            line = raw_line.decode(errors="replace")
+            stderr_lines.append(line)
+            if total_secs > 0:
+                m = re.search(r"time=(\d+):(\d+):([\d.]+)", line)
+                if m:
+                    done = int(m[1]) * 3600 + int(m[2]) * 60 + float(m[3])
+                    yield min(98, int(done / total_secs * 100))
+        await proc.wait()
         if proc.returncode != 0:
-            raise RuntimeError(f"ffmpeg re-mux failed: {stderr.decode()[-500:]}")
+            raise RuntimeError(f"ffmpeg re-mux failed: {''.join(stderr_lines)[-500:]}")
