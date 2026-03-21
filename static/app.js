@@ -1182,6 +1182,13 @@ async function loadPlaylists({ autoSelect = false } = {}) {
     const sel = document.getElementById("playlistSelect");
     const prev = sel.value;
     sel.innerHTML = '<option value="">＋ Add playlist…</option>';
+    if (list.length > 0) {
+      const totalChannels = list.reduce((sum, pl) => sum + (pl.channel_count || 0), 0);
+      const allOpt = document.createElement("option");
+      allOpt.value = "__all__";
+      allOpt.textContent = `All Playlists (${totalChannels})`;
+      sel.appendChild(allOpt);
+    }
     for (const pl of list) {
       const opt = document.createElement("option");
       opt.value = pl.id;
@@ -1191,11 +1198,26 @@ async function loadPlaylists({ autoSelect = false } = {}) {
     if (prev && [...sel.options].some((o) => o.value === prev)) {
       sel.value = prev;
     } else if (autoSelect && list.length > 0 && !currentPlaylist) {
-      // Auto-select the first playlist on initial page load
-      sel.value = list[0].id;
-      await selectPlaylist(list[0].id);
+      sel.value = "__all__";
+      await selectPlaylist("__all__");
     }
   } catch (_) {}
+}
+
+function _populateGroupFilter(channels) {
+  const gSel = document.getElementById("groupFilter");
+  gSel.innerHTML = "";
+  const allOpt = document.createElement("option");
+  allOpt.value = "";
+  allOpt.textContent = "All groups";
+  gSel.appendChild(allOpt);
+  const groups = [...new Set(channels.map((c) => c.group).filter(Boolean))].sort();
+  for (const g of groups) {
+    const opt = document.createElement("option");
+    opt.value = g;
+    opt.textContent = g;
+    gSel.appendChild(opt);
+  }
 }
 
 async function selectPlaylist(id) {
@@ -1215,27 +1237,34 @@ async function selectPlaylist(id) {
     deleteBtn.disabled = true;
     return;
   }
+
+  // "All Playlists" mode: aggregate channels across every saved playlist
+  if (id === "__all__") {
+    try {
+      const res = await apiFetch("/api/channels");
+      if (!res.ok) throw new Error("Failed to load channels");
+      currentPlaylist = null;
+      allChannels = await res.json();
+      _populateGroupFilter(allChannels);
+      document.getElementById("channelSearch").value = "";
+      filterBar.classList.remove("d-none");
+      countBadge.textContent = allChannels.length;
+      refreshBtn.disabled = true;
+      document.getElementById("editPlaylistBtn").disabled = true;
+      deleteBtn.disabled = true;
+      renderChannels(allChannels);
+    } catch (e) {
+      toast(e.message, "danger");
+    }
+    return;
+  }
+
   try {
     const res = await apiFetch(`/api/playlists/${id}`);
     if (!res.ok) throw new Error("Failed to load playlist");
     currentPlaylist = await res.json();
     allChannels = currentPlaylist.channels || [];
-
-    // Rebuild group filter using createElement (no innerHTML re-parsing issues)
-    const gSel = document.getElementById("groupFilter");
-    gSel.innerHTML = "";
-    const allOpt = document.createElement("option");
-    allOpt.value = "";
-    allOpt.textContent = "All groups";
-    gSel.appendChild(allOpt);
-    const groups = [...new Set(allChannels.map((c) => c.group).filter(Boolean))].sort();
-    for (const g of groups) {
-      const opt = document.createElement("option");
-      opt.value = g;
-      opt.textContent = g;
-      gSel.appendChild(opt);
-    }
-
+    _populateGroupFilter(allChannels);
     document.getElementById("channelSearch").value = "";
     filterBar.classList.remove("d-none");
     countBadge.textContent = allChannels.length;
@@ -1255,7 +1284,8 @@ function getFilteredChannels() {
     const matchSearch =
       !search ||
       (ch.name || "").toLowerCase().includes(search) ||
-      (ch.group || "").toLowerCase().includes(search);
+      (ch.group || "").toLowerCase().includes(search) ||
+      (ch.playlist_name || "").toLowerCase().includes(search);
     const matchGroup = !group || ch.group === group;
     return matchSearch && matchGroup;
   });
@@ -1299,6 +1329,7 @@ function renderChannels(channels) {
       </div>
       <div class="channel-name" title="${esc(ch.name)}">${esc(ch.name || ch.url)}</div>
       ${ch.group ? `<div class="channel-group">${esc(ch.group)}</div>` : ""}
+      ${ch.playlist_name ? `<div class="channel-playlist-tag" title="${esc(ch.playlist_name)}">${esc(ch.playlist_name)}</div>` : ""}
       <div class="channel-actions">
         <button class="btn btn-sm btn-primary channel-dl-btn" data-ch-idx="${i}" title="Download">
           <i class="fas fa-download"></i>
@@ -1368,7 +1399,9 @@ document.getElementById("playlistSelect").addEventListener("mousedown", (e) => {
 
 document.getElementById("playlistSelect").addEventListener("change", (e) => {
   if (e.target.value === "") {
-    e.target.value = currentPlaylist?.id || ""; // restore previous selection
+    // Restore previous selection (specific playlist or "__all__"), then open add modal
+    const sel = document.getElementById("playlistSelect");
+    sel.value = currentPlaylist?.id || (allChannels.length ? "__all__" : "");
     new bootstrap.Modal(document.getElementById("addPlaylistModal")).show();
     return;
   }

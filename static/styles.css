@@ -304,6 +304,18 @@ textarea.form-control {
   max-width: 100%;
 }
 
+.channel-playlist-tag {
+  font-size: 0.64rem;
+  color: #58a6ff;
+  background-color: rgba(88, 166, 255, 0.1);
+  padding: 1px 6px;
+  border-radius: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
 .channel-dl-btn {
   font-size: 0.7rem;
   padding: 3px 8px;

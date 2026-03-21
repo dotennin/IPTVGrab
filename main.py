@@ -728,6 +728,15 @@ async def refresh_playlist(pl_id: str):
     return {"channel_count": len(channels)}
 
 
+@app.get("/api/channels")
+async def list_all_channels():
+    result = []
+    for pl in playlists.values():
+        for ch in pl.get("channels", []):
+            result.append({**ch, "playlist_id": pl["id"], "playlist_name": pl["name"]})
+    return result
+
+
 # ── Static files (must be last) ───────────────────────────────────────────────
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
