@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import os
 import re
@@ -107,6 +108,7 @@ DOWNLOADS_DIR = Path(os.environ.get("DOWNLOADS_DIR", "downloads"))
 DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
 TASKS_FILE = DOWNLOADS_DIR / "tasks.json"
 PLAYLISTS_FILE = DOWNLOADS_DIR / "playlists.json"
+MERGED_FILE = DOWNLOADS_DIR / "merged_config.json"
 
 # ── Task persistence ─────────────────────────────────────────────────────────
 
@@ -158,6 +160,125 @@ def save_playlists():
 
 
 playlists: dict = load_playlists()
+
+
+# ── Merged "All Playlists" config ─────────────────────────────────────────────
+
+def _channel_id(playlist_id: str, url: str) -> str:
+    """Stable ID for a sourced channel based on playlist + URL."""
+    return hashlib.md5(f"{playlist_id}:{url}".encode()).hexdigest()[:12]
+
+
+def load_merged_config() -> dict:
+    if MERGED_FILE.exists():
+        try:
+            return json.loads(MERGED_FILE.read_text())
+        except Exception:
+            return {"groups": []}
+    return {"groups": []}
+
+
+def save_merged_config():
+    try:
+        MERGED_FILE.write_text(json.dumps(merged_config, indent=2, default=str))
+    except Exception:
+        pass
+
+
+merged_config: dict = load_merged_config()
+
+
+def build_merged_view() -> list:
+    """Build the full merged group+channel tree from all playlists + config.
+
+    Returns a list of group dicts, each with an ordered list of channels.
+    Preserves user customizations (order, enabled state, custom items).
+    """
+    # Collect all sourced channels, grouped
+    sourced: dict = {}  # group_name -> list of channel dicts
+    for pl in playlists.values():
+        pl_id = pl["id"]
+        for ch in pl.get("channels", []):
+            g = ch.get("group") or "Ungrouped"
+            cid = _channel_id(pl_id, ch["url"])
+            entry = {
+                "id": cid,
+                "name": ch.get("name", ""),
+                "url": ch.get("url", ""),
+                "tvg_id": ch.get("tvg_id", ""),
+                "tvg_name": ch.get("tvg_name", ""),
+                "tvg_logo": ch.get("tvg_logo", ""),
+                "group": g,
+                "enabled": True,
+                "custom": False,
+                "source_playlist_id": pl_id,
+                "source_playlist_name": pl.get("name", ""),
+            }
+            sourced.setdefault(g, []).append(entry)
+
+    existing_groups = merged_config.get("groups", [])
+    if not existing_groups:
+        # First build: create groups from sourced data
+        groups = []
+        for g_name, channels in sorted(sourced.items()):
+            groups.append({
+                "id": "g_" + hashlib.md5(g_name.encode()).hexdigest()[:8],
+                "name": g_name,
+                "enabled": True,
+                "custom": False,
+                "channels": channels,
+            })
+        return groups
+
+    # Merge with existing config
+    existing_group_names = {g["name"] for g in existing_groups}
+    existing_channel_ids = set()
+    for g in existing_groups:
+        for ch in g.get("channels", []):
+            existing_channel_ids.add(ch["id"])
+
+    result = []
+    for eg in existing_groups:
+        g_name = eg["name"]
+        new_group = {
+            "id": eg.get("id", "g_" + hashlib.md5(g_name.encode()).hexdigest()[:8]),
+            "name": g_name,
+            "enabled": eg.get("enabled", True),
+            "custom": eg.get("custom", False),
+            "channels": [],
+        }
+
+        # Build channel map from sourced data for this group
+        sourced_for_group = {ch["id"]: ch for ch in sourced.get(g_name, [])}
+
+        # Keep existing channel order, update metadata from source
+        for ech in eg.get("channels", []):
+            if ech.get("custom"):
+                new_group["channels"].append(ech)
+            elif ech["id"] in sourced_for_group:
+                updated = sourced_for_group.pop(ech["id"])
+                updated["enabled"] = ech.get("enabled", True)
+                new_group["channels"].append(updated)
+            # else: channel was removed from source, drop it
+
+        # Append new sourced channels not in existing config
+        for ch in sourced_for_group.values():
+            new_group["channels"].append(ch)
+
+        result.append(new_group)
+
+    # Append brand-new groups from sources
+    for g_name, channels in sorted(sourced.items()):
+        if g_name not in existing_group_names:
+            result.append({
+                "id": "g_" + hashlib.md5(g_name.encode()).hexdigest()[:8],
+                "name": g_name,
+                "enabled": True,
+                "custom": False,
+                "channels": channels,
+            })
+
+    return result
 
 
 def parse_m3u_playlist(text: str) -> list:
@@ -224,6 +345,29 @@ class AddPlaylistRequest(BaseModel):
 class EditPlaylistRequest(BaseModel):
     name: str = ""
     url: str = ""
+
+
+class AddCustomGroupRequest(BaseModel):
+    name: str
+
+
+class AddCustomChannelRequest(BaseModel):
+    name: str
+    url: str
+    group_id: str
+    tvg_logo: str = ""
+
+
+class EditChannelRequest(BaseModel):
+    name: Optional[str] = None
+    url: Optional[str] = None
+    tvg_logo: Optional[str] = None
+    group_id: Optional[str] = None
+    enabled: Optional[bool] = None
+
+
+class SaveMergedConfigRequest(BaseModel):
+    groups: list  # full group+channel tree from frontend
 
 
 # ── Auth routes ──────────────────────────────────────────────────────────────
@@ -735,6 +879,190 @@ async def list_all_channels():
         for ch in pl.get("channels", []):
             result.append({**ch, "playlist_id": pl["id"], "playlist_name": pl["name"]})
     return result
+
+
+# ── All Playlists (merged editor) routes ──────────────────────────────────────
+
+@app.get("/api/all-playlists")
+async def get_all_playlists():
+    """Return merged group+channel tree with user customizations applied."""
+    groups = build_merged_view()
+    # Persist on first access so subsequent calls use saved ordering
+    if not merged_config.get("groups"):
+        merged_config["groups"] = groups
+        save_merged_config()
+    return {"groups": groups}
+
+
+@app.put("/api/all-playlists")
+async def save_all_playlists(req: SaveMergedConfigRequest):
+    """Save the full merged config (reorder, enable/disable) from frontend."""
+    merged_config["groups"] = req.groups
+    save_merged_config()
+    return {"ok": True}
+
+
+@app.post("/api/all-playlists/groups")
+async def add_custom_group(req: AddCustomGroupRequest):
+    name = req.name.strip()
+    if not name:
+        raise HTTPException(400, "Group name is required")
+    groups = merged_config.get("groups") or build_merged_view()
+    for g in groups:
+        if g["name"] == name:
+            raise HTTPException(400, f"Group '{name}' already exists")
+    new_group = {
+        "id": "g_" + uuid.uuid4().hex[:8],
+        "name": name,
+        "enabled": True,
+        "custom": True,
+        "channels": [],
+    }
+    groups.append(new_group)
+    merged_config["groups"] = groups
+    save_merged_config()
+    return new_group
+
+
+@app.delete("/api/all-playlists/groups/{group_id}")
+async def delete_custom_group(group_id: str):
+    groups = merged_config.get("groups", [])
+    for i, g in enumerate(groups):
+        if g["id"] == group_id:
+            if not g.get("custom"):
+                raise HTTPException(400, "Only custom groups can be deleted")
+            groups.pop(i)
+            merged_config["groups"] = groups
+            save_merged_config()
+            return {"ok": True}
+    raise HTTPException(404, "Group not found")
+
+
+@app.post("/api/all-playlists/channels")
+async def add_custom_channel(req: AddCustomChannelRequest):
+    if not req.name.strip() or not req.url.strip():
+        raise HTTPException(400, "Channel name and URL are required")
+    groups = merged_config.get("groups") or build_merged_view()
+    target_group = None
+    for g in groups:
+        if g["id"] == req.group_id:
+            target_group = g
+            break
+    if not target_group:
+        raise HTTPException(404, "Group not found")
+    new_channel = {
+        "id": "cc_" + uuid.uuid4().hex[:8],
+        "name": req.name.strip(),
+        "url": req.url.strip(),
+        "tvg_id": "",
+        "tvg_name": "",
+        "tvg_logo": req.tvg_logo.strip(),
+        "group": target_group["name"],
+        "enabled": True,
+        "custom": True,
+        "source_playlist_id": None,
+        "source_playlist_name": None,
+    }
+    target_group["channels"].append(new_channel)
+    merged_config["groups"] = groups
+    save_merged_config()
+    return new_channel
+
+
+@app.patch("/api/all-playlists/channels/{channel_id}")
+async def edit_channel(channel_id: str, req: EditChannelRequest):
+    groups = merged_config.get("groups", [])
+    for g in groups:
+        for ch in g.get("channels", []):
+            if ch["id"] == channel_id:
+                if req.enabled is not None:
+                    ch["enabled"] = req.enabled
+                if ch.get("custom"):
+                    if req.name is not None:
+                        ch["name"] = req.name.strip()
+                    if req.url is not None:
+                        ch["url"] = req.url.strip()
+                    if req.tvg_logo is not None:
+                        ch["tvg_logo"] = req.tvg_logo.strip()
+                    if req.group_id is not None:
+                        # Move to different group
+                        for tg in groups:
+                            if tg["id"] == req.group_id:
+                                ch["group"] = tg["name"]
+                                g["channels"].remove(ch)
+                                tg["channels"].append(ch)
+                                break
+                merged_config["groups"] = groups
+                save_merged_config()
+                return ch
+    raise HTTPException(404, "Channel not found")
+
+
+@app.delete("/api/all-playlists/channels/{channel_id}")
+async def delete_custom_channel(channel_id: str):
+    groups = merged_config.get("groups", [])
+    for g in groups:
+        for i, ch in enumerate(g.get("channels", [])):
+            if ch["id"] == channel_id:
+                if not ch.get("custom"):
+                    raise HTTPException(400, "Only custom channels can be deleted")
+                g["channels"].pop(i)
+                merged_config["groups"] = groups
+                save_merged_config()
+                return {"ok": True}
+    raise HTTPException(404, "Channel not found")
+
+
+@app.post("/api/all-playlists/refresh")
+async def refresh_all_playlists():
+    """Re-fetch all source playlist URLs and smart-merge with existing config."""
+    errors = []
+    for pl_id, pl in list(playlists.items()):
+        url = pl.get("url")
+        if not url:
+            continue
+        try:
+            timeout = aiohttp.ClientTimeout(total=30)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(url) as resp:
+                    if resp.status != 200:
+                        errors.append(f"{pl.get('name', pl_id)}: HTTP {resp.status}")
+                        continue
+                    raw_text = await resp.text(errors="replace")
+            channels = parse_m3u_playlist(raw_text)
+            if channels:
+                playlists[pl_id]["channels"] = channels
+                playlists[pl_id]["channel_count"] = len(channels)
+                playlists[pl_id]["updated_at"] = time.time()
+        except Exception as e:
+            errors.append(f"{pl.get('name', pl_id)}: {e}")
+    save_playlists()
+
+    # Rebuild merged view (preserves custom items, disabled state, ordering)
+    merged_config["groups"] = build_merged_view()
+    save_merged_config()
+
+    total = sum(pl.get("channel_count", 0) for pl in playlists.values())
+    return {"ok": True, "total_channels": total, "errors": errors}
+
+
+@app.get("/api/all-playlists/export.m3u")
+async def export_m3u():
+    """Export enabled channels as M3U playlist."""
+    groups = merged_config.get("groups") or build_merged_view()
+    lines = ["#EXTM3U"]
+    for g in groups:
+        if not g.get("enabled", True):
+            continue
+        for ch in g.get("channels", []):
+            if not ch.get("enabled", True):
+                continue
+            attrs = f'tvg-id="{ch.get("tvg_id", "")}" tvg-name="{ch.get("tvg_name", "") or ch.get("name", "")}" tvg-logo="{ch.get("tvg_logo", "")}" group-title="{g["name"]}"'
+            lines.append(f'#EXTINF:-1 {attrs},{ch.get("name", "")}')
+            lines.append(ch.get("url", ""))
+    content = "\n".join(lines) + "\n"
+    return Response(content=content, media_type="audio/x-mpegurl",
+                    headers={"Content-Disposition": "attachment; filename=all-playlists.m3u"})
 
 
 # ── Static files (must be last) ───────────────────────────────────────────────

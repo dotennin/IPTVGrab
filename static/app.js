@@ -1234,17 +1234,28 @@ async function selectPlaylist(id) {
     countBadge.textContent = "0";
     refreshBtn.disabled = true;
     document.getElementById("editPlaylistBtn").disabled = true;
+    document.getElementById("editAllPlaylistsBtn").classList.add("d-none");
+    document.getElementById("refreshAllPlaylistsBtn").classList.add("d-none");
     deleteBtn.disabled = true;
     return;
   }
 
-  // "All Playlists" mode: aggregate channels across every saved playlist
+  // "All Playlists" mode: use merged config (respects ordering, enabled state)
   if (id === "__all__") {
     try {
-      const res = await apiFetch("/api/channels");
+      const res = await apiFetch("/api/all-playlists");
       if (!res.ok) throw new Error("Failed to load channels");
+      const data = await res.json();
       currentPlaylist = null;
-      allChannels = await res.json();
+      // Flatten enabled groups/channels for the grid view
+      allChannels = [];
+      for (const g of data.groups || []) {
+        if (!g.enabled) continue;
+        for (const ch of g.channels || []) {
+          if (!ch.enabled) continue;
+          allChannels.push({ ...ch, playlist_name: ch.source_playlist_name || "" });
+        }
+      }
       _populateGroupFilter(allChannels);
       document.getElementById("channelSearch").value = "";
       filterBar.classList.remove("d-none");
@@ -1252,6 +1263,8 @@ async function selectPlaylist(id) {
       refreshBtn.disabled = true;
       document.getElementById("editPlaylistBtn").disabled = true;
       deleteBtn.disabled = true;
+      document.getElementById("editAllPlaylistsBtn").classList.remove("d-none");
+      document.getElementById("refreshAllPlaylistsBtn").classList.remove("d-none");
       renderChannels(allChannels);
     } catch (e) {
       toast(e.message, "danger");
@@ -1270,6 +1283,8 @@ async function selectPlaylist(id) {
     countBadge.textContent = allChannels.length;
     refreshBtn.disabled = !currentPlaylist.url;
     document.getElementById("editPlaylistBtn").disabled = false;
+    document.getElementById("editAllPlaylistsBtn").classList.add("d-none");
+    document.getElementById("refreshAllPlaylistsBtn").classList.add("d-none");
     deleteBtn.disabled = false;
     renderChannels(allChannels);
   } catch (e) {
@@ -1529,6 +1544,382 @@ document.getElementById("savePlaylistBtn").addEventListener("click", async () =>
   } finally {
     btn.disabled = false;
     btn.innerHTML = '<i class="fas fa-save me-1"></i>Save';
+  }
+});
+
+// ── All Playlists Editor ──────────────────────────────────────────────────────
+
+let editorGroups = [];
+let editorSelectedGroupId = null;
+let groupSortable = null;
+let channelSortable = null;
+let editorDirty = false;
+
+function openAllPlaylistsEditor() {
+  editorDirty = false;
+  apiFetch("/api/all-playlists")
+    .then((r) => r.json())
+    .then((data) => {
+      editorGroups = data.groups || [];
+      editorSelectedGroupId = null;
+      renderEditorGroups();
+      renderEditorChannels();
+      new bootstrap.Modal(document.getElementById("allPlaylistsEditorModal")).show();
+    })
+    .catch((e) => toast(e.message, "danger"));
+}
+
+function renderEditorGroups() {
+  const list = document.getElementById("editorGroupList");
+  list.innerHTML = editorGroups
+    .map(
+      (g) => `
+    <div class="editor-group-item${g.id === editorSelectedGroupId ? " active" : ""}${g.enabled ? "" : " disabled-item"}"
+         data-group-id="${g.id}">
+      <span class="drag-handle"><i class="fas fa-grip-vertical"></i></span>
+      <span class="editor-item-name" title="${esc(g.name)}">${esc(g.name)}</span>
+      <span class="editor-item-badge badge ${g.custom ? "bg-info" : "bg-secondary"}">${g.channels?.length || 0}</span>
+      <span class="editor-item-actions">
+        <div class="form-check form-switch mb-0">
+          <input class="form-check-input editor-group-toggle" type="checkbox" ${g.enabled ? "checked" : ""} data-gid="${g.id}" title="${g.enabled ? "Enabled" : "Disabled"}">
+        </div>
+        <button class="btn btn-outline-danger btn-xs editor-delete-group-btn" data-gid="${g.id}" ${g.custom ? "" : "disabled"} title="${g.custom ? "Delete group" : "Source groups cannot be deleted"}">
+          <i class="fas fa-trash-alt"></i>
+        </button>
+      </span>
+    </div>`
+    )
+    .join("");
+
+  // Click to select group
+  list.querySelectorAll(".editor-group-item").forEach((el) => {
+    el.addEventListener("click", (e) => {
+      if (e.target.closest(".editor-item-actions")) return;
+      editorSelectedGroupId = el.dataset.groupId;
+      renderEditorGroups();
+      renderEditorChannels();
+    });
+  });
+
+  // Toggle group enabled
+  list.querySelectorAll(".editor-group-toggle").forEach((cb) => {
+    cb.addEventListener("change", (e) => {
+      e.stopPropagation();
+      const g = editorGroups.find((g) => g.id === cb.dataset.gid);
+      if (g) {
+        g.enabled = cb.checked;
+        editorDirty = true;
+        renderEditorGroups();
+      }
+    });
+  });
+
+  // Delete custom group
+  list.querySelectorAll(".editor-delete-group-btn:not([disabled])").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const gid = btn.dataset.gid;
+      const g = editorGroups.find((g) => g.id === gid);
+      if (!g?.custom) return;
+      if (!confirm(`Delete custom group "${g.name}" and all its channels?`)) return;
+      editorGroups = editorGroups.filter((g) => g.id !== gid);
+      if (editorSelectedGroupId === gid) editorSelectedGroupId = null;
+      editorDirty = true;
+      renderEditorGroups();
+      renderEditorChannels();
+    });
+  });
+
+  // Init Sortable for groups
+  if (groupSortable) groupSortable.destroy();
+  groupSortable = new Sortable(list, {
+    handle: ".drag-handle",
+    animation: 150,
+    ghostClass: "sortable-ghost",
+    chosenClass: "sortable-chosen",
+    onEnd: () => {
+      const newOrder = [...list.querySelectorAll(".editor-group-item")].map((el) => el.dataset.groupId);
+      const reordered = newOrder.map((id) => editorGroups.find((g) => g.id === id)).filter(Boolean);
+      editorGroups = reordered;
+      editorDirty = true;
+    },
+  });
+}
+
+function renderEditorChannels() {
+  const list = document.getElementById("editorChannelList");
+  const placeholder = document.getElementById("editorChannelPlaceholder");
+  const addBtn = document.getElementById("editorAddChannelBtn");
+  const countEl = document.getElementById("editorChannelCount");
+  const nameEl = document.getElementById("editorSelectedGroupName");
+
+  const group = editorGroups.find((g) => g.id === editorSelectedGroupId);
+  if (!group) {
+    list.classList.add("d-none");
+    placeholder.classList.remove("d-none");
+    addBtn.classList.add("d-none");
+    countEl.textContent = "0";
+    nameEl.textContent = "";
+    return;
+  }
+
+  placeholder.classList.add("d-none");
+  list.classList.remove("d-none");
+  addBtn.classList.remove("d-none");
+  countEl.textContent = group.channels?.length || 0;
+  nameEl.textContent = `— ${group.name}`;
+
+  const channels = group.channels || [];
+  list.innerHTML = channels
+    .map(
+      (ch, i) => `
+    <div class="editor-channel-item${ch.enabled ? "" : " disabled-item"}" data-ch-id="${ch.id}" data-ch-idx="${i}">
+      <span class="drag-handle"><i class="fas fa-grip-vertical"></i></span>
+      ${
+        ch.tvg_logo
+          ? `<img src="${esc(ch.tvg_logo)}" class="ch-logo" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
+          : ""
+      }
+      <div class="ch-logo-fallback" ${ch.tvg_logo ? 'style="display:none"' : ""}><i class="fas fa-tv"></i></div>
+      <div class="flex-grow-1" style="min-width:0">
+        <div class="editor-item-name" title="${esc(ch.name)}">${esc(ch.name || ch.url)}</div>
+        <div class="editor-channel-url" title="${esc(ch.url)}">${esc(ch.url)}</div>
+        ${ch.source_playlist_name ? `<div class="editor-channel-source">${esc(ch.source_playlist_name)}</div>` : ""}
+      </div>
+      <span class="editor-item-actions">
+        <div class="form-check form-switch mb-0">
+          <input class="form-check-input editor-ch-toggle" type="checkbox" ${ch.enabled ? "checked" : ""} data-chid="${ch.id}">
+        </div>
+        ${ch.custom ? `<button class="btn btn-outline-secondary btn-xs editor-edit-ch-btn" data-chid="${ch.id}" title="Edit"><i class="fas fa-pencil-alt"></i></button>` : ""}
+        <button class="btn btn-outline-danger btn-xs editor-delete-ch-btn" data-chid="${ch.id}" ${ch.custom ? "" : "disabled"} title="${ch.custom ? "Delete" : "Source channels cannot be deleted"}">
+          <i class="fas fa-trash-alt"></i>
+        </button>
+      </span>
+    </div>`
+    )
+    .join("");
+
+  // Toggle channel enabled
+  list.querySelectorAll(".editor-ch-toggle").forEach((cb) => {
+    cb.addEventListener("change", (e) => {
+      e.stopPropagation();
+      const ch = channels.find((c) => c.id === cb.dataset.chid);
+      if (ch) {
+        ch.enabled = cb.checked;
+        editorDirty = true;
+        renderEditorChannels();
+      }
+    });
+  });
+
+  // Edit custom channel
+  list.querySelectorAll(".editor-edit-ch-btn").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const ch = channels.find((c) => c.id === btn.dataset.chid);
+      if (!ch) return;
+      document.getElementById("editChannelNameInput").value = ch.name || "";
+      document.getElementById("editChannelUrlInput").value = ch.url || "";
+      document.getElementById("editChannelLogoInput").value = ch.tvg_logo || "";
+      document.getElementById("editChannelIdInput").value = ch.id;
+      new bootstrap.Modal(document.getElementById("editChannelModal")).show();
+    });
+  });
+
+  // Delete custom channel
+  list.querySelectorAll(".editor-delete-ch-btn:not([disabled])").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const chid = btn.dataset.chid;
+      const ch = channels.find((c) => c.id === chid);
+      if (!ch?.custom) return;
+      group.channels = channels.filter((c) => c.id !== chid);
+      editorDirty = true;
+      renderEditorChannels();
+    });
+  });
+
+  // Init Sortable for channels
+  if (channelSortable) channelSortable.destroy();
+  channelSortable = new Sortable(list, {
+    handle: ".drag-handle",
+    animation: 150,
+    ghostClass: "sortable-ghost",
+    chosenClass: "sortable-chosen",
+    onEnd: () => {
+      const newOrder = [...list.querySelectorAll(".editor-channel-item")].map((el) => el.dataset.chId);
+      group.channels = newOrder.map((id) => channels.find((c) => c.id === id)).filter(Boolean);
+      editorDirty = true;
+    },
+  });
+}
+
+// Edit All Playlists button
+document.getElementById("editAllPlaylistsBtn").addEventListener("click", openAllPlaylistsEditor);
+
+// Refresh All Playlists button (from toolbar, outside editor)
+document.getElementById("refreshAllPlaylistsBtn").addEventListener("click", async () => {
+  const btn = document.getElementById("refreshAllPlaylistsBtn");
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+  try {
+    const res = await apiFetch("/api/all-playlists/refresh", { method: "POST" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Refresh failed");
+    await loadPlaylists();
+    await selectPlaylist("__all__");
+    let msg = `Refreshed: ${data.total_channels} channels`;
+    if (data.errors?.length) msg += ` (${data.errors.length} error(s))`;
+    toast(msg, "success");
+  } catch (e) {
+    toast(e.message, "danger");
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-sync-alt"></i>';
+  }
+});
+
+// Save editor changes
+document.getElementById("editorSaveBtn").addEventListener("click", async () => {
+  const btn = document.getElementById("editorSaveBtn");
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Saving...';
+  try {
+    const res = await apiFetch("/api/all-playlists", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ groups: editorGroups }),
+    });
+    if (!res.ok) {
+      const data = await res.json();
+      throw new Error(data.detail || "Save failed");
+    }
+    editorDirty = false;
+    toast("All Playlists config saved", "success");
+    // Refresh the main channel view
+    await selectPlaylist("__all__");
+  } catch (e) {
+    toast(e.message, "danger");
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-save me-1"></i>Save Changes';
+  }
+});
+
+// Refresh all (from inside editor)
+document.getElementById("editorRefreshAllBtn").addEventListener("click", async () => {
+  const btn = document.getElementById("editorRefreshAllBtn");
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Refreshing...';
+  try {
+    const res = await apiFetch("/api/all-playlists/refresh", { method: "POST" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Refresh failed");
+    // Reload editor data
+    const res2 = await apiFetch("/api/all-playlists");
+    const data2 = await res2.json();
+    editorGroups = data2.groups || [];
+    // Try to keep the same group selected
+    if (editorSelectedGroupId && !editorGroups.find((g) => g.id === editorSelectedGroupId)) {
+      editorSelectedGroupId = null;
+    }
+    renderEditorGroups();
+    renderEditorChannels();
+    editorDirty = false;
+    let msg = `Refreshed: ${data.total_channels} channels`;
+    if (data.errors?.length) msg += ` (${data.errors.length} error(s))`;
+    toast(msg, "success");
+  } catch (e) {
+    toast(e.message, "danger");
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-sync-alt me-1"></i>Refresh All';
+  }
+});
+
+// Add custom group
+document.getElementById("editorAddGroupBtn").addEventListener("click", () => {
+  document.getElementById("newGroupNameInput").value = "";
+  new bootstrap.Modal(document.getElementById("addGroupModal")).show();
+});
+
+document.getElementById("confirmAddGroupBtn").addEventListener("click", () => {
+  const name = document.getElementById("newGroupNameInput").value.trim();
+  if (!name) { toast("Group name is required", "danger"); return; }
+  if (editorGroups.some((g) => g.name === name)) { toast("Group already exists", "danger"); return; }
+  editorGroups.push({
+    id: "g_" + Math.random().toString(36).slice(2, 10),
+    name,
+    enabled: true,
+    custom: true,
+    channels: [],
+  });
+  editorDirty = true;
+  bootstrap.Modal.getInstance(document.getElementById("addGroupModal")).hide();
+  renderEditorGroups();
+});
+
+// Add custom channel
+document.getElementById("editorAddChannelBtn").addEventListener("click", () => {
+  document.getElementById("newChannelNameInput").value = "";
+  document.getElementById("newChannelUrlInput").value = "";
+  document.getElementById("newChannelLogoInput").value = "";
+  new bootstrap.Modal(document.getElementById("addChannelModal")).show();
+});
+
+document.getElementById("confirmAddChannelBtn").addEventListener("click", () => {
+  const name = document.getElementById("newChannelNameInput").value.trim();
+  const url = document.getElementById("newChannelUrlInput").value.trim();
+  const logo = document.getElementById("newChannelLogoInput").value.trim();
+  if (!name || !url) { toast("Name and URL are required", "danger"); return; }
+  const group = editorGroups.find((g) => g.id === editorSelectedGroupId);
+  if (!group) { toast("No group selected", "danger"); return; }
+  if (!group.channels) group.channels = [];
+  group.channels.push({
+    id: "cc_" + Math.random().toString(36).slice(2, 10),
+    name,
+    url,
+    tvg_id: "",
+    tvg_name: "",
+    tvg_logo: logo,
+    group: group.name,
+    enabled: true,
+    custom: true,
+    source_playlist_id: null,
+    source_playlist_name: null,
+  });
+  editorDirty = true;
+  bootstrap.Modal.getInstance(document.getElementById("addChannelModal")).hide();
+  renderEditorChannels();
+});
+
+// Confirm edit channel
+document.getElementById("confirmEditChannelBtn").addEventListener("click", () => {
+  const chId = document.getElementById("editChannelIdInput").value;
+  const name = document.getElementById("editChannelNameInput").value.trim();
+  const url = document.getElementById("editChannelUrlInput").value.trim();
+  const logo = document.getElementById("editChannelLogoInput").value.trim();
+  if (!name || !url) { toast("Name and URL are required", "danger"); return; }
+  for (const g of editorGroups) {
+    const ch = (g.channels || []).find((c) => c.id === chId);
+    if (ch && ch.custom) {
+      ch.name = name;
+      ch.url = url;
+      ch.tvg_logo = logo;
+      editorDirty = true;
+      break;
+    }
+  }
+  bootstrap.Modal.getInstance(document.getElementById("editChannelModal")).hide();
+  renderEditorChannels();
+});
+
+// Warn before closing editor with unsaved changes
+document.getElementById("allPlaylistsEditorModal").addEventListener("hide.bs.modal", (e) => {
+  if (editorDirty) {
+    if (!confirm("You have unsaved changes. Close without saving?")) {
+      e.preventDefault();
+    }
   }
 });
 
