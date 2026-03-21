@@ -384,7 +384,7 @@ function applySortOrder() {
   const list = document.getElementById("downloadsList");
   const cards = [...list.querySelectorAll(".task-card")];
   const { field, dir } = currentSort;
-  cards.sort((a, b) => {
+  const sortedCards = [...cards].sort((a, b) => {
     let va, vb;
     if (field === "created_at") {
       va = parseFloat(a.dataset.createdAt) || 0;
@@ -400,7 +400,11 @@ function applySortOrder() {
     if (va > vb) return dir === "asc" ? 1 : -1;
     return 0;
   });
-  cards.forEach(c => list.appendChild(c));
+  if (!sortedCards.some((card, idx) => card !== cards[idx])) return;
+
+  const fragment = document.createDocumentFragment();
+  sortedCards.forEach(card => fragment.appendChild(card));
+  list.appendChild(fragment);
 }
 
 function addTaskCard(taskId, url) {
@@ -459,6 +463,10 @@ const STATUS_MAP = {
 function updateTaskCard(taskId, task) {
   const card = document.getElementById(`task-${taskId}`);
   if (!card) return;
+  const prevStatus = card.dataset.taskStatus || "";
+  const prevCreatedAt = card.dataset.createdAt || "";
+  const prevSize = card.dataset.size || "";
+  const prevFilename = card.dataset.filename || "";
 
   const { text, cls } = STATUS_MAP[task.status] || { text: task.status, cls: "bg-secondary" };
   card.querySelector(".task-status").className = `badge ${cls} flex-shrink-0 task-status`;
@@ -501,69 +509,89 @@ function updateTaskCard(taskId, task) {
   }
 
   const info = card.querySelector(".task-info");
+  const infoStatus = info.dataset.status || "";
 
   if (task.status === "recording") {
+    if (infoStatus !== "recording" || !info.querySelector(".task-recording-time")) {
+      info.className = "task-info small";
+      info.innerHTML = `
+        <span class="text-danger fw-semibold">
+          <i class="fas fa-circle fa-beat me-1" style="font-size:.6em"></i><span class="task-recording-time"></span>
+        </span>
+        <span class="task-recording-segments ms-2"></span>
+        <span class="task-recording-bytes ms-2"></span>
+        <span class="task-recording-speed ms-2 text-muted"></span>`;
+      info.dataset.status = "recording";
+    }
     const elapsed = task.elapsed_sec || 0;
     const mm = String(Math.floor(elapsed / 60)).padStart(2, "0");
     const ss = String(elapsed % 60).padStart(2, "0");
-    info.innerHTML = `
-      <span class="text-danger fw-semibold">
-        <i class="fas fa-circle fa-beat me-1" style="font-size:.6em"></i>${mm}:${ss}
-      </span>
-      <span class="ms-2">${task.recorded_segments || 0} segs</span>
-      <span class="ms-2">${formatBytes(task.bytes_downloaded)}</span>
-      <span class="ms-2 text-muted">${task.speed_mbps || 0} MB/s</span>`;
-    info.className = "task-info small";
+    info.querySelector(".task-recording-time").textContent = `${mm}:${ss}`;
+    info.querySelector(".task-recording-segments").textContent = `${task.recorded_segments || 0} segs`;
+    info.querySelector(".task-recording-bytes").textContent = formatBytes(task.bytes_downloaded);
+    info.querySelector(".task-recording-speed").textContent = `${task.speed_mbps || 0} MB/s`;
   } else if (task.status === "downloading") {
-    info.innerHTML = `
-      <span>${task.downloaded || 0} / ${task.total || 0} segs</span>
-      <span class="ms-2 text-primary">${task.speed_mbps || 0} MB/s</span>
-      <span class="ms-2">${formatBytes(task.bytes_downloaded)}</span>`;
-    info.className = "task-info small";
-  } else if (task.status === "stopping") {
-    info.innerHTML = '<i class="fas fa-cog fa-spin me-1"></i>Merging recorded segments...';
-    info.className = "task-info small text-info";
-  } else if (task.status === "merging") {
-    info.innerHTML = '<i class="fas fa-cog fa-spin me-1"></i>Merging segments...';
-    info.className = "task-info small text-info";
-  } else if (task.status === "completed" && task.output) {
-    const sizeStr = task.size ? ` (${formatBytes(task.size)})` : "";
-    info.innerHTML = `
-      <a href="/downloads/${esc(task.output)}" download
-         class="btn btn-sm btn-success">
-        <i class="fas fa-download me-1"></i>${esc(task.output)}${sizeStr}
-      </a>
-      ${task.duration_sec ? `<span class="ms-2 text-muted small">${task.duration_sec}s elapsed</span>` : ""}
-      <button class="btn btn-link btn-sm p-0 ms-2 text-info" onclick="restartTask('${taskId}')">
-        <i class="fas fa-redo me-1"></i>Restart
-      </button>`;
-  } else if (task.status === "failed") {
-    info.innerHTML = `
-      <div class="task-error text-danger" title="Click to expand/collapse" onclick="this.classList.toggle('expanded')">Error: ${esc(task.error || "Unknown error")}</div>
-      <div class="mt-1">
-        <button class="btn btn-link btn-sm p-0 text-warning" onclick="resumeTask('${taskId}')">
-          <i class="fas fa-play me-1"></i>Resume
+    if (infoStatus !== "downloading" || !info.querySelector(".task-download-progress")) {
+      info.className = "task-info small";
+      info.innerHTML = `
+        <span class="task-download-progress"></span>
+        <span class="task-download-speed ms-2 text-primary"></span>
+        <span class="task-download-bytes ms-2"></span>`;
+      info.dataset.status = "downloading";
+    }
+    info.querySelector(".task-download-progress").textContent = `${task.downloaded || 0} / ${task.total || 0} segs`;
+    info.querySelector(".task-download-speed").textContent = `${task.speed_mbps || 0} MB/s`;
+    info.querySelector(".task-download-bytes").textContent = formatBytes(task.bytes_downloaded);
+  } else if (infoStatus !== task.status) {
+    info.dataset.status = task.status;
+    if (task.status === "stopping") {
+      info.innerHTML = '<i class="fas fa-cog fa-spin me-1"></i>Merging recorded segments...';
+      info.className = "task-info small text-info";
+    } else if (task.status === "merging") {
+      info.innerHTML = '<i class="fas fa-cog fa-spin me-1"></i>Merging segments...';
+      info.className = "task-info small text-info";
+    } else if (task.status === "completed" && task.output) {
+      const sizeStr = task.size ? ` (${formatBytes(task.size)})` : "";
+      info.innerHTML = `
+        <a href="/downloads/${esc(task.output)}" download
+           class="btn btn-sm btn-success">
+          <i class="fas fa-download me-1"></i>${esc(task.output)}${sizeStr}
+        </a>
+        ${task.duration_sec ? `<span class="ms-2 text-muted small">${task.duration_sec}s elapsed</span>` : ""}
+        <button class="btn btn-link btn-sm p-0 ms-2 text-info" onclick="restartTask('${taskId}')">
+          <i class="fas fa-redo me-1"></i>Restart
+        </button>`;
+    } else if (task.status === "failed") {
+      info.innerHTML = `
+        <div class="task-error text-danger" title="Click to expand/collapse" onclick="this.classList.toggle('expanded')">Error: ${esc(task.error || "Unknown error")}</div>
+        <div class="mt-1">
+          <button class="btn btn-link btn-sm p-0 text-warning" onclick="resumeTask('${taskId}')">
+            <i class="fas fa-play me-1"></i>Resume
+          </button>
+          <button class="btn btn-link btn-sm p-0 ms-2 text-info" onclick="restartTask('${taskId}')">
+            <i class="fas fa-sync me-1"></i>Restart
+          </button>
+        </div>`;
+      info.className = "task-info small";
+    } else if (task.status === "cancelled") {
+      info.innerHTML = `<span class="text-muted">Cancelled</span>
+        <button class="btn btn-link btn-sm p-0 ms-2 text-info" onclick="restartTask('${taskId}')">
+          <i class="fas fa-redo me-1"></i>Restart
+        </button>`;
+      info.className = "task-info small";
+    } else if (task.status === "interrupted") {
+      info.innerHTML = `<span class="text-warning"><i class="fas fa-exclamation-triangle me-1"></i>Interrupted</span>
+        <button class="btn btn-link btn-sm p-0 ms-2 text-warning" onclick="resumeTask('${taskId}')">
+          <i class="fas fa-redo me-1"></i>Resume
         </button>
         <button class="btn btn-link btn-sm p-0 ms-2 text-info" onclick="restartTask('${taskId}')">
           <i class="fas fa-sync me-1"></i>Restart
-        </button>
-      </div>`;
-    info.className = "task-info small";
-  } else if (task.status === "cancelled") {
-    info.innerHTML = `<span class="text-muted">Cancelled</span>
-      <button class="btn btn-link btn-sm p-0 ms-2 text-info" onclick="restartTask('${taskId}')">
-        <i class="fas fa-redo me-1"></i>Restart
-      </button>`;
-    info.className = "task-info small";
-  } else if (task.status === "interrupted") {
-    info.innerHTML = `<span class="text-warning"><i class="fas fa-exclamation-triangle me-1"></i>Interrupted</span>
-      <button class="btn btn-link btn-sm p-0 ms-2 text-warning" onclick="resumeTask('${taskId}')">
-        <i class="fas fa-redo me-1"></i>Resume
-      </button>
-      <button class="btn btn-link btn-sm p-0 ms-2 text-info" onclick="restartTask('${taskId}')">
-        <i class="fas fa-sync me-1"></i>Restart
-      </button>`;
-    info.className = "task-info small";
+        </button>`;
+      info.className = "task-info small";
+    } else {
+      info.className = "task-info small text-muted";
+      info.textContent = "Preparing...";
+    }
   }
 
   // ── Preview button ────────────────────────────────────────────────────────
@@ -643,20 +671,30 @@ function updateTaskCard(taskId, task) {
   // Sync data attributes for category filtering and sorting
   card.dataset.taskStatus = task.status;
   if (task.created_at) card.dataset.createdAt = String(task.created_at);
-  if (task.size)        card.dataset.size       = String(task.size);
+  card.dataset.size = task.size ? String(task.size) : "0";
   const _fn = task.output || (task.output_name
     ? (task.output_name.endsWith(".mp4") ? task.output_name : task.output_name + ".mp4")
     : "");
-  if (_fn) card.dataset.filename = _fn;
+  card.dataset.filename = _fn;
 
-  applyCategoryFilter();
-  applySortOrder();
-  updateTaskCount();
+  const sortKeyChanged =
+    (currentSort.field === "created_at" && prevCreatedAt !== (card.dataset.createdAt || "")) ||
+    (currentSort.field === "size" && prevSize !== card.dataset.size) ||
+    (currentSort.field === "filename" && prevFilename !== card.dataset.filename);
+  const statusChanged = prevStatus !== task.status;
+
+  if (statusChanged) applyCategoryFilter();
+  if (sortKeyChanged) applySortOrder();
+  if (statusChanged) updateTaskCount();
 }
 
 // ── Polling ───────────────────────────────────────────────────────────────────
 function startPolling(taskId) {
+  if (pollingTimers[taskId]) return;
+  let inFlight = false;
   pollingTimers[taskId] = setInterval(async () => {
+    if (inFlight) return;
+    inFlight = true;
     try {
       const res = await apiFetch(`/api/tasks/${taskId}`);
       if (!res.ok) { stopPolling(taskId); return; }
@@ -670,6 +708,7 @@ function startPolling(taskId) {
           toast(`Failed: ${task.error}`, "danger");
       }
     } catch (_) { /* network hiccup – keep polling */ }
+    finally { inFlight = false; }
   }, 600);
 }
 
@@ -699,6 +738,7 @@ async function cancelTask(taskId) {
     const info = card.querySelector(".task-info");
     if (info) {
       info.className = "task-info small";
+      delete info.dataset.status;
       info.innerHTML = `<span class="text-muted">Cancelled</span>
         <button class="btn btn-link btn-sm p-0 ms-2 text-info" onclick="restartTask('${taskId}')">
           <i class="fas fa-redo me-1"></i>Restart
@@ -782,7 +822,10 @@ async function resumeTask(taskId) {
     if (card) {
       card.querySelector(".task-status").textContent = "Queued";
       card.querySelector(".task-status").className = "badge bg-secondary flex-shrink-0 task-status";
-      card.querySelector(".task-info").textContent = "Preparing...";
+      const info = card.querySelector(".task-info");
+      info.className = "task-info small text-muted";
+      info.textContent = "Preparing...";
+      delete info.dataset.status;
       card.dataset.taskStatus = "queued";
       const btn = card.querySelector(".task-action");
       btn.innerHTML = '<i class="fas fa-times"></i> Cancel';
@@ -811,7 +854,10 @@ async function restartTask(taskId) {
     if (card) {
       card.querySelector(".task-status").textContent = "Queued";
       card.querySelector(".task-status").className = "badge bg-secondary flex-shrink-0 task-status";
-      card.querySelector(".task-info").textContent = "Preparing...";
+      const info = card.querySelector(".task-info");
+      info.className = "task-info small text-muted";
+      info.textContent = "Preparing...";
+      delete info.dataset.status;
       card.dataset.taskStatus = "queued";
       const bar = card.querySelector(".task-bar");
       if (bar) { bar.style.width = "0%"; bar.textContent = ""; }
