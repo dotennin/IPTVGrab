@@ -43,6 +43,18 @@
               <li class="nav-item" role="presentation">
                 <button
                   class="nav-link active"
+                  id="playlist-tab"
+                  data-bs-toggle="tab"
+                  data-bs-target="#playlistPane"
+                  type="button"
+                  role="tab"
+                >
+                  <i class="fas fa-tv me-1"></i>Playlist
+                </button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button
+                  class="nav-link"
                   id="url-tab"
                   data-bs-toggle="tab"
                   data-bs-target="#urlPane"
@@ -64,36 +76,38 @@
                   <i class="fas fa-terminal me-1"></i>cURL
                 </button>
               </li>
-              <li class="nav-item" role="presentation">
-                <button
-                  class="nav-link"
-                  id="batch-tab"
-                  data-bs-toggle="tab"
-                  data-bs-target="#batchPane"
-                  type="button"
-                  role="tab"
-                >
-                  <i class="fas fa-list me-1"></i>Batch
-                </button>
-              </li>
-              <li class="nav-item" role="presentation">
-                <button
-                  class="nav-link"
-                  id="playlist-tab"
-                  data-bs-toggle="tab"
-                  data-bs-target="#playlistPane"
-                  type="button"
-                  role="tab"
-                >
-                  <i class="fas fa-tv me-1"></i>Playlist
-                </button>
-              </li>
             </ul>
           </div>
           <div class="card-body">
             <div class="tab-content">
+              <!-- Playlist tab -->
+              <div class="tab-pane fade show active" id="playlistPane" role="tabpanel">
+                <div class="d-flex gap-2 mb-3 align-items-center">
+                  <select class="form-select form-select-sm flex-grow-1" id="playlistSelect">
+                    <option value="">＋ Add playlist…</option>
+                  </select>
+                  <button class="btn btn-sm btn-outline-secondary" id="refreshPlaylistBtn" title="Refresh from URL" disabled>
+                    <i class="fas fa-sync-alt"></i>
+                  </button>
+                  <button class="btn btn-sm btn-outline-danger ms-3" id="deletePlaylistBtn" title="Delete playlist" disabled>
+                    <i class="fas fa-trash"></i>
+                  </button>
+                </div>
+                <!-- Filter controls (shown once a playlist is loaded) -->
+                <div class="d-none" id="channelFilterBar">
+                  <div class="mb-2">
+                    <input type="text" class="form-control form-control-sm" id="channelSearch" placeholder="Search channels…" />
+                  </div>
+                  <div class="d-flex gap-2 align-items-center">
+                    <select class="form-select form-select-sm flex-grow-1" id="groupFilter">
+                      <option value="">All groups</option>
+                    </select>
+                    <small class="text-muted text-nowrap" id="channelFilterCount"></small>
+                  </div>
+                </div>
+              </div>
               <!-- URL tab -->
-              <div class="tab-pane fade show active" id="urlPane" role="tabpanel">
+              <div class="tab-pane fade" id="urlPane" role="tabpanel">
                 <div class="mb-3">
                   <label class="form-label text-muted small">M3U8 URL</label>
                   <input
@@ -125,72 +139,12 @@
                   spellcheck="false"
                 ></textarea>
               </div>
-              <!-- Batch tab -->
-              <div class="tab-pane fade" id="batchPane" role="tabpanel">
-                <label class="form-label text-muted small">
-                  Batch URLs — add <code>#name</code> before a URL to set its output filename
-                </label>
-                <textarea
-                  class="form-control font-mono"
-                  id="batchInput"
-                  rows="7"
-                  placeholder="#Episode 1&#10;https://example.com/ep1/index.m3u8&#10;#Episode 2&#10;https://example.com/ep2/index.m3u8&#10;https://example.com/ep3/index.m3u8"
-                  spellcheck="false"
-                ></textarea>
-                <div id="batchHint" class="form-text text-muted mt-1"></div>
-                <div class="row g-2 align-items-end mt-2">
-                  <div class="col-sm-5">
-                    <label class="form-label text-muted small">Quality</label>
-                    <select class="form-select form-select-sm bg-dark text-light border-secondary" id="batchQuality">
-                      <option value="best" selected>Best quality</option>
-                      <option value="worst">Worst quality</option>
-                    </select>
-                  </div>
-                  <div class="col-sm-7">
-                    <label class="form-label text-muted small">
-                      Parallel tasks: <span id="batchConcurrencyVal">3</span>
-                    </label>
-                    <input type="range" class="form-range" id="batchConcurrency" min="1" max="10" value="3" />
-                  </div>
-                </div>
-                <div class="mt-3">
-                  <button class="btn btn-primary" id="batchStartBtn" type="button">
-                    <i class="fas fa-play me-1"></i>Start batch
-                  </button>
-                </div>
-              </div>
-              <!-- Playlist tab -->
-              <div class="tab-pane fade" id="playlistPane" role="tabpanel">
-                <div class="d-flex gap-2 mb-3 align-items-center">
-                  <select class="form-select form-select-sm flex-grow-1" id="playlistSelect">
-                    <option value="">＋ Add playlist…</option>
-                  </select>
-                  <button class="btn btn-sm btn-outline-secondary" id="refreshPlaylistBtn" title="Refresh from URL" disabled>
-                    <i class="fas fa-sync-alt"></i>
-                  </button>
-                  <button class="btn btn-sm btn-outline-danger ms-3" id="deletePlaylistBtn" title="Delete playlist" disabled>
-                    <i class="fas fa-trash"></i>
-                  </button>
-                </div>
-                <!-- Filter controls (shown once a playlist is loaded) -->
-                <div class="d-none" id="channelFilterBar">
-                  <div class="mb-2">
-                    <input type="text" class="form-control form-control-sm" id="channelSearch" placeholder="Search channels…" />
-                  </div>
-                  <div class="d-flex gap-2 align-items-center">
-                    <select class="form-select form-select-sm flex-grow-1" id="groupFilter">
-                      <option value="">All groups</option>
-                    </select>
-                    <small class="text-muted text-nowrap" id="channelFilterCount"></small>
-                  </div>
-                </div>
-              </div>
             </div>
 
             <hr class="my-3" />
 
-            <!-- Output settings (hidden when batch tab is active) -->
-            <div class="row g-3 align-items-end" id="outputSettingsRow">
+            <!-- Output settings (hidden when playlist tab is active) -->
+            <div class="row g-3 align-items-end d-none" id="outputSettingsRow">
               <div class="col-sm-7">
                 <label class="form-label text-muted small">Output filename (optional)</label>
                 <div class="input-group">
@@ -218,7 +172,7 @@
               </div>
             </div>
 
-            <div class="mt-3 d-flex gap-2" id="parseBtnGroup">
+            <div class="mt-3 d-flex gap-2 d-none" id="parseBtnGroup">
               <button class="btn btn-primary" id="parseBtn" type="button">
                 <i class="fas fa-search me-1"></i>Parse stream
               </button>
@@ -235,7 +189,7 @@
       </div>
 
       <!-- ── Right panel: Stream info (default) ── -->
-      <div class="col-xl-6" id="streamInfoPanel">
+      <div class="col-xl-6 d-none" id="streamInfoPanel">
         <div class="card h-100" id="streamInfoCard">
           <div class="card-header d-flex align-items-center justify-content-between">
             <span><i class="fas fa-info-circle me-2"></i>Stream info</span>
@@ -250,7 +204,7 @@
         </div>
       </div>
       <!-- ── Right panel: Channel grid (shown when Playlist tab is active) ── -->
-      <div class="col-xl-6 d-none" id="channelGridPanel">
+      <div class="col-xl-6" id="channelGridPanel">
         <div class="card h-100">
           <div class="card-header d-flex align-items-center justify-content-between">
             <span><i class="fas fa-tv me-2"></i>Channels</span>

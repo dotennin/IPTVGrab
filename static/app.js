@@ -85,35 +85,7 @@ document.getElementById("concurrency").addEventListener("input", (e) => {
   document.getElementById("concurrencyVal").textContent = e.target.value;
 });
 
-// ── Batch tab: toggle common output settings visibility ───────────────────────
-function parseBatchText(text) {
-  const items = [];
-  let currentTitle = null;
-  for (const raw of text.split("\n")) {
-    const line = raw.trim();
-    if (!line) continue;
-    if (line.toUpperCase().startsWith("#EXTINF:")) {
-      // Standard M3U: #EXTINF:-1 group-title="x",Title Here
-      const commaPos = line.lastIndexOf(",");
-      if (commaPos !== -1) {
-        const title = line.slice(commaPos + 1).trim();
-        currentTitle = title || null;
-      }
-    } else if (line.startsWith("#")) {
-      currentTitle = line.slice(1).trim() || null;
-    } else if (line.startsWith("http://") || line.startsWith("https://")) {
-      items.push({ title: currentTitle, url: line });
-      currentTitle = null;
-    }
-  }
-  return items;
-}
-
-document.getElementById("batch-tab").addEventListener("shown.bs.tab", () => {
-  document.getElementById("outputSettingsRow").classList.add("d-none");
-  document.getElementById("parseBtnGroup").classList.add("d-none");
-});
-
+// ── Tab: toggle common output settings visibility ────────────────────────────
 document.getElementById("playlist-tab").addEventListener("shown.bs.tab", () => {
   document.getElementById("outputSettingsRow").classList.add("d-none");
   document.getElementById("parseBtnGroup").classList.add("d-none");
@@ -121,82 +93,13 @@ document.getElementById("playlist-tab").addEventListener("shown.bs.tab", () => {
   document.getElementById("channelGridPanel").classList.remove("d-none");
 });
 
-["url-tab", "curl-tab", "batch-tab"].forEach((id) => {
-  document.getElementById(id).addEventListener("shown.bs.tab", () => {
-    document.getElementById("streamInfoPanel").classList.remove("d-none");
-    document.getElementById("channelGridPanel").classList.add("d-none");
-  });
-});
-
 ["url-tab", "curl-tab"].forEach((id) => {
   document.getElementById(id).addEventListener("shown.bs.tab", () => {
     document.getElementById("outputSettingsRow").classList.remove("d-none");
     document.getElementById("parseBtnGroup").classList.remove("d-none");
+    document.getElementById("streamInfoPanel").classList.remove("d-none");
+    document.getElementById("channelGridPanel").classList.add("d-none");
   });
-});
-
-// Live parse hint
-document.getElementById("batchInput").addEventListener("input", () => {
-  const items = parseBatchText(document.getElementById("batchInput").value);
-  const hint = document.getElementById("batchHint");
-  if (items.length === 0) {
-    hint.textContent = "";
-  } else {
-    hint.innerHTML = `<i class="fas fa-check-circle text-success me-1"></i>Found <strong>${items.length}</strong> URL(s)`;
-  }
-});
-
-// Batch concurrency slider
-document.getElementById("batchConcurrency").addEventListener("input", (e) => {
-  document.getElementById("batchConcurrencyVal").textContent = e.target.value;
-});
-
-// Batch start button
-document.getElementById("batchStartBtn").addEventListener("click", async () => {
-  const text = document.getElementById("batchInput").value.trim();
-  const items = parseBatchText(text);
-  if (items.length === 0) {
-    toast("No valid URLs found. Check the input format.", "danger");
-    return;
-  }
-
-  const btn = document.getElementById("batchStartBtn");
-  btn.disabled = true;
-  btn.innerHTML = `<i class="fas fa-spinner fa-spin me-1"></i>Submitting (0/${items.length})`;
-
-  let submitted = 0;
-  try {
-    const quality = document.getElementById("batchQuality").value;
-    const concurrency = parseInt(document.getElementById("batchConcurrency").value, 10);
-
-    const res = await apiFetch("/api/batch", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ batch_text: text, headers: {}, quality, task_parallelism: concurrency }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || "Batch submit failed");
-
-    submitted = data.count;
-    // Add a card for each new task
-    for (const taskId of data.task_ids) {
-      const taskRes = await apiFetch(`/api/tasks/${taskId}`);
-      if (!taskRes.ok) continue;
-      const task = await taskRes.json();
-      addTaskCard(task.id, task.url || "");
-      updateTaskCard(task.id, task);
-      startPolling(task.id);
-    }
-
-    toast(`${submitted} download task(s) submitted`, "success");
-    document.getElementById("batchInput").value = "";
-    document.getElementById("batchHint").textContent = "";
-  } catch (e) {
-    toast(e.message, "danger");
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = '<i class="fas fa-play me-1"></i>Start batch';
-  }
 });
 
 // ── Header rows ───────────────────────────────────────────────────────────────
