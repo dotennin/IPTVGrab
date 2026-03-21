@@ -12,7 +12,7 @@
     href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
     rel="stylesheet"
   />
-  <link href="/styles.css?v=15" rel="stylesheet" />
+  <link href="/styles.css?v=16" rel="stylesheet" />
 </head>
 <body>
   <!-- Navbar -->
@@ -387,7 +387,8 @@
   </div>
 
   <!-- Preview / Watch modal -->
-  <div class="modal fade" id="previewModal" tabindex="-1" aria-hidden="true">    <div class="modal-dialog modal-xl modal-dialog-centered">
+  <div class="modal fade" id="previewModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-centered">
       <div class="modal-content">
         <div class="modal-header py-2">
           <h6 class="modal-title mb-0" id="previewModalTitle">
@@ -396,7 +397,7 @@
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
         <div class="modal-body p-0 bg-black">
-          <video id="previewVideo" controls style="width:100%;max-height:72vh;display:block"></video>
+          <video id="previewVideo" tabindex="0" controls style="width:100%;max-height:72vh;display:block"></video>
         </div>
         <div class="modal-footer py-2">
         </div>
@@ -412,6 +413,6 @@
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
-  <script src="/app.js?v=15"></script>
+  <script src="/app.js?v=16"></script>
 </body>
 </html>

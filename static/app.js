@@ -928,83 +928,156 @@ async function forkRecording(taskId) {
 
 // ── Preview / Watch player (hls.js) ──────────────────────────────────────────
 let hlsInstance = null;
+const previewModalEl = document.getElementById("previewModal");
+const previewVideo = document.getElementById("previewVideo");
+const previewTitleEl = document.getElementById("previewModalTitle");
+const previewModal = bootstrap.Modal.getOrCreateInstance(previewModalEl);
+
+function isPreviewVisible() {
+  return previewModalEl.classList.contains("show");
+}
+
+function setPreviewTitle(title) {
+  if (previewTitleEl) {
+    previewTitleEl.innerHTML = `<i class="fas fa-play-circle me-2 text-primary"></i>${title}`;
+  }
+}
+
+function isPreviewFullscreen() {
+  return document.fullscreenElement === previewVideo
+    || (!!document.fullscreenElement && previewModalEl.contains(document.fullscreenElement))
+    || previewVideo.webkitDisplayingFullscreen === true;
+}
+
+async function enterPreviewFullscreen() {
+  if (previewVideo.requestFullscreen) {
+    try {
+      await previewVideo.requestFullscreen();
+    } catch (error) {
+      toast("Unable to enter fullscreen", "danger");
+    }
+    return;
+  }
+
+  if (previewVideo.webkitEnterFullscreen) {
+    previewVideo.webkitEnterFullscreen();
+    return;
+  }
+
+  toast("Fullscreen is not supported in this browser", "danger");
+}
+
+async function exitPreviewFullscreen() {
+  if (document.fullscreenElement && document.exitFullscreen) {
+    try {
+      await document.exitFullscreen();
+    } catch (error) {
+      toast("Unable to exit fullscreen", "danger");
+    }
+    return;
+  }
+
+  if (previewVideo.webkitDisplayingFullscreen === true && previewVideo.webkitExitFullscreen) {
+    previewVideo.webkitExitFullscreen();
+  }
+}
+
+async function togglePreviewFullscreen() {
+  if (isPreviewFullscreen()) {
+    await exitPreviewFullscreen();
+    return;
+  }
+
+  await enterPreviewFullscreen();
+}
+
+async function closePreviewModal() {
+  if (isPreviewFullscreen()) {
+    await exitPreviewFullscreen();
+  }
+  previewModal.hide();
+}
+
+previewModalEl.addEventListener("shown.bs.modal", () => {
+  previewVideo.focus();
+});
+
+document.addEventListener("keydown", (event) => {
+  if (!isPreviewVisible() || event.altKey || event.ctrlKey || event.metaKey) return;
+
+  if (event.key === "Escape") {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    void closePreviewModal();
+    return;
+  }
+
+  if (!event.repeat && (event.key === "f" || event.key === "F")) {
+    event.preventDefault();
+    void togglePreviewFullscreen();
+  }
+});
 
 function openHLSPlayer(url, title = "") {
-  const video = document.getElementById("previewVideo");
-  const titleEl = document.getElementById("previewModalTitle");
-  if (titleEl) {
-    titleEl.innerHTML = `<i class="fas fa-play-circle me-2 text-primary"></i>${title ? esc(title) : "Watch"}`;
-  }
+  setPreviewTitle(title ? esc(title) : "Watch");
   if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
-  video.pause();
-  video.removeAttribute("src");
+  previewVideo.pause();
+  previewVideo.removeAttribute("src");
   if (typeof Hls !== "undefined" && Hls.isSupported()) {
     hlsInstance = new Hls({ enableWorker: false });
     hlsInstance.loadSource(url);
-    hlsInstance.attachMedia(video);
-    hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => video.play().catch(() => {}));
+    hlsInstance.attachMedia(previewVideo);
+    hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => previewVideo.play().catch(() => {}));
     hlsInstance.on(Hls.Events.ERROR, (_evt, data) => {
       if (data.fatal) toast("Stream error: " + (data.details || "unknown"), "danger");
     });
-  } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
-    video.src = url;
-    video.play().catch(() => {});
+  } else if (previewVideo.canPlayType("application/vnd.apple.mpegurl")) {
+    previewVideo.src = url;
+    previewVideo.play().catch(() => {});
   } else {
     toast("HLS playback not supported in this browser", "danger");
     return;
   }
-  new bootstrap.Modal(document.getElementById("previewModal")).show();
+  previewModal.show();
 }
 
 function openPreviewDirect(url) {
-  const video = document.getElementById("previewVideo");
-  const titleEl = document.getElementById("previewModalTitle");
-  if (titleEl) {
-    titleEl.innerHTML = '<i class="fas fa-play-circle me-2 text-primary"></i>Preview';
-  }
+  setPreviewTitle("Preview");
   if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
-  video.pause();
-  video.src = url;
-  new bootstrap.Modal(document.getElementById("previewModal")).show();
-  video.play().catch(() => {});
+  previewVideo.pause();
+  previewVideo.src = url;
+  previewModal.show();
+  previewVideo.play().catch(() => {});
 }
 
 function openPreview(taskId) {
-  const video = document.getElementById("previewVideo");
-  const titleEl = document.getElementById("previewModalTitle");
-  if (titleEl) {
-    titleEl.innerHTML = '<i class="fas fa-play-circle me-2 text-primary"></i>Preview';
-  }
+  setPreviewTitle("Preview");
   if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
-  video.pause();
-  video.removeAttribute("src");
+  previewVideo.pause();
+  previewVideo.removeAttribute("src");
 
   const src = `/api/tasks/${taskId}/preview.m3u8`;
   if (typeof Hls !== "undefined" && Hls.isSupported()) {
     hlsInstance = new Hls({ enableWorker: false });
     hlsInstance.loadSource(src);
-    hlsInstance.attachMedia(video);
-    hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => video.play().catch(() => {}));
-  } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
-    video.src = src;
-    video.play().catch(() => {});
+    hlsInstance.attachMedia(previewVideo);
+    hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => previewVideo.play().catch(() => {}));
+  } else if (previewVideo.canPlayType("application/vnd.apple.mpegurl")) {
+    previewVideo.src = src;
+    previewVideo.play().catch(() => {});
   } else {
     toast("HLS preview requires Chrome with hls.js loaded", "danger");
     return;
   }
-  new bootstrap.Modal(document.getElementById("previewModal")).show();
+  previewModal.show();
 }
 
-document.getElementById("previewModal").addEventListener("hidden.bs.modal", () => {
-  const video = document.getElementById("previewVideo");
-  const titleEl = document.getElementById("previewModalTitle");
-  if (titleEl) {
-    titleEl.innerHTML = '<i class="fas fa-play-circle me-2 text-primary"></i>Preview';
-  }
+previewModalEl.addEventListener("hidden.bs.modal", () => {
+  setPreviewTitle("Preview");
   if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
-  video.pause();
-  video.removeAttribute("src");
-  video.load();
+  previewVideo.pause();
+  previewVideo.removeAttribute("src");
+  previewVideo.load();
 });
 
 // ── Load existing tasks on page load ─────────────────────────────────────────

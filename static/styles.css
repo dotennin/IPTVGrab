@@ -413,3 +413,10 @@ textarea.form-control {
   color: #e6edf3;
   border-color: #388bfd;
 }
+
+/* ── Preview modal ────────────────────────────────────────────────────────── */
+#previewVideo:focus,
+#previewVideo:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
