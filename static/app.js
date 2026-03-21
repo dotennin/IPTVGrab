@@ -69,20 +69,15 @@ function formatDuration(sec) {
 
 function toast(msg, type = "success") {
   const id = "t" + Date.now();
-  const colors = { success: "bg-success", danger: "bg-danger", info: "bg-primary" };
-  const html = `
-    <div id="${id}" class="toast align-items-center text-white border-0 ${colors[type] || ""}"
-         role="alert" data-bs-delay="3500">
-      <div class="d-flex">
-        <div class="toast-body">${esc(msg)}</div>
-        <button type="button" class="btn-close btn-close-white me-2 m-auto"
-                data-bs-dismiss="toast"></button>
-      </div>
-    </div>`;
-  document.getElementById("toastContainer").insertAdjacentHTML("beforeend", html);
+  const typeClass = { success: "toast-success", danger: "toast-danger", info: "toast-info" }[type] || "toast-success";
+  const html = `<div id="${id}" class="tw-toast ${typeClass}" role="alert">
+    <span>${esc(msg)}</span>
+    <button class="tw-toast-close" onclick="this.parentElement.remove()">✕</button>
+  </div>`;
+  const container = document.getElementById("toastContainer");
+  container.insertAdjacentHTML("beforeend", html);
   const el = document.getElementById(id);
-  new bootstrap.Toast(el).show();
-  el.addEventListener("hidden.bs.toast", () => el.remove());
+  setTimeout(() => { el.style.opacity = "0"; setTimeout(() => el.remove(), 300); }, 3500);
 }
 
 // ── Health check helpers ──────────────────────────────────────────────────────
@@ -1366,7 +1361,9 @@ async function selectPlaylist(id) {
       document.getElementById("healthOnlyWrap").classList.remove("d-none");
       countBadge.textContent = allChannels.length;
       refreshBtn.disabled = true;
+      refreshBtn.classList.add("d-none");
       document.getElementById("editPlaylistBtn").disabled = true;
+      document.getElementById("editPlaylistBtn").classList.add("d-none");
       deleteBtn.disabled = true;
       document.getElementById("editAllPlaylistsBtn").classList.remove("d-none");
       document.getElementById("refreshAllPlaylistsBtn").classList.remove("d-none");
@@ -1390,7 +1387,9 @@ async function selectPlaylist(id) {
     document.getElementById("healthOnlyWrap").classList.remove("d-none");
     countBadge.textContent = allChannels.length;
     refreshBtn.disabled = !currentPlaylist.url;
+    refreshBtn.classList.remove("d-none");
     document.getElementById("editPlaylistBtn").disabled = false;
+    document.getElementById("editPlaylistBtn").classList.remove("d-none");
     document.getElementById("editAllPlaylistsBtn").classList.add("d-none");
     document.getElementById("refreshAllPlaylistsBtn").classList.add("d-none");
     deleteBtn.disabled = false;
