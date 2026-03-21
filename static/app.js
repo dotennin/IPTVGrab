@@ -6,6 +6,11 @@ let currentRequest = { url: "", headers: {} };
 let currentStreamInfo = null;
 const pollingTimers = {};
 
+// ── Health check state ────────────────────────────────────────────────────────
+let healthCache = {};  // url -> {status: "ok"|"dead", checked_at}
+let _healthPollTimer = null;
+let healthOnlyFilter = false;  // show only "ok" channels when true
+
 // ── Auth helpers ─────────────────────────────────────────────────────────────
 async function apiFetch(url, options = {}) {
   const res = await fetch(url, options);
@@ -80,7 +85,92 @@ function toast(msg, type = "success") {
   el.addEventListener("hidden.bs.toast", () => el.remove());
 }
 
-// ── Concurrency slider ────────────────────────────────────────────────────────
+// ── Health check helpers ──────────────────────────────────────────────────────
+
+function _healthDot(url) {
+  const h = healthCache[url];
+  const cls = h ? (h.status === "ok" ? "health-ok" : "health-dead") : "health-unknown";
+  const title = h ? (h.status === "ok" ? "Reachable" : "Unreachable") : "Not checked";
+  return `<span class="health-dot ${cls}" data-health-url="${esc(url)}" title="${title}"></span>`;
+}
+
+function _healthDotInline(url) {
+  const h = healthCache[url];
+  if (!h) return "";
+  const cls = h.status === "ok" ? "health-ok" : "health-dead";
+  const title = h.status === "ok" ? "Reachable" : "Unreachable";
+  return `<span class="health-dot-inline ${cls}" data-health-url="${esc(url)}" title="${title}"></span>`;
+}
+
+function updateHealthDots() {
+  document.querySelectorAll("[data-health-url]").forEach((el) => {
+    const url = el.dataset.healthUrl;
+    const h = healthCache[url];
+    el.classList.remove("health-ok", "health-dead", "health-unknown");
+    if (!h) {
+      el.classList.add("health-unknown");
+      el.title = "Not checked";
+    } else if (h.status === "ok") {
+      el.classList.add("health-ok");
+      el.title = "Reachable";
+    } else {
+      el.classList.add("health-dead");
+      el.title = "Unreachable";
+    }
+  });
+  // If health filter is active, re-render so counts stay accurate
+  if (healthOnlyFilter) {
+    renderChannels(getFilteredChannels());
+  }
+}
+
+function _updateHealthProgress(data) {
+  const badge = document.getElementById("healthProgressBadge");
+  const text = document.getElementById("healthProgressText");
+  if (!badge || !text) return;
+  if (data.running) {
+    badge.classList.remove("d-none");
+    text.textContent = `${data.done} / ${data.total}`;
+  } else {
+    badge.classList.add("d-none");
+  }
+}
+
+function startHealthPoll() {
+  _stopHealthPoll();
+  const poll = async () => {
+    try {
+      const res = await apiFetch("/api/health-check");
+      if (!res.ok) return;
+      const data = await res.json();
+      healthCache = data.cache || {};
+      _updateHealthProgress(data);
+      updateHealthDots();
+      if (!data.running) _stopHealthPoll();
+    } catch (_) {}
+  };
+  poll();
+  _healthPollTimer = setInterval(poll, 2000);
+}
+
+function _stopHealthPoll() {
+  if (_healthPollTimer) {
+    clearInterval(_healthPollTimer);
+    _healthPollTimer = null;
+  }
+}
+
+async function refreshHealthOnce() {
+  try {
+    const res = await apiFetch("/api/health-check");
+    if (!res.ok) return;
+    const data = await res.json();
+    healthCache = data.cache || {};
+    _updateHealthProgress(data);
+    updateHealthDots();
+    if (data.running && !_healthPollTimer) startHealthPoll();
+  } catch (_) {}
+}
 document.getElementById("concurrency").addEventListener("input", (e) => {
   document.getElementById("concurrencyVal").textContent = e.target.value;
 });
@@ -1226,11 +1316,17 @@ async function selectPlaylist(id) {
   const refreshBtn = document.getElementById("refreshPlaylistBtn");
   const deleteBtn = document.getElementById("deletePlaylistBtn");
 
+  // Reset health filter on playlist switch
+  healthOnlyFilter = false;
+  const healthOnlyCheck = document.getElementById("healthOnlyCheck");
+  if (healthOnlyCheck) healthOnlyCheck.checked = false;
+
   if (!id) {
     currentPlaylist = null;
     allChannels = [];
     renderChannels([]);
     filterBar.classList.add("d-none");
+    document.getElementById("healthOnlyWrap").classList.add("d-none");
     countBadge.textContent = "0";
     refreshBtn.disabled = true;
     document.getElementById("editPlaylistBtn").disabled = true;
@@ -1259,6 +1355,7 @@ async function selectPlaylist(id) {
       _populateGroupFilter(allChannels);
       document.getElementById("channelSearch").value = "";
       filterBar.classList.remove("d-none");
+      document.getElementById("healthOnlyWrap").classList.remove("d-none");
       countBadge.textContent = allChannels.length;
       refreshBtn.disabled = true;
       document.getElementById("editPlaylistBtn").disabled = true;
@@ -1266,6 +1363,7 @@ async function selectPlaylist(id) {
       document.getElementById("editAllPlaylistsBtn").classList.remove("d-none");
       document.getElementById("refreshAllPlaylistsBtn").classList.remove("d-none");
       renderChannels(allChannels);
+      refreshHealthOnce();
     } catch (e) {
       toast(e.message, "danger");
     }
@@ -1280,6 +1378,7 @@ async function selectPlaylist(id) {
     _populateGroupFilter(allChannels);
     document.getElementById("channelSearch").value = "";
     filterBar.classList.remove("d-none");
+    document.getElementById("healthOnlyWrap").classList.remove("d-none");
     countBadge.textContent = allChannels.length;
     refreshBtn.disabled = !currentPlaylist.url;
     document.getElementById("editPlaylistBtn").disabled = false;
@@ -1287,6 +1386,7 @@ async function selectPlaylist(id) {
     document.getElementById("refreshAllPlaylistsBtn").classList.add("d-none");
     deleteBtn.disabled = false;
     renderChannels(allChannels);
+    refreshHealthOnce();
   } catch (e) {
     toast(e.message, "danger");
   }
@@ -1302,7 +1402,8 @@ function getFilteredChannels() {
       (ch.group || "").toLowerCase().includes(search) ||
       (ch.playlist_name || "").toLowerCase().includes(search);
     const matchGroup = !group || ch.group === group;
-    return matchSearch && matchGroup;
+    const matchHealth = !healthOnlyFilter || (healthCache[ch.url] && healthCache[ch.url].status === "ok");
+    return matchSearch && matchGroup && matchHealth;
   });
 }
 
@@ -1333,6 +1434,7 @@ function renderChannels(channels) {
     .map(
       (ch, i) => `
     <div class="channel-card">
+      ${_healthDot(ch.url)}
       <div class="channel-logo-wrap">
         ${
           ch.tvg_logo
@@ -1431,6 +1533,11 @@ document.getElementById("groupFilter").addEventListener("change", () => {
   renderChannels(getFilteredChannels());
 });
 
+document.getElementById("healthOnlyCheck").addEventListener("change", (e) => {
+  healthOnlyFilter = e.target.checked;
+  renderChannels(getFilteredChannels());
+});
+
 document.getElementById("refreshPlaylistBtn").addEventListener("click", async () => {
   if (!currentPlaylist) return;
   const btn = document.getElementById("refreshPlaylistBtn");
@@ -1443,6 +1550,7 @@ document.getElementById("refreshPlaylistBtn").addEventListener("click", async ()
     await selectPlaylist(currentPlaylist.id);
     await loadPlaylists();
     toast(`Refreshed: ${data.channel_count} channels`, "success");
+    startHealthPoll();
   } catch (e) {
     toast(e.message, "danger");
   } finally {
@@ -1539,6 +1647,7 @@ document.getElementById("savePlaylistBtn").addEventListener("click", async () =>
     document.getElementById("playlistSelect").value = data.id;
     await selectPlaylist(data.id);
     toast(`Playlist added: ${data.channel_count} channels`, "success");
+    startHealthPoll();
   } catch (e) {
     toast(e.message, "danger");
   } finally {
@@ -1682,7 +1791,7 @@ function renderEditorChannels() {
       }
       <div class="ch-logo-fallback" ${ch.tvg_logo ? 'style="display:none"' : ""}><i class="fas fa-tv"></i></div>
       <div class="flex-grow-1" style="min-width:0">
-        <div class="editor-item-name" title="${esc(ch.name)}">${esc(ch.name || ch.url)}</div>
+        <div class="editor-item-name" title="${esc(ch.name)}">${esc(ch.name || ch.url)} ${_healthDotInline(ch.url)}</div>
         <div class="editor-channel-url" title="${esc(ch.url)}">${esc(ch.url)}</div>
         ${ch.source_playlist_name ? `<div class="editor-channel-source">${esc(ch.source_playlist_name)}</div>` : ""}
       </div>
@@ -1771,6 +1880,7 @@ document.getElementById("refreshAllPlaylistsBtn").addEventListener("click", asyn
     let msg = `Refreshed: ${data.total_channels} channels`;
     if (data.errors?.length) msg += ` (${data.errors.length} error(s))`;
     toast(msg, "success");
+    startHealthPoll();
   } catch (e) {
     toast(e.message, "danger");
   } finally {
@@ -1830,6 +1940,7 @@ document.getElementById("editorRefreshAllBtn").addEventListener("click", async (
     let msg = `Refreshed: ${data.total_channels} channels`;
     if (data.errors?.length) msg += ` (${data.errors.length} error(s))`;
     toast(msg, "success");
+    startHealthPoll();
   } catch (e) {
     toast(e.message, "danger");
   } finally {

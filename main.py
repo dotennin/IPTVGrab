@@ -109,6 +109,10 @@ DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
 TASKS_FILE = DOWNLOADS_DIR / "tasks.json"
 PLAYLISTS_FILE = DOWNLOADS_DIR / "playlists.json"
 MERGED_FILE = DOWNLOADS_DIR / "merged_config.json"
+HEALTH_FILE = DOWNLOADS_DIR / "health_cache.json"
+
+_HEALTH_CONCURRENCY = 15
+_HEALTH_TIMEOUT = 8
 
 # ── Task persistence ─────────────────────────────────────────────────────────
 
@@ -188,6 +192,71 @@ def save_merged_config():
 merged_config: dict = load_merged_config()
 
 
+# ── Health check ──────────────────────────────────────────────────────────────
+
+def load_health_cache() -> dict:
+    if HEALTH_FILE.exists():
+        try:
+            return json.loads(HEALTH_FILE.read_text())
+        except Exception:
+            return {}
+    return {}
+
+
+def save_health_cache():
+    try:
+        HEALTH_FILE.write_text(json.dumps(health_cache, indent=2))
+    except Exception:
+        pass
+
+
+health_cache: dict = load_health_cache()  # {url: {"status": "ok"|"dead", "checked_at": float}}
+health_check_state: dict = {"running": False, "total": 0, "done": 0, "started_at": 0.0}
+_health_gen: int = 0
+_health_task: Optional[asyncio.Task] = None
+
+
+async def _run_health_check(urls: list, gen: int):
+    global health_check_state
+    deduped = list(dict.fromkeys(u for u in urls if u and u.startswith(("http://", "https://"))))
+    if not deduped:
+        if _health_gen == gen:
+            health_check_state["running"] = False
+        return
+    health_check_state.update({"running": True, "total": len(deduped), "done": 0, "started_at": time.time()})
+    sem = asyncio.Semaphore(_HEALTH_CONCURRENCY)
+
+    async def check_one(session: aiohttp.ClientSession, url: str):
+        async with sem:
+            try:
+                async with session.get(url, allow_redirects=True, ssl=False) as resp:
+                    st = "ok" if resp.status < 400 else "dead"
+            except Exception:
+                st = "dead"
+            health_cache[url] = {"status": st, "checked_at": time.time()}
+            health_check_state["done"] += 1
+
+    try:
+        timeout = aiohttp.ClientTimeout(total=_HEALTH_TIMEOUT)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            await asyncio.gather(*[check_one(session, url) for url in deduped])
+    except (asyncio.CancelledError, Exception):
+        pass
+    finally:
+        if _health_gen == gen:
+            health_check_state["running"] = False
+        save_health_cache()
+
+
+def _trigger_health_check(urls: list):
+    global _health_task, _health_gen
+    _health_gen += 1
+    gen = _health_gen
+    if _health_task and not _health_task.done():
+        _health_task.cancel()
+    _health_task = asyncio.create_task(_run_health_check(urls, gen))
+
+
 def build_merged_view() -> list:
     """Build the full merged group+channel tree from all playlists + config.
 
@@ -232,10 +301,6 @@ def build_merged_view() -> list:
 
     # Merge with existing config
     existing_group_names = {g["name"] for g in existing_groups}
-    existing_channel_ids = set()
-    for g in existing_groups:
-        for ch in g.get("channels", []):
-            existing_channel_ids.add(ch["id"])
 
     result = []
     for eg in existing_groups:
@@ -812,6 +877,7 @@ async def add_playlist(req: AddPlaylistRequest):
         "updated_at": time.time(),
     }
     save_playlists()
+    _trigger_health_check([ch["url"] for ch in channels if ch.get("url")])
     return {"id": pl_id, "channel_count": len(channels)}
 
 
@@ -869,6 +935,7 @@ async def refresh_playlist(pl_id: str):
     playlists[pl_id]["channel_count"] = len(channels)
     playlists[pl_id]["updated_at"] = time.time()
     save_playlists()
+    _trigger_health_check([ch["url"] for ch in channels if ch.get("url")])
     return {"channel_count": len(channels)}
 
 
@@ -1042,6 +1109,9 @@ async def refresh_all_playlists():
     merged_config["groups"] = build_merged_view()
     save_merged_config()
 
+    all_urls = [ch["url"] for g in merged_config["groups"] for ch in g.get("channels", []) if ch.get("url")]
+    _trigger_health_check(all_urls)
+
     total = sum(pl.get("channel_count", 0) for pl in playlists.values())
     return {"ok": True, "total_channels": total, "errors": errors}
 
@@ -1062,6 +1132,28 @@ async def export_m3u():
             lines.append(ch.get("url", ""))
     content = "\n".join(lines) + "\n"
     return Response(content=content, media_type="text/plain; charset=utf-8")
+
+
+# ── Health check routes ───────────────────────────────────────────────────────
+
+@app.get("/api/health-check")
+async def get_health_status():
+    return {
+        "running": health_check_state["running"],
+        "total": health_check_state["total"],
+        "done": health_check_state["done"],
+        "started_at": health_check_state["started_at"],
+        "cache": health_cache,
+    }
+
+
+@app.post("/api/health-check")
+async def trigger_health_check_route():
+    """Manually trigger health check for all enabled channels."""
+    groups = merged_config.get("groups") or build_merged_view()
+    urls = [ch["url"] for g in groups for ch in g.get("channels", []) if ch.get("url")]
+    _trigger_health_check(urls)
+    return {"ok": True, "total": len(set(urls))}
 
 
 # ── Static files (must be last) ───────────────────────────────────────────────

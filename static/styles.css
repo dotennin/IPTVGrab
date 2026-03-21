@@ -235,6 +235,7 @@ textarea.form-control {
 }
 
 .channel-card {
+  position: relative;
   background-color: #0d1117;
   border: 1px solid var(--card-border);
   border-radius: 8px;
@@ -336,7 +337,39 @@ textarea.form-control {
   flex: 1;
 }
 
-/* ── Downloads sidebar layout ────────────────────────────────────────────── */
+/* ── Health status dots ──────────────────────────────────────────────────── */
+.health-dot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.health-dot-inline {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+
+.health-ok {
+  background-color: #3fb950;
+  box-shadow: 0 0 5px rgba(63, 185, 80, 0.7);
+}
+
+.health-dead {
+  background-color: #f85149;
+  box-shadow: 0 0 5px rgba(248, 81, 73, 0.6);
+}
+
+.health-unknown {
+  background-color: #484f58;
+}
 .downloads-layout {
   display: flex;
   min-height: 160px;
