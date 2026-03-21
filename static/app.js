@@ -911,7 +911,16 @@ function openHLSPlayer(url, title = "") {
 }
 
 function openPreviewDirect(url) {
-  openHLSPlayer(url, "Preview");
+  const video = document.getElementById("previewVideo");
+  const titleEl = document.getElementById("previewModalTitle");
+  if (titleEl) {
+    titleEl.innerHTML = '<i class="fas fa-play-circle me-2 text-primary"></i>Preview';
+  }
+  if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
+  video.pause();
+  video.src = url;
+  new bootstrap.Modal(document.getElementById("previewModal")).show();
+  video.play().catch(() => {});
 }
 
 function openPreview(taskId) {
