@@ -221,3 +221,92 @@ textarea.form-control {
   font-size: 0.78rem;
   padding: 2px 8px;
 }
+
+/* ── Channel grid (IPTV Playlists) ──────────────────────────────────────── */
+#channelGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 10px;
+}
+
+.channel-grid-body {
+  overflow-y: auto;
+  max-height: 520px;
+}
+
+.channel-card {
+  background-color: #0d1117;
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  padding: 12px 10px 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 6px;
+  transition: border-color 0.15s ease;
+}
+
+.channel-card:hover {
+  border-color: #388bfd;
+}
+
+.channel-logo-wrap {
+  width: 60px;
+  height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.channel-logo {
+  max-width: 60px;
+  max-height: 42px;
+  object-fit: contain;
+  border-radius: 4px;
+}
+
+.channel-logo-fallback {
+  width: 42px;
+  height: 42px;
+  background-color: #21262d;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 1.1rem;
+}
+
+.channel-name {
+  font-size: 0.78rem;
+  font-weight: 500;
+  line-height: 1.3;
+  max-height: 2.6em;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  width: 100%;
+  word-break: break-word;
+}
+
+.channel-group {
+  font-size: 0.68rem;
+  color: var(--muted);
+  background-color: #21262d;
+  padding: 1px 7px;
+  border-radius: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.channel-dl-btn {
+  font-size: 0.7rem;
+  padding: 3px 8px;
+  width: 100%;
+  margin-top: auto;
+}

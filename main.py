@@ -9,6 +9,7 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
+import aiohttp
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
@@ -105,6 +106,7 @@ app.add_middleware(NoCacheStaticMiddleware)
 DOWNLOADS_DIR = Path(os.environ.get("DOWNLOADS_DIR", "downloads"))
 DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
 TASKS_FILE = DOWNLOADS_DIR / "tasks.json"
+PLAYLISTS_FILE = DOWNLOADS_DIR / "playlists.json"
 
 # ── Task persistence ─────────────────────────────────────────────────────────
 
@@ -137,6 +139,66 @@ tasks: dict = load_tasks()
 downloaders: dict = {}
 
 
+# ── Playlist persistence ──────────────────────────────────────────────────────
+
+def load_playlists() -> dict:
+    if PLAYLISTS_FILE.exists():
+        try:
+            return json.loads(PLAYLISTS_FILE.read_text())
+        except Exception:
+            return {}
+    return {}
+
+
+def save_playlists():
+    try:
+        PLAYLISTS_FILE.write_text(json.dumps(playlists, indent=2, default=str))
+    except Exception:
+        pass
+
+
+playlists: dict = load_playlists()
+
+
+def parse_m3u_playlist(text: str) -> list:
+    """Parse IPTV M3U playlist into a list of channel dicts.
+
+    Handles the standard IPTV #EXTINF format:
+        #EXTINF:-1 tvg-id="..." tvg-name="..." tvg-logo="..." group-title="...",Display Name
+        http://stream-url
+    """
+    channels = []
+    lines = text.splitlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+        if line.upper().startswith("#EXTINF:"):
+            channel: dict = {"name": "", "url": "", "tvg_id": "", "tvg_name": "", "tvg_logo": "", "group": ""}
+            comma_pos = line.rfind(",")
+            attr_part = line[8:comma_pos] if comma_pos != -1 else line[8:]
+            if comma_pos != -1:
+                channel["name"] = line[comma_pos + 1:].strip()
+            for attr, key in [("tvg-id", "tvg_id"), ("tvg-name", "tvg_name"),
+                               ("tvg-logo", "tvg_logo"), ("group-title", "group")]:
+                m = re.search(rf'{attr}="([^"]*)"', attr_part, re.IGNORECASE)
+                if m:
+                    channel[key] = m.group(1)
+            if not channel["name"] and channel["tvg_name"]:
+                channel["name"] = channel["tvg_name"]
+            # Find next URL line
+            i += 1
+            while i < len(lines):
+                url_line = lines[i].strip()
+                if url_line and not url_line.startswith("#"):
+                    channel["url"] = url_line
+                    if channel["name"] or channel["url"]:
+                        channels.append(channel)
+                    break
+                i += 1
+        i += 1
+    return channels
+
+
 # ── Pydantic models ─────────────────────────────────────────────────────────
 
 class ParseRequest(BaseModel):
@@ -159,6 +221,12 @@ class BatchRequest(BaseModel):
     quality: str = "best"
     task_parallelism: int = 3   # how many tasks download simultaneously
     concurrency: int = 4        # per-task segment concurrency
+
+
+class AddPlaylistRequest(BaseModel):
+    name: str = ""
+    url: str = ""
+    text: str = ""  # raw M3U text (alternative to URL)
 
 
 # ── Auth routes ──────────────────────────────────────────────────────────────
@@ -623,6 +691,101 @@ async def _run_download(task_id: str, req: DownloadRequest):
         if tasks.get(task_id, {}).get("_auto_delete"):
             del tasks[task_id]
             save_tasks()
+
+
+# ── Playlist routes ───────────────────────────────────────────────────────────
+
+@app.get("/api/playlists")
+async def list_playlists():
+    result = [{k: v for k, v in pl.items() if k != "channels"} for pl in playlists.values()]
+    return sorted(result, key=lambda p: p.get("created_at", 0), reverse=True)
+
+
+@app.post("/api/playlists")
+async def add_playlist(req: AddPlaylistRequest):
+    if not req.url and not req.text:
+        raise HTTPException(400, "URL or playlist text is required")
+
+    raw_text = req.text
+    source_url = req.url.strip()
+
+    if source_url and not raw_text:
+        try:
+            timeout = aiohttp.ClientTimeout(total=30)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(source_url) as resp:
+                    if resp.status != 200:
+                        raise HTTPException(400, f"Failed to fetch playlist: HTTP {resp.status}")
+                    raw_text = await resp.text(errors="replace")
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(400, f"Failed to fetch playlist: {e}")
+
+    channels = parse_m3u_playlist(raw_text)
+    if not channels:
+        raise HTTPException(400, "No channels found in playlist")
+
+    pl_id = str(uuid.uuid4())
+    auto_name = source_url.split("/")[-1].split("?")[0] if source_url else "Playlist"
+    name = req.name.strip() or auto_name or "Playlist"
+    playlists[pl_id] = {
+        "id": pl_id,
+        "name": name,
+        "url": source_url,
+        "channel_count": len(channels),
+        "channels": channels,
+        "created_at": time.time(),
+        "updated_at": time.time(),
+    }
+    save_playlists()
+    return {"id": pl_id, "channel_count": len(channels)}
+
+
+@app.get("/api/playlists/{pl_id}")
+async def get_playlist(pl_id: str):
+    if pl_id not in playlists:
+        raise HTTPException(404, "Playlist not found")
+    return playlists[pl_id]
+
+
+@app.delete("/api/playlists/{pl_id}")
+async def delete_playlist(pl_id: str):
+    if pl_id not in playlists:
+        raise HTTPException(404, "Playlist not found")
+    del playlists[pl_id]
+    save_playlists()
+    return {"ok": True}
+
+
+@app.post("/api/playlists/{pl_id}/refresh")
+async def refresh_playlist(pl_id: str):
+    if pl_id not in playlists:
+        raise HTTPException(404, "Playlist not found")
+    pl = playlists[pl_id]
+    if not pl.get("url"):
+        raise HTTPException(400, "Playlist has no URL to refresh from")
+    try:
+        timeout = aiohttp.ClientTimeout(total=30)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(pl["url"]) as resp:
+                if resp.status != 200:
+                    raise HTTPException(400, f"Failed to fetch playlist: HTTP {resp.status}")
+                raw_text = await resp.text(errors="replace")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(400, f"Failed to fetch playlist: {e}")
+
+    channels = parse_m3u_playlist(raw_text)
+    if not channels:
+        raise HTTPException(400, "No channels found in refreshed playlist")
+
+    playlists[pl_id]["channels"] = channels
+    playlists[pl_id]["channel_count"] = len(channels)
+    playlists[pl_id]["updated_at"] = time.time()
+    save_playlists()
+    return {"channel_count": len(channels)}
 
 
 # ── Static files (must be last) ───────────────────────────────────────────────

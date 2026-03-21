@@ -114,6 +114,20 @@ document.getElementById("batch-tab").addEventListener("shown.bs.tab", () => {
   document.getElementById("parseBtnGroup").classList.add("d-none");
 });
 
+document.getElementById("playlist-tab").addEventListener("shown.bs.tab", () => {
+  document.getElementById("outputSettingsRow").classList.add("d-none");
+  document.getElementById("parseBtnGroup").classList.add("d-none");
+  document.getElementById("streamInfoPanel").classList.add("d-none");
+  document.getElementById("channelGridPanel").classList.remove("d-none");
+});
+
+["url-tab", "curl-tab", "batch-tab"].forEach((id) => {
+  document.getElementById(id).addEventListener("shown.bs.tab", () => {
+    document.getElementById("streamInfoPanel").classList.remove("d-none");
+    document.getElementById("channelGridPanel").classList.add("d-none");
+  });
+});
+
 ["url-tab", "curl-tab"].forEach((id) => {
   document.getElementById(id).addEventListener("shown.bs.tab", () => {
     document.getElementById("outputSettingsRow").classList.remove("d-none");
@@ -892,3 +906,266 @@ document.getElementById("previewModal").addEventListener("hidden.bs.modal", () =
     });
   } catch (_) {}
 })();
+
+// ── IPTV Playlists ────────────────────────────────────────────────────────────
+
+let currentPlaylist = null;
+let allChannels = [];
+
+async function loadPlaylists({ autoSelect = false } = {}) {
+  try {
+    const res = await apiFetch("/api/playlists");
+    if (!res.ok) return;
+    const list = await res.json();
+    const sel = document.getElementById("playlistSelect");
+    const prev = sel.value;
+    sel.innerHTML = '<option value="">-- Select playlist --</option>';
+    for (const pl of list) {
+      const opt = document.createElement("option");
+      opt.value = pl.id;
+      opt.textContent = `${pl.name} (${pl.channel_count})`;
+      sel.appendChild(opt);
+    }
+    if (prev && [...sel.options].some((o) => o.value === prev)) {
+      sel.value = prev;
+    } else if (autoSelect && list.length > 0 && !currentPlaylist) {
+      // Auto-select the first playlist on initial page load
+      sel.value = list[0].id;
+      await selectPlaylist(list[0].id);
+    }
+  } catch (_) {}
+}
+
+async function selectPlaylist(id) {
+  const filterBar = document.getElementById("channelFilterBar");
+  const countBadge = document.getElementById("channelCountBadge");
+  const refreshBtn = document.getElementById("refreshPlaylistBtn");
+  const deleteBtn = document.getElementById("deletePlaylistBtn");
+
+  if (!id) {
+    currentPlaylist = null;
+    allChannels = [];
+    renderChannels([]);
+    filterBar.classList.add("d-none");
+    countBadge.textContent = "0";
+    refreshBtn.disabled = true;
+    deleteBtn.disabled = true;
+    return;
+  }
+  try {
+    const res = await apiFetch(`/api/playlists/${id}`);
+    if (!res.ok) throw new Error("Failed to load playlist");
+    currentPlaylist = await res.json();
+    allChannels = currentPlaylist.channels || [];
+
+    // Rebuild group filter using createElement (no innerHTML re-parsing issues)
+    const gSel = document.getElementById("groupFilter");
+    gSel.innerHTML = "";
+    const allOpt = document.createElement("option");
+    allOpt.value = "";
+    allOpt.textContent = "All groups";
+    gSel.appendChild(allOpt);
+    const groups = [...new Set(allChannels.map((c) => c.group).filter(Boolean))].sort();
+    for (const g of groups) {
+      const opt = document.createElement("option");
+      opt.value = g;
+      opt.textContent = g;
+      gSel.appendChild(opt);
+    }
+
+    document.getElementById("channelSearch").value = "";
+    filterBar.classList.remove("d-none");
+    countBadge.textContent = allChannels.length;
+    refreshBtn.disabled = !currentPlaylist.url;
+    deleteBtn.disabled = false;
+    renderChannels(allChannels);
+  } catch (e) {
+    toast(e.message, "danger");
+  }
+}
+
+function getFilteredChannels() {
+  const search = document.getElementById("channelSearch").value.toLowerCase();
+  const group = document.getElementById("groupFilter").value;
+  return allChannels.filter((ch) => {
+    const matchSearch =
+      !search ||
+      (ch.name || "").toLowerCase().includes(search) ||
+      (ch.group || "").toLowerCase().includes(search);
+    const matchGroup = !group || ch.group === group;
+    return matchSearch && matchGroup;
+  });
+}
+
+function renderChannels(channels) {
+  const grid = document.getElementById("channelGrid");
+  const placeholder = document.getElementById("channelPlaceholder");
+  // channelPlaceholder is a SIBLING of channelGrid — NOT inside it.
+  // Setting grid.innerHTML never removes it from the DOM, fixing the crash.
+
+  const filterCountEl = document.getElementById("channelFilterCount");
+  if (filterCountEl) {
+    filterCountEl.textContent =
+      allChannels.length > 0 && channels.length !== allChannels.length
+        ? `${channels.length} / ${allChannels.length}`
+        : channels.length
+        ? `${channels.length} channels`
+        : "";
+  }
+
+  if (!channels.length) {
+    grid.innerHTML = "";
+    placeholder.classList.remove("d-none");
+    return;
+  }
+  placeholder.classList.add("d-none");
+
+  grid.innerHTML = channels
+    .map(
+      (ch, i) => `
+    <div class="channel-card">
+      <div class="channel-logo-wrap">
+        ${
+          ch.tvg_logo
+            ? `<img src="${esc(ch.tvg_logo)}" class="channel-logo" alt=""
+                 onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" />
+               <div class="channel-logo-fallback" style="display:none"><i class="fas fa-tv"></i></div>`
+            : `<div class="channel-logo-fallback"><i class="fas fa-tv"></i></div>`
+        }
+      </div>
+      <div class="channel-name" title="${esc(ch.name)}">${esc(ch.name || ch.url)}</div>
+      ${ch.group ? `<div class="channel-group">${esc(ch.group)}</div>` : ""}
+      <button class="btn btn-sm btn-primary channel-dl-btn" data-ch-idx="${i}">
+        <i class="fas fa-download me-1"></i>Download
+      </button>
+    </div>`
+    )
+    .join("");
+
+  // Bind download buttons — closure captures the current filtered channels array
+  grid.querySelectorAll(".channel-dl-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const idx = parseInt(btn.dataset.chIdx, 10);
+      downloadChannel(channels[idx]);
+    });
+  });
+}
+
+async function downloadChannel(ch) {
+  try {
+    const res = await apiFetch("/api/download", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: ch.url, output_name: ch.name || null, quality: "best", concurrency: 8 }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Failed to start download");
+
+    const taskRes = await apiFetch(`/api/tasks/${data.task_id}`);
+    if (taskRes.ok) {
+      const task = await taskRes.json();
+      addTaskCard(task.id, task.url || "");
+      updateTaskCard(task.id, task);
+      startPolling(task.id);
+    }
+    document.getElementById("downloadsList").scrollIntoView({ behavior: "smooth" });
+    toast(`Started: ${ch.name || ch.url}`, "success");
+  } catch (e) {
+    toast(e.message, "danger");
+  }
+}
+
+// ── Playlist event listeners ──────────────────────────────────────────────────
+
+document.getElementById("playlistSelect").addEventListener("change", (e) => {
+  selectPlaylist(e.target.value);
+});
+
+document.getElementById("channelSearch").addEventListener("input", () => {
+  renderChannels(getFilteredChannels());
+});
+
+document.getElementById("groupFilter").addEventListener("change", () => {
+  renderChannels(getFilteredChannels());
+});
+
+document.getElementById("refreshPlaylistBtn").addEventListener("click", async () => {
+  if (!currentPlaylist) return;
+  const btn = document.getElementById("refreshPlaylistBtn");
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+  try {
+    const res = await apiFetch(`/api/playlists/${currentPlaylist.id}/refresh`, { method: "POST" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Refresh failed");
+    await selectPlaylist(currentPlaylist.id);
+    await loadPlaylists();
+    toast(`Refreshed: ${data.channel_count} channels`, "success");
+  } catch (e) {
+    toast(e.message, "danger");
+  } finally {
+    btn.disabled = !currentPlaylist?.url;
+    btn.innerHTML = '<i class="fas fa-sync-alt"></i>';
+  }
+});
+
+document.getElementById("deletePlaylistBtn").addEventListener("click", async () => {
+  if (!currentPlaylist) return;
+  if (!confirm(`Delete playlist "${currentPlaylist.name}"?`)) return;
+  const deletedId = currentPlaylist.id;
+  try {
+    const res = await apiFetch(`/api/playlists/${deletedId}`, { method: "DELETE" });
+    if (!res.ok) throw new Error("Delete failed");
+    currentPlaylist = null;
+    allChannels = [];
+    // Refresh dropdown first, then reset the panel — no page reload needed
+    await loadPlaylists();
+    document.getElementById("playlistSelect").value = "";
+    await selectPlaylist("");
+    toast("Playlist deleted", "success");
+  } catch (e) {
+    toast(e.message, "danger");
+  }
+});
+
+document.getElementById("savePlaylistBtn").addEventListener("click", async () => {
+  const name = document.getElementById("newPlaylistName").value.trim();
+  const url = document.getElementById("newPlaylistUrl").value.trim();
+  const text = document.getElementById("newPlaylistText").value.trim();
+
+  if (!url && !text) {
+    toast("Please provide a playlist URL or paste playlist content", "danger");
+    return;
+  }
+
+  const btn = document.getElementById("savePlaylistBtn");
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Loading...';
+  try {
+    const res = await apiFetch("/api/playlists", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, url, text }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Failed to add playlist");
+
+    bootstrap.Modal.getInstance(document.getElementById("addPlaylistModal")).hide();
+    document.getElementById("newPlaylistName").value = "";
+    document.getElementById("newPlaylistUrl").value = "";
+    document.getElementById("newPlaylistText").value = "";
+
+    await loadPlaylists();
+    document.getElementById("playlistSelect").value = data.id;
+    await selectPlaylist(data.id);
+    toast(`Playlist added: ${data.channel_count} channels`, "success");
+  } catch (e) {
+    toast(e.message, "danger");
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-save me-1"></i>Save';
+  }
+});
+
+// Load playlists on page load (auto-select first if available)
+loadPlaylists({ autoSelect: true });

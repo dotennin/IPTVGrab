@@ -12,7 +12,7 @@
     href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
     rel="stylesheet"
   />
-  <link href="/styles.css?v=10" rel="stylesheet" />
+  <link href="/styles.css?v=12" rel="stylesheet" />
 </head>
 <body>
   <!-- Navbar -->
@@ -74,6 +74,18 @@
                   role="tab"
                 >
                   <i class="fas fa-list me-1"></i>Batch
+                </button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button
+                  class="nav-link"
+                  id="playlist-tab"
+                  data-bs-toggle="tab"
+                  data-bs-target="#playlistPane"
+                  type="button"
+                  role="tab"
+                >
+                  <i class="fas fa-tv me-1"></i>Playlist
                 </button>
               </li>
             </ul>
@@ -147,6 +159,35 @@
                   </button>
                 </div>
               </div>
+              <!-- Playlist tab -->
+              <div class="tab-pane fade" id="playlistPane" role="tabpanel">
+                <div class="d-flex gap-2 mb-3 align-items-center">
+                  <select class="form-select form-select-sm flex-grow-1" id="playlistSelect">
+                    <option value="">-- Select playlist --</option>
+                  </select>
+                  <button class="btn btn-sm btn-outline-secondary" id="refreshPlaylistBtn" title="Refresh from URL" disabled>
+                    <i class="fas fa-sync-alt"></i>
+                  </button>
+                  <button class="btn btn-sm btn-outline-danger" id="deletePlaylistBtn" title="Delete playlist" disabled>
+                    <i class="fas fa-trash"></i>
+                  </button>
+                </div>
+                <button class="btn btn-primary btn-sm w-100 mb-3" data-bs-toggle="modal" data-bs-target="#addPlaylistModal">
+                  <i class="fas fa-plus me-1"></i>Add Playlist
+                </button>
+                <!-- Filter controls (shown once a playlist is loaded) -->
+                <div class="d-none" id="channelFilterBar">
+                  <div class="mb-2">
+                    <input type="text" class="form-control form-control-sm" id="channelSearch" placeholder="Search channels…" />
+                  </div>
+                  <div class="d-flex gap-2 align-items-center">
+                    <select class="form-select form-select-sm flex-grow-1" id="groupFilter">
+                      <option value="">All groups</option>
+                    </select>
+                    <small class="text-muted text-nowrap" id="channelFilterCount"></small>
+                  </div>
+                </div>
+              </div>
             </div>
 
             <hr class="my-3" />
@@ -196,8 +237,8 @@
         </div>
       </div>
 
-      <!-- ── Right panel: Stream info ── -->
-      <div class="col-xl-6">
+      <!-- ── Right panel: Stream info (default) ── -->
+      <div class="col-xl-6" id="streamInfoPanel">
         <div class="card h-100" id="streamInfoCard">
           <div class="card-header d-flex align-items-center justify-content-between">
             <span><i class="fas fa-info-circle me-2"></i>Stream info</span>
@@ -208,6 +249,23 @@
               <i class="fas fa-play-circle fa-3x mb-3 d-block opacity-25"></i>
               <p class="mb-0">Stream info will appear here after parsing</p>
             </div>
+          </div>
+        </div>
+      </div>
+      <!-- ── Right panel: Channel grid (shown when Playlist tab is active) ── -->
+      <div class="col-xl-6 d-none" id="channelGridPanel">
+        <div class="card h-100">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <span><i class="fas fa-tv me-2"></i>Channels</span>
+            <span class="badge bg-secondary ms-1" id="channelCountBadge">0</span>
+          </div>
+          <div class="card-body p-3 channel-grid-body">
+            <!-- Placeholder: NOT inside channelGrid so innerHTML swap won't remove it -->
+            <div class="text-center text-muted py-5" id="channelPlaceholder">
+              <i class="fas fa-tv fa-2x mb-2 d-block opacity-25"></i>
+              <p class="mb-0 small">Select a playlist to browse channels</p>
+            </div>
+            <div id="channelGrid" class="channel-grid"></div>
           </div>
         </div>
       </div>
@@ -229,7 +287,7 @@
               id="clearCompletedBtn"
               type="button"
             >
-              <i class="fas fa-trash me-1"></i>Clear completed
+              <i class="fas fa-trash me-1"></i>Clear finished
             </button>
           </div>
           <div class="card-body p-3" id="downloadsList">
@@ -238,6 +296,55 @@
               <p class="mb-0 small">No tasks yet</p>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add Playlist modal -->
+  <div class="modal fade" id="addPlaylistModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header py-2">
+          <h6 class="modal-title mb-0">
+            <i class="fas fa-plus-circle me-2 text-primary"></i>Add Playlist
+          </h6>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label text-muted small">Playlist Name (optional)</label>
+            <input type="text" class="form-control" id="newPlaylistName" placeholder="My IPTV" />
+          </div>
+          <ul class="nav nav-tabs mb-3" id="addPlaylistTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+              <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#addByUrl" type="button" role="tab">
+                <i class="fas fa-link me-1"></i>URL
+              </button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button class="nav-link" data-bs-toggle="tab" data-bs-target="#addByText" type="button" role="tab">
+                <i class="fas fa-paste me-1"></i>Paste
+              </button>
+            </li>
+          </ul>
+          <div class="tab-content">
+            <div class="tab-pane fade show active" id="addByUrl" role="tabpanel">
+              <input type="url" class="form-control font-mono" id="newPlaylistUrl"
+                placeholder="http://iptv-server.com/playlist.m3u" />
+              <div class="form-text text-muted">Direct link to an M3U/M3U8 IPTV playlist file</div>
+            </div>
+            <div class="tab-pane fade" id="addByText" role="tabpanel">
+              <textarea class="form-control font-mono" id="newPlaylistText" rows="8"
+                placeholder="#EXTM3U&#10;#EXTINF:-1 group-title=&quot;Sports&quot;,Channel 1&#10;http://stream.example.com/ch1.m3u8&#10;#EXTINF:-1 group-title=&quot;News&quot;,Channel 2&#10;http://stream.example.com/ch2.m3u8"></textarea>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer py-2">
+          <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary btn-sm" id="savePlaylistBtn">
+            <i class="fas fa-save me-1"></i>Save
+          </button>
         </div>
       </div>
     </div>
@@ -293,6 +400,6 @@
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
-  <script src="/app.js?v=10"></script>
+  <script src="/app.js?v=12"></script>
 </body>
 </html>
