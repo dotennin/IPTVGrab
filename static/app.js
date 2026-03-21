@@ -1291,12 +1291,14 @@ async function loadPlaylists({ autoSelect = false } = {}) {
 
 let _activeGroup = "";  // currently selected group in sidebar
 
-function _populateGroupFilter(channels) {
+function _populateGroupFilter(channels, orderedGroups = null) {
   const list = document.getElementById("groupList");
   const sidebar = document.getElementById("channelGroupSidebar");
   if (!list || !sidebar) return;
 
-  const groups = [...new Set(channels.map((c) => c.group).filter(Boolean))].sort();
+  const groups = orderedGroups
+    ? orderedGroups
+    : [...new Set(channels.map((c) => c.group).filter(Boolean))].sort();
   list.innerHTML = `<li class="channel-group-item${_activeGroup === "" ? " active" : ""}" data-group="">All</li>`;
   for (const g of groups) {
     const li = document.createElement("li");
@@ -1354,7 +1356,7 @@ async function selectPlaylist(id) {
           allChannels.push({ ...ch, playlist_name: ch.source_playlist_name || "" });
         }
       }
-      _populateGroupFilter(allChannels);
+      _populateGroupFilter(allChannels, (data.groups || []).filter(g => g.enabled).map(g => g.name));
       document.getElementById("channelSearch").value = "";
       document.getElementById("channelSearch").classList.remove("d-none");
       filterBar.classList.remove("d-none");
