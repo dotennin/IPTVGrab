@@ -1294,20 +1294,24 @@ async function loadPlaylists({ autoSelect = false } = {}) {
   } catch (_) {}
 }
 
+let _activeGroup = "";  // currently selected group in sidebar
+
 function _populateGroupFilter(channels) {
-  const gSel = document.getElementById("groupFilter");
-  gSel.innerHTML = "";
-  const allOpt = document.createElement("option");
-  allOpt.value = "";
-  allOpt.textContent = "All groups";
-  gSel.appendChild(allOpt);
+  const list = document.getElementById("groupList");
+  const sidebar = document.getElementById("channelGroupSidebar");
+  if (!list || !sidebar) return;
+
   const groups = [...new Set(channels.map((c) => c.group).filter(Boolean))].sort();
+  list.innerHTML = `<li class="channel-group-item${_activeGroup === "" ? " active" : ""}" data-group="">All</li>`;
   for (const g of groups) {
-    const opt = document.createElement("option");
-    opt.value = g;
-    opt.textContent = g;
-    gSel.appendChild(opt);
+    const li = document.createElement("li");
+    li.className = "channel-group-item" + (g === _activeGroup ? " active" : "");
+    li.dataset.group = g;
+    li.textContent = g;
+    li.title = g;
+    list.appendChild(li);
   }
+  sidebar.classList.toggle("d-none", groups.length === 0);
 }
 
 async function selectPlaylist(id) {
@@ -1316,8 +1320,9 @@ async function selectPlaylist(id) {
   const refreshBtn = document.getElementById("refreshPlaylistBtn");
   const deleteBtn = document.getElementById("deletePlaylistBtn");
 
-  // Reset health filter on playlist switch
+  // Reset health + group filter on playlist switch
   healthOnlyFilter = false;
+  _activeGroup = "";
   const healthOnlyCheck = document.getElementById("healthOnlyCheck");
   if (healthOnlyCheck) healthOnlyCheck.checked = false;
 
@@ -1326,7 +1331,9 @@ async function selectPlaylist(id) {
     allChannels = [];
     renderChannels([]);
     filterBar.classList.add("d-none");
+    document.getElementById("channelSearch").classList.add("d-none");
     document.getElementById("healthOnlyWrap").classList.add("d-none");
+    document.getElementById("channelGroupSidebar").classList.add("d-none");
     countBadge.textContent = "0";
     refreshBtn.disabled = true;
     document.getElementById("editPlaylistBtn").disabled = true;
@@ -1354,6 +1361,7 @@ async function selectPlaylist(id) {
       }
       _populateGroupFilter(allChannels);
       document.getElementById("channelSearch").value = "";
+      document.getElementById("channelSearch").classList.remove("d-none");
       filterBar.classList.remove("d-none");
       document.getElementById("healthOnlyWrap").classList.remove("d-none");
       countBadge.textContent = allChannels.length;
@@ -1377,6 +1385,7 @@ async function selectPlaylist(id) {
     allChannels = currentPlaylist.channels || [];
     _populateGroupFilter(allChannels);
     document.getElementById("channelSearch").value = "";
+    document.getElementById("channelSearch").classList.remove("d-none");
     filterBar.classList.remove("d-none");
     document.getElementById("healthOnlyWrap").classList.remove("d-none");
     countBadge.textContent = allChannels.length;
@@ -1394,14 +1403,13 @@ async function selectPlaylist(id) {
 
 function getFilteredChannels() {
   const search = document.getElementById("channelSearch").value.toLowerCase();
-  const group = document.getElementById("groupFilter").value;
   return allChannels.filter((ch) => {
     const matchSearch =
       !search ||
       (ch.name || "").toLowerCase().includes(search) ||
       (ch.group || "").toLowerCase().includes(search) ||
       (ch.playlist_name || "").toLowerCase().includes(search);
-    const matchGroup = !group || ch.group === group;
+    const matchGroup = !_activeGroup || ch.group === _activeGroup;
     const matchHealth = !healthOnlyFilter || (healthCache[ch.url] && healthCache[ch.url].status === "ok");
     return matchSearch && matchGroup && matchHealth;
   });
@@ -1410,17 +1418,12 @@ function getFilteredChannels() {
 function renderChannels(channels) {
   const grid = document.getElementById("channelGrid");
   const placeholder = document.getElementById("channelPlaceholder");
-  // channelPlaceholder is a SIBLING of channelGrid — NOT inside it.
-  // Setting grid.innerHTML never removes it from the DOM, fixing the crash.
-
-  const filterCountEl = document.getElementById("channelFilterCount");
-  if (filterCountEl) {
-    filterCountEl.textContent =
+  const countBadge = document.getElementById("channelCountBadge");
+  if (countBadge) {
+    countBadge.textContent =
       allChannels.length > 0 && channels.length !== allChannels.length
         ? `${channels.length} / ${allChannels.length}`
-        : channels.length
-        ? `${channels.length} channels`
-        : "";
+        : channels.length;
   }
 
   if (!channels.length) {
@@ -1529,7 +1532,13 @@ document.getElementById("channelSearch").addEventListener("input", () => {
   renderChannels(getFilteredChannels());
 });
 
-document.getElementById("groupFilter").addEventListener("change", () => {
+document.getElementById("groupList").addEventListener("click", (e) => {
+  const item = e.target.closest(".channel-group-item");
+  if (!item) return;
+  _activeGroup = item.dataset.group;
+  document.querySelectorAll(".channel-group-item").forEach((el) =>
+    el.classList.toggle("active", el === item)
+  );
   renderChannels(getFilteredChannels());
 });
 

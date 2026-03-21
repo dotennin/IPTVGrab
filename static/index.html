@@ -12,7 +12,7 @@
     href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
     rel="stylesheet"
   />
-  <link href="/styles.css?v=25" rel="stylesheet" />
+  <link href="/styles.css?v=26" rel="stylesheet" />
 </head>
 <body>
   <!-- Navbar -->
@@ -36,7 +36,7 @@
   <div class="container-fluid py-4 px-4">
     <div class="row g-4">
       <!-- ── Left panel: Input ── -->
-      <div class="col-xl-6">
+      <div class="col-xl-4">
         <div class="card h-100">
           <div class="card-header">
             <ul class="nav nav-tabs card-header-tabs" id="inputTabs" role="tablist">
@@ -104,15 +104,7 @@
                 </div>
                 <!-- Filter controls (shown once a playlist is loaded) -->
                 <div class="d-none" id="channelFilterBar">
-                  <div class="mb-2">
-                    <input type="text" class="form-control form-control-sm" id="channelSearch" placeholder="Search by name, group or playlist…" />
-                  </div>
-                  <div class="d-flex gap-2 align-items-center mb-2">
-                    <select class="form-select form-select-sm flex-grow-1" id="groupFilter">
-                      <option value="">All groups</option>
-                    </select>
-                    <small class="text-muted text-nowrap" id="channelFilterCount"></small>
-                  </div>
+                  <input type="text" class="form-control form-control-sm" id="channelSearch" placeholder="Search channels…" />
                 </div>
               </div>
               <!-- URL tab -->
@@ -191,7 +183,7 @@
       </div>
 
       <!-- ── Right panel: Stream info (default) ── -->
-      <div class="col-xl-6 d-none" id="streamInfoPanel">
+      <div class="col-xl-8 d-none" id="streamInfoPanel">
         <div class="card h-100" id="streamInfoCard">
           <div class="card-header d-flex align-items-center justify-content-between">
             <span><i class="fas fa-info-circle me-2"></i>Stream info</span>
@@ -206,11 +198,12 @@
         </div>
       </div>
       <!-- ── Right panel: Channel grid (shown when Playlist tab is active) ── -->
-      <div class="col-xl-6" id="channelGridPanel">
+      <div class="col-xl-8" id="channelGridPanel">
         <div class="card h-100">
-          <div class="card-header d-flex align-items-center justify-content-between">
-            <span><i class="fas fa-tv me-2"></i>Channels</span>
-            <div class="d-flex align-items-center gap-2">
+          <div class="card-header d-flex align-items-center gap-2 flex-wrap">
+            <span class="me-1"><i class="fas fa-tv me-2"></i>Channels</span>
+            <input type="text" class="form-control form-control-sm channel-grid-search d-none" id="channelSearch" placeholder="Search…" />
+            <div class="d-flex align-items-center gap-2 ms-auto">
               <div class="form-check form-switch mb-0 d-none" id="healthOnlyWrap">
                 <input class="form-check-input" type="checkbox" role="switch" id="healthOnlyCheck" />
                 <label class="form-check-label small text-muted" for="healthOnlyCheck">Healthy only</label>
@@ -222,13 +215,21 @@
               <span class="badge bg-secondary" id="channelCountBadge">0</span>
             </div>
           </div>
-          <div class="card-body p-3 channel-grid-body">
-            <!-- Placeholder: NOT inside channelGrid so innerHTML swap won't remove it -->
-            <div class="text-center text-muted py-5" id="channelPlaceholder">
-              <i class="fas fa-tv fa-2x mb-2 d-block opacity-25"></i>
-              <p class="mb-0 small">Select a playlist to browse channels</p>
+          <div class="card-body p-0 d-flex channel-grid-body">
+            <!-- Group list sidebar -->
+            <div class="channel-group-sidebar d-none" id="channelGroupSidebar">
+              <ul class="channel-group-list" id="groupList">
+                <li class="channel-group-item active" data-group="">All</li>
+              </ul>
             </div>
-            <div id="channelGrid" class="channel-grid"></div>
+            <!-- Channel grid area -->
+            <div class="channel-grid-area">
+              <div class="text-center text-muted py-5" id="channelPlaceholder">
+                <i class="fas fa-tv fa-2x mb-2 d-block opacity-25"></i>
+                <p class="mb-0 small">Select a playlist to browse channels</p>
+              </div>
+              <div id="channelGrid" class="channel-grid"></div>
+            </div>
           </div>
         </div>
       </div>
@@ -570,6 +571,6 @@
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.6/Sortable.min.js"></script>
-  <script src="/app.js?v=25"></script>
+  <script src="/app.js?v=26"></script>
 </body>
 </html>
