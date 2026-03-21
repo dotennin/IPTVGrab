@@ -1061,8 +1061,7 @@ async def export_m3u():
             lines.append(f'#EXTINF:-1 {attrs},{ch.get("name", "")}')
             lines.append(ch.get("url", ""))
     content = "\n".join(lines) + "\n"
-    return Response(content=content, media_type="audio/x-mpegurl",
-                    headers={"Content-Disposition": "attachment; filename=all-playlists.m3u"})
+    return Response(content=content, media_type="text/plain; charset=utf-8")
 
 
 # ── Static files (must be last) ───────────────────────────────────────────────

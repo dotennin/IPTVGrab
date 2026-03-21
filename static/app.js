@@ -1795,6 +1795,7 @@ document.getElementById("editorSaveBtn").addEventListener("click", async () => {
       throw new Error(data.detail || "Save failed");
     }
     editorDirty = false;
+    bootstrap.Modal.getInstance(document.getElementById("allPlaylistsEditorModal")).hide();
     toast("All Playlists config saved", "success");
     // Refresh the main channel view
     await selectPlaylist("__all__");
