@@ -7,6 +7,7 @@ Paste a URL or a raw `curl` command, choose quality, and download the stream as 
 
 ## Features
 
+- **IPTV playlist browser** — load an M3U/M3U8 IPTV playlist by URL or raw text; browse and filter channels by name or group, then start a recording with one click
 - **URL & cURL input** — paste a plain M3U8 URL or a full `curl` command copied from browser DevTools (with all headers)
 - **Master playlist** — auto-lists quality variants; pick the resolution you want
 - **Concurrent download** — configurable segment concurrency (1–32)
@@ -14,7 +15,7 @@ Paste a URL or a raw `curl` command, choose quality, and download the stream as 
 - **CMAF / fMP4** — handles `#EXT-X-MAP` init segments; binary-concatenates + re-muxes via ffmpeg
 - **Live stream recording** — polls playlist, deduplicates segments, records until stopped, then merges to MP4
 - **Video preview** — in-browser HLS preview via hls.js after the first few segments are downloaded
-- **Resume /** — interrupted downloads resume from the last segment on server restart
+- **Resume** — interrupted downloads resume from the last segment on server restart
 - **Task persistence** — task history survives server restarts (`tasks.json` inside the downloads dir)
 - **Access control** — optional password protection; brute-force protection locks an IP for 5 minutes after 5 failed attempts
 
@@ -40,19 +41,21 @@ Three tabs for different input methods:
 
 | Tab | Purpose |
 |-----|---------|
+| **Playlist** | Load a saved IPTV playlist or add a new one by URL or raw M3U text. Filter channels by name or group, then click a channel card to start recording. |
 | **URL** | Enter a direct M3U8 URL. Add any number of custom request headers as key-value pairs. |
 | **cURL command** | Paste the full `curl` command copied from Chrome DevTools → *Copy as cURL*. The URL and all headers are extracted automatically. Raw HTTP request header blocks (Chrome DevTools format) are also accepted. |
-| **Batch download** | One URL per line. Prefix a line with `#title` to set the output filename for the next URL. Configure how many tasks run in parallel (1–10). |
 
-Shared options below the tabs:
+Shared options below the tabs (visible on URL and cURL tabs):
 
 - **Output filename** — leave blank to auto-name with a Unix timestamp; output is always `.mp4`
 - **Concurrency slider** — number of segments downloaded in parallel per task (1–32, default 8)
 - **Parse stream** button — fetches and parses the M3U8, populating the right panel
 
-#### Right panel — Stream info
+#### Right panel — Stream info / Channel grid
 
-Displays parse results. Content adapts to the detected stream type:
+When the **Playlist** tab is active the right panel shows the **channel grid**: all channels from the loaded playlist, searchable and filterable by group. Click any channel card to start recording immediately.
+
+When the **URL** or **cURL** tab is active the right panel shows **stream info** after parsing:
 
 | Stream type | Displayed |
 |-------------|-----------|
@@ -190,6 +193,11 @@ services:
 | `GET` | `/api/tasks/{id}/preview.m3u8` | HLS playlist for in-progress preview |
 | `GET` | `/api/tasks/{id}/seg/{filename}` | Serve an individual downloaded segment |
 | `GET` | `/downloads/{filename}` | Download a completed MP4 file |
+| `GET` | `/api/playlists` | List all saved IPTV playlists |
+| `POST` | `/api/playlists` | Add a playlist (by URL or raw M3U text) |
+| `GET` | `/api/playlists/{id}` | Get playlist details with channel list |
+| `DELETE` | `/api/playlists/{id}` | Delete a saved playlist |
+| `POST` | `/api/playlists/{id}/refresh` | Re-fetch and update a URL-based playlist |
 
 ### POST /api/parse
 
@@ -234,6 +242,7 @@ Returns `{ "type": "master"|"media", "streams": [...] }` for master playlists, o
 │   └── styles.css
 ├── downloads/         # Default output dir (auto-created)
 │   ├── tasks.json     # Persisted task history
+│   ├── playlists.json # Saved IPTV playlists
 │   └── .cache/        # Segment cache for resume & preview
 ├── Dockerfile
 ├── docker-compose.yml
