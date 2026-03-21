@@ -310,3 +310,93 @@ textarea.form-control {
   width: 100%;
   margin-top: auto;
 }
+
+/* ── Downloads sidebar layout ────────────────────────────────────────────── */
+.downloads-layout {
+  display: flex;
+  min-height: 160px;
+}
+
+.downloads-sidebar {
+  width: 168px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--card-border);
+  padding: 8px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dl-cat {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.84rem;
+  color: var(--muted);
+  transition: background-color 0.15s, color 0.15s;
+  user-select: none;
+}
+
+.dl-cat i {
+  width: 14px;
+  text-align: center;
+  flex-shrink: 0;
+  font-size: 0.85em;
+}
+
+.dl-cat span:first-of-type {
+  flex: 1;
+}
+
+.dl-cat .badge {
+  flex-shrink: 0;
+  font-size: 0.7rem;
+}
+
+.dl-cat:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+  color: #e6edf3;
+}
+
+.dl-cat.active {
+  background-color: #21262d;
+  color: #e6edf3;
+}
+
+.dl-sidebar-footer {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--card-border);
+}
+
+.downloads-content {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ── Sort buttons ────────────────────────────────────────────────────────── */
+.sort-btn {
+  font-size: 0.75rem;
+  padding: 3px 9px;
+  border: 1px solid var(--card-border);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+
+.sort-btn:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+  color: #e6edf3;
+  border-color: #484f58;
+}
+
+.sort-btn.active {
+  background-color: #21262d;
+  color: #e6edf3;
+  border-color: #388bfd;
+}

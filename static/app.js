@@ -429,20 +429,81 @@ async function startDownload() {
   }
 }
 
+// ── Download task state ───────────────────────────────────────────────────────
+let currentCategory = "all";
+let currentSort = { field: "created_at", dir: "desc" };
+const SORT_DEFAULTS = { created_at: "desc", filename: "asc", size: "desc" };
+const ACTIVE_STATUSES   = ["downloading", "recording", "merging", "stopping"];
+const WAITING_STATUSES  = ["queued"];
+const FINISHED_STATUSES = ["completed", "failed", "cancelled", "interrupted"];
+
 // ── Task cards ────────────────────────────────────────────────────────────────
 function updateTaskCount() {
-  const n = document.querySelectorAll(".task-card").length;
-  document.getElementById("taskCountBadge").textContent = n;
-  document.getElementById("tasksPlaceholder").style.display = n ? "none" : "";
+  const cards = document.querySelectorAll(".task-card");
+  let all = 0, active = 0, waiting = 0, finished = 0;
+  cards.forEach(c => {
+    all++;
+    const s = c.dataset.taskStatus || "";
+    if      (ACTIVE_STATUSES.includes(s))   active++;
+    else if (WAITING_STATUSES.includes(s))  waiting++;
+    else if (FINISHED_STATUSES.includes(s)) finished++;
+  });
+  document.getElementById("taskCountBadge").textContent   = all;
+  document.getElementById("catCount-all").textContent     = all;
+  document.getElementById("catCount-active").textContent  = active;
+  document.getElementById("catCount-queued").textContent  = waiting;
+  document.getElementById("catCount-finished").textContent = finished;
+}
+
+function applyCategoryFilter() {
+  document.querySelectorAll(".task-card").forEach(card => {
+    const s = card.dataset.taskStatus || "";
+    let show = false;
+    switch (currentCategory) {
+      case "all":      show = true; break;
+      case "active":   show = ACTIVE_STATUSES.includes(s); break;
+      case "queued":   show = WAITING_STATUSES.includes(s); break;
+      case "finished": show = FINISHED_STATUSES.includes(s); break;
+    }
+    card.style.display = show ? "" : "none";
+  });
+  const hasVisible = [...document.querySelectorAll(".task-card")].some(c => c.style.display !== "none");
+  document.getElementById("tasksPlaceholder").style.display = hasVisible ? "none" : "";
+}
+
+function applySortOrder() {
+  const list = document.getElementById("downloadsList");
+  const cards = [...list.querySelectorAll(".task-card")];
+  const { field, dir } = currentSort;
+  cards.sort((a, b) => {
+    let va, vb;
+    if (field === "created_at") {
+      va = parseFloat(a.dataset.createdAt) || 0;
+      vb = parseFloat(b.dataset.createdAt) || 0;
+    } else if (field === "size") {
+      va = parseInt(a.dataset.size) || 0;
+      vb = parseInt(b.dataset.size) || 0;
+    } else {
+      va = (a.dataset.filename || "").toLowerCase();
+      vb = (b.dataset.filename || "").toLowerCase();
+    }
+    if (va < vb) return dir === "asc" ? -1 : 1;
+    if (va > vb) return dir === "asc" ? 1 : -1;
+    return 0;
+  });
+  cards.forEach(c => list.appendChild(c));
 }
 
 function addTaskCard(taskId, url) {
   const list = document.getElementById("downloadsList");
-  document.getElementById("tasksPlaceholder").style.display = "none";
 
   const card = document.createElement("div");
   card.className = "task-card";
   card.id = `task-${taskId}`;
+  card.dataset.taskStatus = "queued";
+  card.dataset.createdAt  = (Date.now() / 1000).toString();
+  card.dataset.size       = "0";
+  card.dataset.filename   = "";
   card.innerHTML = `
     <div class="d-flex justify-content-between align-items-start mb-2 gap-2">
       <div class="flex-grow-1 overflow-hidden">
@@ -467,8 +528,10 @@ function addTaskCard(taskId, url) {
       </div>
     </div>`;
 
-  list.insertBefore(card, list.firstChild);
+  list.appendChild(card);
   card.querySelector(".task-action").addEventListener("click", () => cancelTask(taskId));
+  applyCategoryFilter();
+  applySortOrder();
   updateTaskCount();
 }
 
@@ -662,10 +725,24 @@ function updateTaskCard(taskId, task) {
       card.querySelector(".task-action").addEventListener("click", async () => {
         await apiFetch(`/api/tasks/${taskId}`, { method: "DELETE" }).catch(() => {});
         card.remove();
+        applyCategoryFilter();
         updateTaskCount();
       });
     }
   }
+
+  // Sync data attributes for category filtering and sorting
+  card.dataset.taskStatus = task.status;
+  if (task.created_at) card.dataset.createdAt = String(task.created_at);
+  if (task.size)        card.dataset.size       = String(task.size);
+  const _fn = task.output || (task.output_name
+    ? (task.output_name.endsWith(".mp4") ? task.output_name : task.output_name + ".mp4")
+    : "");
+  if (_fn) card.dataset.filename = _fn;
+
+  applyCategoryFilter();
+  applySortOrder();
+  updateTaskCount();
 }
 
 // ── Polling ───────────────────────────────────────────────────────────────────
@@ -709,6 +786,7 @@ async function cancelTask(taskId) {
   if (card) {
     card.querySelector(".task-status").textContent = "Cancelled";
     card.querySelector(".task-status").className = "badge bg-secondary flex-shrink-0 task-status";
+    card.dataset.taskStatus = "cancelled";
     const info = card.querySelector(".task-info");
     if (info) {
       info.className = "task-info small";
@@ -725,24 +803,63 @@ async function cancelTask(taskId) {
     card.querySelector(".task-action").addEventListener("click", async () => {
       await apiFetch(`/api/tasks/${taskId}`, { method: "DELETE" }).catch(() => {});
       card.remove();
+      applyCategoryFilter();
       updateTaskCount();
     });
+    applyCategoryFilter();
+    updateTaskCount();
   }
 }
 
-// ── Clear completed ───────────────────────────────────────────────────────────
+// ── Clear failed (completed tasks are preserved) ──────────────────────────────
 document.getElementById("clearCompletedBtn").addEventListener("click", async () => {
-  const terminalTexts = ["Completed", "Failed", "Cancelled", "Interrupted"];
-  const toRemove = Array.from(document.querySelectorAll(".task-card")).filter((card) => {
-    const s = card.querySelector(".task-status")?.textContent;
-    return terminalTexts.includes(s);
+  const toRemove = Array.from(document.querySelectorAll(".task-card")).filter(card => {
+    const s = card.dataset.taskStatus;
+    return s === "failed" || s === "cancelled" || s === "interrupted";
   });
   for (const card of toRemove) {
     const taskId = card.id.replace("task-", "");
     await apiFetch(`/api/tasks/${taskId}`, { method: "DELETE" }).catch(() => {});
     card.remove();
   }
+  applyCategoryFilter();
   updateTaskCount();
+});
+
+// ── Category sidebar ──────────────────────────────────────────────────────────
+document.querySelectorAll(".dl-cat").forEach(cat => {
+  cat.addEventListener("click", () => {
+    currentCategory = cat.dataset.cat;
+    document.querySelectorAll(".dl-cat").forEach(c => c.classList.remove("active"));
+    cat.classList.add("active");
+    applyCategoryFilter();
+    updateTaskCount();
+  });
+});
+
+// ── Sort controls ─────────────────────────────────────────────────────────────
+document.querySelectorAll(".sort-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const field = btn.dataset.field;
+    if (currentSort.field === field) {
+      currentSort.dir = currentSort.dir === "asc" ? "desc" : "asc";
+    } else {
+      currentSort.field = field;
+      currentSort.dir = SORT_DEFAULTS[field];
+    }
+    // Update button UI: deactivate all, hide all direction icons
+    document.querySelectorAll(".sort-btn").forEach(b => {
+      b.classList.remove("active");
+      const icon = b.querySelector(".sort-dir-icon");
+      if (icon) icon.className = "fas fa-arrow-down sort-dir-icon ms-1 d-none";
+    });
+    btn.classList.add("active");
+    const icon = btn.querySelector(".sort-dir-icon");
+    if (icon) {
+      icon.className = `fas ${currentSort.dir === "asc" ? "fa-arrow-up" : "fa-arrow-down"} sort-dir-icon ms-1`;
+    }
+    applySortOrder();
+  });
 });
 
 // ── Resume task ────────────────────────────────────────────────────────────────
@@ -757,6 +874,7 @@ async function resumeTask(taskId) {
       card.querySelector(".task-status").textContent = "Queued";
       card.querySelector(".task-status").className = "badge bg-secondary flex-shrink-0 task-status";
       card.querySelector(".task-info").textContent = "Preparing...";
+      card.dataset.taskStatus = "queued";
       const btn = card.querySelector(".task-action");
       btn.innerHTML = '<i class="fas fa-times"></i> Cancel';
       btn.className = "btn btn-sm btn-outline-danger task-action";
@@ -764,6 +882,8 @@ async function resumeTask(taskId) {
       btn.disabled = false;
       btn.replaceWith(btn.cloneNode(true));
       card.querySelector(".task-action").addEventListener("click", () => cancelTask(taskId));
+      applyCategoryFilter();
+      updateTaskCount();
     }
     startPolling(taskId);
     toast("Resume started", "info");
@@ -783,6 +903,7 @@ async function restartTask(taskId) {
       card.querySelector(".task-status").textContent = "Queued";
       card.querySelector(".task-status").className = "badge bg-secondary flex-shrink-0 task-status";
       card.querySelector(".task-info").textContent = "Preparing...";
+      card.dataset.taskStatus = "queued";
       const bar = card.querySelector(".task-bar");
       if (bar) { bar.style.width = "0%"; bar.textContent = ""; }
       const btn = card.querySelector(".task-action");
@@ -792,6 +913,8 @@ async function restartTask(taskId) {
       btn.disabled = false;
       btn.replaceWith(btn.cloneNode(true));
       card.querySelector(".task-action").addEventListener("click", () => cancelTask(taskId));
+      applyCategoryFilter();
+      updateTaskCount();
     }
     startPolling(taskId);
     toast("Download restarted", "info");
@@ -825,7 +948,6 @@ document.getElementById("confirmRestartRecordingBtn").addEventListener("click", 
     stopPolling(taskId);
     const oldCard = document.getElementById(`task-${taskId}`);
     if (oldCard) oldCard.remove();
-    updateTaskCount();
     addTaskCard(data.new_task_id, data.url);
     startPolling(data.new_task_id);
     toast("Recording restarted", "info");
