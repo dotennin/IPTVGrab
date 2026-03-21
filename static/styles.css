@@ -415,6 +415,34 @@ textarea.form-control {
 }
 
 /* ── Preview modal ────────────────────────────────────────────────────────── */
+#previewViewport {
+  width: 100%;
+  background-color: #000;
+}
+
+#previewViewport.preview-idle,
+#previewViewport.preview-idle #previewVideo {
+  cursor: none;
+}
+
+#previewViewport:fullscreen,
+#previewViewport:-webkit-full-screen {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #000;
+}
+
+#previewViewport:fullscreen #previewVideo,
+#previewViewport:-webkit-full-screen #previewVideo {
+  width: 100%;
+  height: 100%;
+  max-height: 100vh !important;
+  object-fit: contain;
+}
+
 #previewVideo:focus,
 #previewVideo:focus-visible {
   outline: none;

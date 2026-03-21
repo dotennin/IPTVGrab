@@ -929,9 +929,12 @@ async function forkRecording(taskId) {
 // ── Preview / Watch player (hls.js) ──────────────────────────────────────────
 let hlsInstance = null;
 const previewModalEl = document.getElementById("previewModal");
+const previewViewportEl = document.getElementById("previewViewport");
 const previewVideo = document.getElementById("previewVideo");
 const previewTitleEl = document.getElementById("previewModalTitle");
 const previewModal = bootstrap.Modal.getOrCreateInstance(previewModalEl);
+const PREVIEW_IDLE_DELAY_MS = 1800;
+let previewIdleTimer = null;
 
 function isPreviewVisible() {
   return previewModalEl.classList.contains("show");
@@ -943,13 +946,61 @@ function setPreviewTitle(title) {
   }
 }
 
+function clearPreviewIdleTimer() {
+  if (previewIdleTimer !== null) {
+    window.clearTimeout(previewIdleTimer);
+    previewIdleTimer = null;
+  }
+}
+
+function resetPreviewChrome() {
+  clearPreviewIdleTimer();
+  previewVideo.controls = true;
+  previewViewportEl.classList.remove("preview-idle");
+}
+
+function hidePreviewChrome() {
+  if (!isPreviewVisible() || previewVideo.paused || previewVideo.ended) return;
+  previewVideo.controls = false;
+  previewViewportEl.classList.add("preview-idle");
+}
+
+function schedulePreviewChromeHide() {
+  clearPreviewIdleTimer();
+  if (!isPreviewVisible() || previewVideo.paused || previewVideo.ended) return;
+  previewIdleTimer = window.setTimeout(() => {
+    hidePreviewChrome();
+  }, PREVIEW_IDLE_DELAY_MS);
+}
+
+function handlePreviewActivity() {
+  if (!isPreviewVisible()) return;
+  resetPreviewChrome();
+  schedulePreviewChromeHide();
+}
+
 function isPreviewFullscreen() {
-  return document.fullscreenElement === previewVideo
-    || (!!document.fullscreenElement && previewModalEl.contains(document.fullscreenElement))
+  return document.fullscreenElement === previewViewportEl
+    || document.fullscreenElement === previewVideo
+    || (!!document.fullscreenElement && previewViewportEl.contains(document.fullscreenElement))
     || previewVideo.webkitDisplayingFullscreen === true;
 }
 
 async function enterPreviewFullscreen() {
+  if (previewViewportEl.requestFullscreen) {
+    try {
+      await previewViewportEl.requestFullscreen();
+    } catch (error) {
+      toast("Unable to enter fullscreen", "danger");
+    }
+    return;
+  }
+
+  if (previewViewportEl.webkitRequestFullscreen) {
+    previewViewportEl.webkitRequestFullscreen();
+    return;
+  }
+
   if (previewVideo.requestFullscreen) {
     try {
       await previewVideo.requestFullscreen();
@@ -977,6 +1028,11 @@ async function exitPreviewFullscreen() {
     return;
   }
 
+  if (document.webkitFullscreenElement && document.webkitExitFullscreen) {
+    document.webkitExitFullscreen();
+    return;
+  }
+
   if (previewVideo.webkitDisplayingFullscreen === true && previewVideo.webkitExitFullscreen) {
     previewVideo.webkitExitFullscreen();
   }
@@ -999,11 +1055,15 @@ async function closePreviewModal() {
 }
 
 previewModalEl.addEventListener("shown.bs.modal", () => {
+  resetPreviewChrome();
   previewVideo.focus();
+  schedulePreviewChromeHide();
 });
 
 document.addEventListener("keydown", (event) => {
   if (!isPreviewVisible() || event.altKey || event.ctrlKey || event.metaKey) return;
+
+  handlePreviewActivity();
 
   if (event.key === "Escape") {
     event.preventDefault();
@@ -1017,6 +1077,18 @@ document.addEventListener("keydown", (event) => {
     void togglePreviewFullscreen();
   }
 });
+
+["mousemove", "pointerdown", "touchstart"].forEach((eventName) => {
+  previewViewportEl.addEventListener(eventName, handlePreviewActivity);
+});
+
+previewVideo.addEventListener("play", schedulePreviewChromeHide);
+previewVideo.addEventListener("pause", resetPreviewChrome);
+previewVideo.addEventListener("ended", resetPreviewChrome);
+document.addEventListener("fullscreenchange", handlePreviewActivity);
+document.addEventListener("webkitfullscreenchange", handlePreviewActivity);
+previewVideo.addEventListener("webkitbeginfullscreen", handlePreviewActivity);
+previewVideo.addEventListener("webkitendfullscreen", handlePreviewActivity);
 
 function openHLSPlayer(url, title = "") {
   setPreviewTitle(title ? esc(title) : "Watch");
@@ -1074,6 +1146,7 @@ function openPreview(taskId) {
 
 previewModalEl.addEventListener("hidden.bs.modal", () => {
   setPreviewTitle("Preview");
+  resetPreviewChrome();
   if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
   previewVideo.pause();
   previewVideo.removeAttribute("src");
