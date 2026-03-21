@@ -423,6 +423,7 @@ async def recording_restart(task_id: str, bg: BackgroundTasks):
         dl.cancel()
     _cleanup_tmpdir(task_id)
     tasks[task_id]["status"] = "cancelled"
+    tasks[task_id]["_auto_delete"] = True  # _run_download will remove this entry on exit
     save_tasks()
 
     req = DownloadRequest(
@@ -619,6 +620,9 @@ async def _run_download(task_id: str, req: DownloadRequest):
         save_tasks()
     finally:
         downloaders.pop(task_id, None)
+        if tasks.get(task_id, {}).get("_auto_delete"):
+            del tasks[task_id]
+            save_tasks()
 
 
 # ── Static files (must be last) ───────────────────────────────────────────────
