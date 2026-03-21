@@ -163,18 +163,15 @@
               <div class="tab-pane fade" id="playlistPane" role="tabpanel">
                 <div class="d-flex gap-2 mb-3 align-items-center">
                   <select class="form-select form-select-sm flex-grow-1" id="playlistSelect">
-                    <option value="">-- Select playlist --</option>
+                    <option value="">＋ Add playlist…</option>
                   </select>
                   <button class="btn btn-sm btn-outline-secondary" id="refreshPlaylistBtn" title="Refresh from URL" disabled>
                     <i class="fas fa-sync-alt"></i>
                   </button>
-                  <button class="btn btn-sm btn-outline-danger" id="deletePlaylistBtn" title="Delete playlist" disabled>
+                  <button class="btn btn-sm btn-outline-danger ms-3" id="deletePlaylistBtn" title="Delete playlist" disabled>
                     <i class="fas fa-trash"></i>
                   </button>
                 </div>
-                <button class="btn btn-primary btn-sm w-100 mb-3" data-bs-toggle="modal" data-bs-target="#addPlaylistModal">
-                  <i class="fas fa-plus me-1"></i>Add Playlist
-                </button>
                 <!-- Filter controls (shown once a playlist is loaded) -->
                 <div class="d-none" id="channelFilterBar">
                   <div class="mb-2">

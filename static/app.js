@@ -1041,7 +1041,7 @@ async function loadPlaylists({ autoSelect = false } = {}) {
     const list = await res.json();
     const sel = document.getElementById("playlistSelect");
     const prev = sel.value;
-    sel.innerHTML = '<option value="">-- Select playlist --</option>';
+    sel.innerHTML = '<option value="">＋ Add playlist…</option>';
     for (const pl of list) {
       const opt = document.createElement("option");
       opt.value = pl.id;
@@ -1200,6 +1200,11 @@ async function downloadChannel(ch) {
 // ── Playlist event listeners ──────────────────────────────────────────────────
 
 document.getElementById("playlistSelect").addEventListener("change", (e) => {
+  if (e.target.value === "") {
+    e.target.value = currentPlaylist || ""; // restore previous selection
+    new bootstrap.Modal(document.getElementById("addPlaylistModal")).show();
+    return;
+  }
   selectPlaylist(e.target.value);
 });
 
