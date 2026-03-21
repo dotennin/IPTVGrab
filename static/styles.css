@@ -311,6 +311,19 @@ textarea.form-control {
   margin-top: auto;
 }
 
+.channel-actions {
+  display: flex;
+  gap: 4px;
+  width: 100%;
+  margin-top: auto;
+}
+
+.channel-actions .btn {
+  font-size: 0.72rem;
+  padding: 3px 0;
+  flex: 1;
+}
+
 /* ── Downloads sidebar layout ────────────────────────────────────────────── */
 .downloads-layout {
   display: flex;

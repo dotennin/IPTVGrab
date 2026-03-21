@@ -178,7 +178,6 @@ document.getElementById("parseBtn").addEventListener("click", async () => {
     if (data.headers) populateHeaders(data.headers);
 
     showStreamInfo(data);
-    document.getElementById("clearInfoBtn").classList.remove("d-none");
     toast("Parsed successfully", "success");
   } catch (e) {
     toast(e.message, "danger");
@@ -187,12 +186,6 @@ document.getElementById("parseBtn").addEventListener("click", async () => {
     btn.disabled = false;
     btn.innerHTML = '<i class="fas fa-search me-1"></i>Parse stream';
   }
-});
-
-document.getElementById("clearInfoBtn").addEventListener("click", () => {
-  currentStreamInfo = null;
-  resetStreamInfo();
-  document.getElementById("clearInfoBtn").classList.add("d-none");
 });
 
 // ── Stream info panel ─────────────────────────────────────────────────────────
@@ -269,21 +262,31 @@ function showStreamInfo(info) {
   });
 
   body.querySelector("#startDownloadBtn")?.addEventListener("click", startDownload);
+  body.querySelector("#watchStreamBtn")?.addEventListener("click", () => {
+    if (!currentRequest.url) return;
+    const label = document.getElementById("outputName")?.value.trim() || currentRequest.url.split("/").pop().split("?")[0] || "Watch";
+    openHLSPlayer(currentRequest.url, label);
+  });
 }
 
 function downloadButton(isLive = false) {
-  return isLive
-    ? `<div class="mt-3 pt-3 border-top">
-         <button class="btn btn-danger px-4" id="startDownloadBtn" type="button">
-           <i class="fas fa-circle me-2"></i>Start recording
-         </button>
-         <span class="ms-3 text-muted small">Merges to MP4 automatically when stopped</span>
-       </div>`
-    : `<div class="mt-3 pt-3 border-top">
-         <button class="btn btn-success px-4" id="startDownloadBtn" type="button">
-           <i class="fas fa-download me-2"></i>Start download
-         </button>
-       </div>`;
+  const startBtn = isLive
+    ? `<button class="btn btn-danger" id="startDownloadBtn" type="button">
+         <i class="fas fa-circle me-2"></i>Start recording
+       </button>`
+    : `<button class="btn btn-success" id="startDownloadBtn" type="button">
+         <i class="fas fa-download me-2"></i>Start download
+       </button>`;
+
+  return `<div class="mt-3 pt-3 border-top">
+    <div class="d-flex align-items-center gap-2 flex-wrap">
+      ${startBtn}
+      <button class="btn btn-outline-info" id="watchStreamBtn" type="button">
+        <i class="fas fa-play me-1"></i>Watch
+      </button>
+    </div>
+    ${isLive ? `<p class="text-muted small mt-2 mb-0"><i class="fas fa-info-circle me-1"></i>Merges to MP4 automatically when stopped</p>` : ""}
+  </div>`;
 }
 
 // ── Start download ────────────────────────────────────────────────────────────
@@ -328,7 +331,10 @@ async function startDownload() {
     toast(e.message, "danger");
   } finally {
     btn.disabled = false;
-    btn.innerHTML = '<i class="fas fa-download me-2"></i>Start download';
+    const isLive = currentStreamInfo?.is_live === true;
+    btn.innerHTML = isLive
+      ? '<i class="fas fa-circle me-2"></i>Start recording'
+      : '<i class="fas fa-download me-2"></i>Start download';
   }
 }
 
@@ -874,20 +880,46 @@ async function forkRecording(taskId) {
   }
 }
 
-// ── Preview player (hls.js) ───────────────────────────────────────────────────
+// ── Preview / Watch player (hls.js) ──────────────────────────────────────────
 let hlsInstance = null;
 
-function openPreviewDirect(url) {
+function openHLSPlayer(url, title = "") {
   const video = document.getElementById("previewVideo");
+  const titleEl = document.getElementById("previewModalTitle");
+  if (titleEl) {
+    titleEl.innerHTML = `<i class="fas fa-play-circle me-2 text-primary"></i>${title ? esc(title) : "Watch"}`;
+  }
   if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
   video.pause();
-  video.src = url;
+  video.removeAttribute("src");
+  if (typeof Hls !== "undefined" && Hls.isSupported()) {
+    hlsInstance = new Hls({ enableWorker: false });
+    hlsInstance.loadSource(url);
+    hlsInstance.attachMedia(video);
+    hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => video.play().catch(() => {}));
+    hlsInstance.on(Hls.Events.ERROR, (_evt, data) => {
+      if (data.fatal) toast("Stream error: " + (data.details || "unknown"), "danger");
+    });
+  } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+    video.src = url;
+    video.play().catch(() => {});
+  } else {
+    toast("HLS playback not supported in this browser", "danger");
+    return;
+  }
   new bootstrap.Modal(document.getElementById("previewModal")).show();
-  video.play().catch(() => {});
+}
+
+function openPreviewDirect(url) {
+  openHLSPlayer(url, "Preview");
 }
 
 function openPreview(taskId) {
   const video = document.getElementById("previewVideo");
+  const titleEl = document.getElementById("previewModalTitle");
+  if (titleEl) {
+    titleEl.innerHTML = '<i class="fas fa-play-circle me-2 text-primary"></i>Preview';
+  }
   if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
   video.pause();
   video.removeAttribute("src");
@@ -910,6 +942,10 @@ function openPreview(taskId) {
 
 document.getElementById("previewModal").addEventListener("hidden.bs.modal", () => {
   const video = document.getElementById("previewVideo");
+  const titleEl = document.getElementById("previewModalTitle");
+  if (titleEl) {
+    titleEl.innerHTML = '<i class="fas fa-play-circle me-2 text-primary"></i>Preview';
+  }
   if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
   video.pause();
   video.removeAttribute("src");
@@ -974,6 +1010,7 @@ async function selectPlaylist(id) {
     filterBar.classList.add("d-none");
     countBadge.textContent = "0";
     refreshBtn.disabled = true;
+    document.getElementById("editPlaylistBtn").disabled = true;
     deleteBtn.disabled = true;
     return;
   }
@@ -1002,6 +1039,7 @@ async function selectPlaylist(id) {
     filterBar.classList.remove("d-none");
     countBadge.textContent = allChannels.length;
     refreshBtn.disabled = !currentPlaylist.url;
+    document.getElementById("editPlaylistBtn").disabled = false;
     deleteBtn.disabled = false;
     renderChannels(allChannels);
   } catch (e) {
@@ -1060,18 +1098,29 @@ function renderChannels(channels) {
       </div>
       <div class="channel-name" title="${esc(ch.name)}">${esc(ch.name || ch.url)}</div>
       ${ch.group ? `<div class="channel-group">${esc(ch.group)}</div>` : ""}
-      <button class="btn btn-sm btn-primary channel-dl-btn" data-ch-idx="${i}">
-        <i class="fas fa-download me-1"></i>Download
-      </button>
+      <div class="channel-actions">
+        <button class="btn btn-sm btn-primary channel-dl-btn" data-ch-idx="${i}" title="Download">
+          <i class="fas fa-download"></i>
+        </button>
+        <button class="btn btn-sm btn-outline-info channel-watch-btn" data-ch-idx="${i}" title="Watch online">
+          <i class="fas fa-play"></i>
+        </button>
+      </div>
     </div>`
     )
     .join("");
 
-  // Bind download buttons — closure captures the current filtered channels array
+  // Bind download and watch buttons
   grid.querySelectorAll(".channel-dl-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
       const idx = parseInt(btn.dataset.chIdx, 10);
       downloadChannel(channels[idx]);
+    });
+  });
+  grid.querySelectorAll(".channel-watch-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const idx = parseInt(btn.dataset.chIdx, 10);
+      watchChannel(channels[idx]);
     });
   });
 }
@@ -1100,11 +1149,25 @@ async function downloadChannel(ch) {
   }
 }
 
+function watchChannel(ch) {
+  openHLSPlayer(ch.url, ch.name || ch.url);
+}
+
 // ── Playlist event listeners ──────────────────────────────────────────────────
+
+// When the select already shows "" (no playlists) clicking won't fire "change"
+// because the value hasn't changed. Use mousedown to intercept that case.
+document.getElementById("playlistSelect").addEventListener("mousedown", (e) => {
+  const sel = document.getElementById("playlistSelect");
+  if (sel.value === "") {
+    e.preventDefault();
+    new bootstrap.Modal(document.getElementById("addPlaylistModal")).show();
+  }
+});
 
 document.getElementById("playlistSelect").addEventListener("change", (e) => {
   if (e.target.value === "") {
-    e.target.value = currentPlaylist || ""; // restore previous selection
+    e.target.value = currentPlaylist?.id || ""; // restore previous selection
     new bootstrap.Modal(document.getElementById("addPlaylistModal")).show();
     return;
   }
@@ -1136,6 +1199,44 @@ document.getElementById("refreshPlaylistBtn").addEventListener("click", async ()
   } finally {
     btn.disabled = !currentPlaylist?.url;
     btn.innerHTML = '<i class="fas fa-sync-alt"></i>';
+  }
+});
+
+document.getElementById("editPlaylistBtn").addEventListener("click", () => {
+  if (!currentPlaylist) return;
+  document.getElementById("editPlaylistName").value = currentPlaylist.name || "";
+  document.getElementById("editPlaylistUrl").value = currentPlaylist.url || "";
+  new bootstrap.Modal(document.getElementById("editPlaylistModal")).show();
+});
+
+document.getElementById("saveEditPlaylistBtn").addEventListener("click", async () => {
+  if (!currentPlaylist) return;
+  const name = document.getElementById("editPlaylistName").value.trim();
+  const url = document.getElementById("editPlaylistUrl").value.trim();
+  if (!name) {
+    toast("Playlist name cannot be empty", "danger");
+    return;
+  }
+  const btn = document.getElementById("saveEditPlaylistBtn");
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Saving...';
+  try {
+    const res = await apiFetch(`/api/playlists/${currentPlaylist.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, url }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Edit failed");
+    bootstrap.Modal.getInstance(document.getElementById("editPlaylistModal")).hide();
+    await loadPlaylists();
+    await selectPlaylist(currentPlaylist.id);
+    toast("Playlist updated", "success");
+  } catch (e) {
+    toast(e.message, "danger");
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-save me-1"></i>Save';
   }
 });
 

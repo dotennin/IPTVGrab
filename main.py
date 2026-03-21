@@ -221,6 +221,11 @@ class AddPlaylistRequest(BaseModel):
     text: str = ""  # raw M3U text (alternative to URL)
 
 
+class EditPlaylistRequest(BaseModel):
+    name: str = ""
+    url: str = ""
+
+
 # ── Auth routes ──────────────────────────────────────────────────────────────
 
 @app.get("/login")
@@ -680,6 +685,17 @@ async def delete_playlist(pl_id: str):
     del playlists[pl_id]
     save_playlists()
     return {"ok": True}
+
+
+@app.patch("/api/playlists/{pl_id}")
+async def edit_playlist(pl_id: str, req: EditPlaylistRequest):
+    if pl_id not in playlists:
+        raise HTTPException(404, "Playlist not found")
+    if req.name.strip():
+        playlists[pl_id]["name"] = req.name.strip()
+    playlists[pl_id]["url"] = req.url.strip()
+    save_playlists()
+    return {"ok": True, "name": playlists[pl_id]["name"], "url": playlists[pl_id]["url"]}
 
 
 @app.post("/api/playlists/{pl_id}/refresh")
