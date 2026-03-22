@@ -495,9 +495,52 @@ textarea.form-control { resize: vertical; min-height: 120px; }
 #previewVideo:focus, #previewVideo:focus-visible { outline: none; box-shadow: none; }
 
 /* ── All Playlists Editor ────────────────────────────────────────────────── */
-.editor-groups-panel { width: 280px; flex-shrink: 0; border-right: 1px solid var(--card-border); display: flex; flex-direction: column; overflow: hidden; }
+.editor-groups-panel { width: 320px; flex-shrink: 0; border-right: 1px solid var(--card-border); display: flex; flex-direction: column; overflow: hidden; }
 .editor-channels-panel { display: flex; flex-direction: column; overflow: hidden; }
 .editor-sortable-list { overflow-y: auto; flex: 1; padding: 6px; }
+.editor-resizer {
+  width: 12px;
+  cursor: col-resize;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  position: relative;
+  z-index: 1;
+  transition: background 0.15s;
+}
+/* center line */
+.editor-resizer::before {
+  content: '';
+  position: absolute;
+  top: 0; bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 1px;
+  background: #30363d;
+  transition: background 0.15s, width 0.15s;
+}
+/* grip dots */
+.editor-resizer::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 4px;
+  height: 32px;
+  background-image: radial-gradient(circle, #555d68 1.5px, transparent 1.5px);
+  background-size: 4px 8px;
+  background-repeat: repeat-y;
+  transition: background-image 0.15s;
+}
+.editor-resizer:hover::before,
+.editor-resizer.dragging::before { width: 2px; background: #388bfd; }
+.editor-resizer:hover::after,
+.editor-resizer.dragging::after {
+  background-image: radial-gradient(circle, #388bfd 1.5px, transparent 1.5px);
+}
 
 .editor-group-item,
 .editor-channel-item {

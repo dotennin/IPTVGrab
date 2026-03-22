@@ -1969,7 +1969,7 @@ document.getElementById("confirmAddGroupBtn").addEventListener("click", () => {
   const name = document.getElementById("newGroupNameInput").value.trim();
   if (!name) { toast("Group name is required", "danger"); return; }
   if (editorGroups.some((g) => g.name === name)) { toast("Group already exists", "danger"); return; }
-  editorGroups.push({
+  editorGroups.unshift({
     id: "g_" + Math.random().toString(36).slice(2, 10),
     name,
     enabled: true,
@@ -1997,7 +1997,7 @@ document.getElementById("confirmAddChannelBtn").addEventListener("click", () => 
   const group = editorGroups.find((g) => g.id === editorSelectedGroupId);
   if (!group) { toast("No group selected", "danger"); return; }
   if (!group.channels) group.channels = [];
-  group.channels.push({
+  group.channels.unshift({
     id: "cc_" + Math.random().toString(36).slice(2, 10),
     name,
     url,
@@ -2044,6 +2044,38 @@ document.getElementById("allPlaylistsEditorModal").addEventListener("hide.bs.mod
     }
   }
 });
+
+// ── Editor panel resizer ──────────────────────────────────────────────────
+(function () {
+  const resizer = document.getElementById("editorResizer");
+  const panel   = document.querySelector(".editor-groups-panel");
+  if (!resizer || !panel) return;
+
+  let startX, startW;
+
+  resizer.addEventListener("mousedown", (e) => {
+    startX = e.clientX;
+    startW = panel.offsetWidth;
+    resizer.classList.add("dragging");
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    function onMove(e) {
+      const w = Math.max(160, Math.min(600, startW + e.clientX - startX));
+      panel.style.width = w + "px";
+    }
+    function onUp() {
+      resizer.classList.remove("dragging");
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    }
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+    e.preventDefault();
+  });
+})();
 
 // Load playlists on page load (auto-select first if available)
 loadPlaylists({ autoSelect: true });
