@@ -77,7 +77,7 @@ Each task is displayed as a card. States and their UI:
 | Failed | Red — shows error message | Delete / Retry |
 | Cancelled | Gray | Delete |
 
-While a task is **downloading or recording**, a **Preview** button opens a modal that plays the already-downloaded segments in the browser (powered by hls.js) and keeps extending the playable/buffered range as new segments arrive. No need to wait for the full download to finish.
+While a task is **downloading or recording**, a **Preview** button opens a modal that plays the already-downloaded segments live in the browser (powered by hls.js). No need to wait for the full download to finish.
 
 The **Clear completed** button in the panel header removes all terminal-state cards (completed, failed, cancelled) at once.
 
@@ -248,3 +248,4 @@ Returns `{ "type": "master"|"media", "streams": [...] }` for master playlists, o
 ├── docker-compose.yml
 └── requirements.txt
 ```
+

@@ -722,165 +722,36 @@ async def restart_task(task_id: str, bg: BackgroundTasks):
     return {"task_id": task_id, "status": "queued"}
 
 
-_PREVIEW_NO_CACHE_HEADERS = {"Cache-Control": "no-cache, no-store, must-revalidate"}
-_PREVIEW_TERMINAL_STATUSES = {
-    "stopping",
-    "merging",
-    "completed",
-    "failed",
-    "cancelled",
-    "interrupted",
-}
-
-
-def _get_preview_context(task_id: str) -> tuple[dict, Path, str, bool, int]:
+@app.get("/api/tasks/{task_id}/preview.m3u8")
+async def preview_playlist(task_id: str):
     task = tasks.get(task_id)
     if not task:
         raise HTTPException(404, "Task not found")
     tmpdir = task.get("tmpdir")
     if not tmpdir or not Path(tmpdir).exists():
         raise HTTPException(404, "No preview available yet")
-    return (
-        task,
-        Path(tmpdir),
-        task.get("seg_ext", ".ts"),
-        task.get("is_cmaf", False),
-        int(task.get("target_duration") or 6),
-    )
-
-
-def _preview_segment_prefix(directory: Path, seg_ext: str) -> list[Path]:
-    seg_files: list[Path] = []
-    idx = 0
-    while True:
-        seg_path = directory / f"seg_{idx:06d}{seg_ext}"
-        if not seg_path.exists():
-            break
-        if seg_path.stat().st_size <= 0:
-            break
-        seg_files.append(seg_path)
-        idx += 1
-    return seg_files
-
-
-def _preview_is_terminal(task: dict) -> bool:
-    return task.get("status") in _PREVIEW_TERMINAL_STATUSES
-
-
-def _preview_media_response(
-    seg_files: list[Path],
-    target_dur: int,
-    is_terminal: bool,
-    segment_base_url: str,
-    map_uri: Optional[str] = None,
-) -> Response:
+    tmpdir_path = Path(tmpdir)
+    seg_ext = task.get("seg_ext", ".ts")
+    is_cmaf = task.get("is_cmaf", False)
+    target_dur = int(task.get("target_duration") or 6)
+    seg_files = sorted(tmpdir_path.glob(f"seg_*{seg_ext}"))
     if not seg_files:
         raise HTTPException(404, "No segments available yet")
     lines = [
         "#EXTM3U",
-        f"#EXT-X-VERSION:{7 if map_uri else 3}",
+        "#EXT-X-VERSION:3",
         f"#EXT-X-TARGETDURATION:{target_dur}",
         "#EXT-X-MEDIA-SEQUENCE:0",
     ]
-    if not is_terminal:
-        lines.append("#EXT-X-PLAYLIST-TYPE:EVENT")
-    if map_uri:
-        lines.append(f'#EXT-X-MAP:URI="{map_uri}"')
+    if is_cmaf:
+        init_file = tmpdir_path / "init.mp4"
+        if init_file.exists():
+            lines.append(f'#EXT-X-MAP:URI="/api/tasks/{task_id}/seg/init.mp4"')
     for seg_file in seg_files:
-        lines.append(f"#EXTINF:{target_dur:.3f},")
-        lines.append(f"{segment_base_url}/{seg_file.name}")
-    if is_terminal:
-        lines.append("#EXT-X-ENDLIST")
-    return Response(
-        "\n".join(lines),
-        media_type="application/vnd.apple.mpegurl",
-        headers=_PREVIEW_NO_CACHE_HEADERS,
-    )
-
-
-@app.get("/api/tasks/{task_id}/preview.m3u8")
-async def preview_playlist(task_id: str):
-    task, tmpdir_path, seg_ext, is_cmaf, target_dur = _get_preview_context(task_id)
-    video_seg_files = _preview_segment_prefix(tmpdir_path, seg_ext)
-    if not video_seg_files:
-        raise HTTPException(404, "No segments available yet")
-
-    if is_cmaf and not (tmpdir_path / "init.mp4").exists():
-        raise HTTPException(404, "Preview init segment not ready yet")
-
-    audio_dir = tmpdir_path / "audio"
-    audio_init_file = audio_dir / "init.mp4"
-    audio_seg_files = (
-        _preview_segment_prefix(audio_dir, seg_ext)
-        if audio_dir.exists() and audio_init_file.exists()
-        else []
-    )
-    if audio_seg_files and min(len(video_seg_files), len(audio_seg_files)) > 0:
-        lines = [
-            "#EXTM3U",
-            "#EXT-X-VERSION:7",
-            f'#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="Audio",DEFAULT=YES,AUTOSELECT=YES,URI="/api/tasks/{task_id}/preview/audio.m3u8"',
-            '#EXT-X-STREAM-INF:BANDWIDTH=1600000,AUDIO="audio",CLOSED-CAPTIONS=NONE',
-            f"/api/tasks/{task_id}/preview/video.m3u8",
-        ]
-        return Response(
-            "\n".join(lines),
-            media_type="application/vnd.apple.mpegurl",
-            headers=_PREVIEW_NO_CACHE_HEADERS,
-        )
-
-    return _preview_media_response(
-        video_seg_files,
-        target_dur,
-        _preview_is_terminal(task),
-        f"/api/tasks/{task_id}/seg",
-        map_uri=f"/api/tasks/{task_id}/seg/init.mp4" if is_cmaf else None,
-    )
-
-
-@app.get("/api/tasks/{task_id}/preview/video.m3u8")
-async def preview_video_playlist(task_id: str):
-    task, tmpdir_path, seg_ext, is_cmaf, target_dur = _get_preview_context(task_id)
-    video_seg_files = _preview_segment_prefix(tmpdir_path, seg_ext)
-    if is_cmaf and not (tmpdir_path / "init.mp4").exists():
-        raise HTTPException(404, "Preview init segment not ready yet")
-
-    audio_dir = tmpdir_path / "audio"
-    audio_init_file = audio_dir / "init.mp4"
-    if audio_dir.exists() and audio_init_file.exists():
-        audio_seg_files = _preview_segment_prefix(audio_dir, seg_ext)
-        if audio_seg_files:
-            video_seg_files = video_seg_files[: min(len(video_seg_files), len(audio_seg_files))]
-
-    return _preview_media_response(
-        video_seg_files,
-        target_dur,
-        _preview_is_terminal(task),
-        f"/api/tasks/{task_id}/seg",
-        map_uri=f"/api/tasks/{task_id}/seg/init.mp4" if is_cmaf else None,
-    )
-
-
-@app.get("/api/tasks/{task_id}/preview/audio.m3u8")
-async def preview_audio_playlist(task_id: str):
-    task, tmpdir_path, seg_ext, _is_cmaf, target_dur = _get_preview_context(task_id)
-    audio_dir = tmpdir_path / "audio"
-    audio_init_file = audio_dir / "init.mp4"
-    if not audio_dir.exists() or not audio_init_file.exists():
-        raise HTTPException(404, "No preview audio available yet")
-
-    audio_seg_files = _preview_segment_prefix(audio_dir, seg_ext)
-    video_seg_files = _preview_segment_prefix(tmpdir_path, seg_ext)
-    if video_seg_files:
-        audio_seg_files = audio_seg_files[: min(len(audio_seg_files), len(video_seg_files))]
-
-    return _preview_media_response(
-        audio_seg_files,
-        target_dur,
-        _preview_is_terminal(task),
-        f"/api/tasks/{task_id}/audio-seg",
-        map_uri=f"/api/tasks/{task_id}/audio-seg/init.mp4",
-    )
+        lines.append(f"#EXTINF:{target_dur}.000,")
+        lines.append(f"/api/tasks/{task_id}/seg/{seg_file.name}")
+    lines.append("#EXT-X-ENDLIST")
+    return Response("\n".join(lines), media_type="application/vnd.apple.mpegurl")
 
 
 @app.get("/api/tasks/{task_id}/seg/{filename}")
@@ -894,20 +765,6 @@ async def serve_segment(task_id: str, filename: str):
     if not seg_path.exists():
         raise HTTPException(404, "Segment not found")
     media_type = "video/mp2t" if filename.endswith(".ts") else "video/mp4"
-    return FileResponse(seg_path, media_type=media_type)
-
-
-@app.get("/api/tasks/{task_id}/audio-seg/{filename}")
-async def serve_audio_segment(task_id: str, filename: str):
-    task = tasks.get(task_id)
-    if not task or not task.get("tmpdir"):
-        raise HTTPException(404, "Task or tmpdir not found")
-    if not (re.match(r"^seg_\d{6}\.(ts|m4s|mp4)$", filename) or filename == "init.mp4"):
-        raise HTTPException(403, "Invalid filename")
-    seg_path = Path(task["tmpdir"]) / "audio" / filename
-    if not seg_path.exists():
-        raise HTTPException(404, "Audio segment not found")
-    media_type = "audio/mp2t" if filename.endswith(".ts") else "audio/mp4"
     return FileResponse(seg_path, media_type=media_type)
 
 

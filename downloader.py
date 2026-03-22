@@ -70,16 +70,6 @@ class M3U8Downloader:
         if cache_dir.exists():
             shutil.rmtree(cache_dir, ignore_errors=True)
 
-    def _write_bytes_atomic(self, path: Path, data: bytes):
-        """Write a file atomically so preview only sees fully-written segments."""
-        tmp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.part")
-        try:
-            tmp_path.write_bytes(data)
-            tmp_path.replace(path)
-        except Exception:
-            tmp_path.unlink(missing_ok=True)
-            raise
-
     def _make_session(self):
         connector = aiohttp.TCPConnector(ssl=False, limit=self.concurrency * 4)
         timeout = aiohttp.ClientTimeout(total=60, connect=15)
@@ -214,7 +204,7 @@ class M3U8Downloader:
                                     else:
                                         init_bytes = await self._fetch_bytes(session, init_url)
                                         init_data_map[init_url] = init_bytes
-                                        self._write_bytes_atomic(init_disk, init_bytes)
+                                        init_disk.write_bytes(init_bytes)
                                 except Exception:
                                     pass
 
@@ -233,7 +223,7 @@ class M3U8Downloader:
                                     try:
                                         ai_url = self._resolve(init_sec.uri, audio_url)
                                         ai_bytes = await self._fetch_bytes(session, ai_url)
-                                        self._write_bytes_atomic(audio_init_disk, ai_bytes)
+                                        audio_init_disk.write_bytes(ai_bytes)
                                     except Exception:
                                         pass
                                     break
@@ -283,7 +273,7 @@ class M3U8Downloader:
                                     k = keys_cache.get(ku)
                                     if k:
                                         data = self._decrypt_aes128(data, k, seg.key.iv)
-                                self._write_bytes_atomic(seg_path, data)
+                                seg_path.write_bytes(data)
                                 bytes_downloaded += len(data)
                             except Exception:
                                 pass
@@ -300,7 +290,7 @@ class M3U8Downloader:
                         async with semaphore:
                             try:
                                 data = await self._fetch_bytes(session, au_url)
-                                self._write_bytes_atomic(seg_path, data)
+                                seg_path.write_bytes(data)
                                 bytes_downloaded += len(data)
                             except Exception:
                                 pass
@@ -413,9 +403,9 @@ class M3U8Downloader:
                                         iu = self._resolve(init_sec.uri, base_url)
                                         if iu not in init_data_map:
                                             try:
-                                                init_bytes = await self._fetch_bytes(session, iu)
-                                                init_data_map[iu] = init_bytes
-                                                self._write_bytes_atomic(init_disk, init_bytes)
+                                                init_data_map[iu] = (
+                                                    await self._fetch_bytes(session, iu)
+                                                )
                                             except Exception:
                                                 pass
                         except Exception:
@@ -435,7 +425,7 @@ class M3U8Downloader:
                                             try:
                                                 ai_url = self._resolve(init_sec.uri, audio_url)
                                                 ai_bytes = await self._fetch_bytes(session, ai_url)
-                                                self._write_bytes_atomic(audio_init_disk, ai_bytes)
+                                                audio_init_disk.write_bytes(ai_bytes)
                                             except Exception:
                                                 pass
                                             break
@@ -488,7 +478,7 @@ class M3U8Downloader:
                                         data = self._decrypt_aes128(
                                             data, key, seg.key.iv
                                         )
-                                self._write_bytes_atomic(seg_path, data)
+                                seg_path.write_bytes(data)
                                 downloaded += 1
                                 bytes_downloaded += len(data)
                             except Exception:
@@ -516,7 +506,7 @@ class M3U8Downloader:
                             async with semaphore:
                                 try:
                                     data = await self._fetch_bytes(session, au_url)
-                                    self._write_bytes_atomic(seg_path, data)
+                                    seg_path.write_bytes(data)
                                     bytes_downloaded += len(data)
                                 except Exception:
                                     pass

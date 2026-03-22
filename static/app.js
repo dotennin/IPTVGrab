@@ -1175,13 +1175,6 @@ document.addEventListener("webkitfullscreenchange", handlePreviewActivity);
 previewVideo.addEventListener("webkitbeginfullscreen", handlePreviewActivity);
 previewVideo.addEventListener("webkitendfullscreen", handlePreviewActivity);
 
-const PREVIEW_HLS_CONFIG = {
-  enableWorker: false,
-  lowLatencyMode: false,
-  startPosition: 0,
-  liveSyncMode: "buffered",
-};
-
 function openHLSPlayer(url, title = "") {
   setPreviewTitle(title ? esc(title) : "Watch");
   if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
@@ -1221,35 +1214,19 @@ function openPreview(taskId) {
   previewVideo.removeAttribute("src");
 
   const src = `/api/tasks/${taskId}/preview.m3u8`;
-  try {
-    if (typeof Hls !== "undefined" && Hls.isSupported()) {
-      hlsInstance = new Hls(PREVIEW_HLS_CONFIG);
-      hlsInstance.loadSource(src);
-      previewVideo.addEventListener("loadedmetadata", () => {
-        try {
-          previewVideo.currentTime = 0;
-        } catch (_) {}
-      }, { once: true });
-      hlsInstance.attachMedia(previewVideo);
-      hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => previewVideo.play().catch(() => {}));
-      hlsInstance.on(Hls.Events.ERROR, (_evt, data) => {
-        if (data.fatal) toast("Preview error: " + (data.details || "unknown"), "danger");
-      });
-    } else if (previewVideo.canPlayType("application/vnd.apple.mpegurl")) {
-      previewVideo.src = src;
-      previewVideo.addEventListener("loadedmetadata", () => {
-        previewVideo.currentTime = 0;
-      }, { once: true });
-      previewVideo.play().catch(() => {});
-    } else {
-      toast("HLS preview requires Chrome with hls.js loaded", "danger");
-      return;
-    }
-    previewModal.show();
-  } catch (err) {
-    if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
-    toast("Preview init failed: " + ((err && err.message) || "unknown error"), "danger");
+  if (typeof Hls !== "undefined" && Hls.isSupported()) {
+    hlsInstance = new Hls({ enableWorker: false });
+    hlsInstance.loadSource(src);
+    hlsInstance.attachMedia(previewVideo);
+    hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => previewVideo.play().catch(() => {}));
+  } else if (previewVideo.canPlayType("application/vnd.apple.mpegurl")) {
+    previewVideo.src = src;
+    previewVideo.play().catch(() => {});
+  } else {
+    toast("HLS preview requires Chrome with hls.js loaded", "danger");
+    return;
   }
+  previewModal.show();
 }
 
 previewModalEl.addEventListener("hidden.bs.modal", () => {
