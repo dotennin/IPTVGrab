@@ -111,7 +111,6 @@
               <textarea class="form-control font-mono" id="curlInput" rows="9" placeholder="curl 'https://example.com/stream.m3u8' \&#10;  -H 'user-agent: Mozilla/5.0 ...' \&#10;  -H 'referer: https://...' \&#10;  ..." spellcheck="false"></textarea>
             </div>
 
-            <hr class="border-gh-border my-3" />
 
             <!-- Output settings (hidden when playlist tab active) -->
             <div class="d-none" id="outputSettingsRow">
@@ -176,12 +175,13 @@
           </div>
           <!-- Body: sidebar + grid -->
           <div class="flex channel-grid-body flex-1 min-h-0">
-            <div class="channel-group-sidebar d-none" id="channelGroupSidebar">
+            <div class="channel-group-sidebar d-none w-[60px] md:w-[150px]" id="channelGroupSidebar">
               <ul class="channel-group-list" id="groupList">
-                <li class="channel-group-item active" data-group="">All</li>
+                <li class="channel-group-item active md:px-2" data-group="">All</li>
               </ul>
             </div>
-            <div class="channel-grid-area flex-1 min-w-0">
+            <div class="channel-group-resizer d-none" id="channelGroupResizer"></div>
+            <div class="channel-grid-area flex-1 min-w-0 p-1">
               <div class="text-center text-gh-muted py-16" id="channelPlaceholder">
                 <i class="fas fa-tv fa-2x mb-2 d-block opacity-25"></i>
                 <p class="mb-0 text-sm">Select a playlist to browse channels</p>

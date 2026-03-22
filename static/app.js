@@ -1487,6 +1487,8 @@ function _populateGroupFilter(channels, orderedGroups = null) {
     list.appendChild(li);
   }
   sidebar.classList.toggle("d-none", groups.length === 0);
+  const resizer = document.getElementById("channelGroupResizer");
+  if (resizer) resizer.classList.toggle("d-none", groups.length === 0);
 }
 
 async function selectPlaylist(id) {
@@ -1509,6 +1511,7 @@ async function selectPlaylist(id) {
     document.getElementById("channelSearch").classList.add("d-none");
     document.getElementById("healthOnlyWrap").classList.add("d-none");
     document.getElementById("channelGroupSidebar").classList.add("d-none");
+    document.getElementById("channelGroupResizer")?.classList.add("d-none");
     countBadge.textContent = "0";
     refreshBtn.disabled = true;
     document.getElementById("editPlaylistBtn").disabled = true;
@@ -2229,11 +2232,10 @@ document.getElementById("allPlaylistsEditorModal").addEventListener("hide.bs.mod
   const panel   = document.querySelector(".editor-groups-panel");
   if (!resizer || !panel) return;
 
-  let startX, startW;
-
-  resizer.addEventListener("mousedown", (e) => {
-    startX = e.clientX;
-    startW = panel.offsetWidth;
+  resizer.addEventListener("pointerdown", (e) => {
+    const startX = e.clientX;
+    const startW = panel.offsetWidth;
+    resizer.setPointerCapture(e.pointerId);
     resizer.classList.add("dragging");
     document.body.style.cursor = "col-resize";
     document.body.style.userSelect = "none";
@@ -2246,11 +2248,42 @@ document.getElementById("allPlaylistsEditorModal").addEventListener("hide.bs.mod
       resizer.classList.remove("dragging");
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
-      document.removeEventListener("mousemove", onMove);
-      document.removeEventListener("mouseup", onUp);
+      resizer.removeEventListener("pointermove", onMove);
+      resizer.removeEventListener("pointerup", onUp);
     }
-    document.addEventListener("mousemove", onMove);
-    document.addEventListener("mouseup", onUp);
+    resizer.addEventListener("pointermove", onMove);
+    resizer.addEventListener("pointerup", onUp);
+    e.preventDefault();
+  });
+})();
+
+// ── Channel group sidebar resizer ─────────────────────────────────────────
+(function () {
+  const resizer = document.getElementById("channelGroupResizer");
+  const sidebar = document.getElementById("channelGroupSidebar");
+  if (!resizer || !sidebar) return;
+
+  resizer.addEventListener("pointerdown", (e) => {
+    const startX = e.clientX;
+    const startW = sidebar.offsetWidth;
+    resizer.setPointerCapture(e.pointerId);
+    resizer.classList.add("dragging");
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    function onMove(e) {
+      const w = Math.max(60, Math.min(320, startW + e.clientX - startX));
+      sidebar.style.width = w + "px";
+    }
+    function onUp() {
+      resizer.classList.remove("dragging");
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      resizer.removeEventListener("pointermove", onMove);
+      resizer.removeEventListener("pointerup", onUp);
+    }
+    resizer.addEventListener("pointermove", onMove);
+    resizer.addEventListener("pointerup", onUp);
     e.preventDefault();
   });
 })();
