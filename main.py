@@ -19,7 +19,7 @@ from pydantic import BaseModel
 
 from downloader import M3U8Downloader, parse_curl_command
 
-app = FastAPI(title="M3U8 Downloader")
+app = FastAPI(title="IPTVGrab")
 
 # ── Auth ─────────────────────────────────────────────────────────────────────
 

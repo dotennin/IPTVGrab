@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Start the M3U8 Downloader web server."""
+"""Start the IPTVGrab web server."""
 import argparse
 import os
 import subprocess
@@ -8,7 +8,7 @@ import sys
 
 def main():
     parser = argparse.ArgumentParser(
-        description="M3U8 Downloader – HLS video download server",
+        description="IPTVGrab – M3U8 & IPTV download server",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
@@ -38,7 +38,7 @@ def main():
     env = os.environ.copy()
     env["DOWNLOADS_DIR"] = args.downloads_dir
 
-    print(f"  M3U8 Downloader  →  http://{args.host}:{args.port}")
+    print(f"  IPTVGrab  →  http://{args.host}:{args.port}")
     print(f"  Downloads dir    →  {args.downloads_dir}")
 
     cmd = [
