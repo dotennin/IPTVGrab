@@ -361,7 +361,31 @@
             <video id="previewVideo" tabindex="0" controls style="width:100%;max-height:72vh;display:block"></video>
           </div>
         </div>
-        <div class="tw-modal-footer"></div>
+        <div class="tw-modal-footer" id="previewModalFooter" style="flex-wrap:wrap;align-items:flex-start;gap:0;padding:0">
+          <div id="clipToggleBar" class="d-flex justify-content-end w-full p-2" style="width:100%">
+            <button id="toggleClipBtn" class="btn btn-sm btn-outline-warning">
+              <i class="fas fa-cut me-1"></i>Clip
+            </button>
+          </div>
+          <div id="clipToolbar" class="d-none clip-toolbar-full">
+            <div class="d-flex justify-content-between mb-1 small px-1">
+              <span class="text-warning"><i class="fas fa-play me-1" style="font-size:.7em"></i><span id="clipStartLabel">0:00</span></span>
+              <span id="clipDurationLabel" class="text-muted"></span>
+              <span class="text-danger"><i class="fas fa-stop me-1" style="font-size:.7em"></i><span id="clipEndLabel">0:00</span></span>
+            </div>
+            <div class="clip-range-wrap mx-1 mb-2">
+              <div class="clip-track"><div class="clip-selection" id="clipSelection"></div></div>
+              <input type="range" id="clipStart" class="clip-range-input" min="0" max="100" step="0.1" value="0">
+              <input type="range" id="clipEnd"   class="clip-range-input" min="0" max="100" step="0.1" value="100">
+            </div>
+            <div class="d-flex align-items-center gap-2 px-1 pb-2">
+              <button id="clipDownloadBtn" class="btn btn-sm btn-success">
+                <i class="fas fa-cut me-1"></i>Download Clip
+              </button>
+              <button id="clipCancelBtn" class="btn btn-sm btn-outline-secondary">Cancel</button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>

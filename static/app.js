@@ -519,6 +519,9 @@ function addTaskCard(taskId, url) {
         <button class="btn btn-sm btn-outline-info task-preview d-none" title="Preview downloaded segments">
           <i class="fas fa-play-circle me-1"></i>Preview
         </button>
+        <button class="btn btn-sm btn-outline-warning task-clip d-none" title="Clip video segment">
+          <i class="fas fa-cut me-1"></i>Clip
+        </button>
         <div class="d-flex gap-1 task-recording-extras d-none"></div>
         <button class="btn btn-sm btn-outline-danger task-action" data-id="${taskId}">
           <i class="fas fa-times"></i> Cancel
@@ -700,6 +703,27 @@ function updateTaskCard(taskId, task) {
           } else {
             openPreview(taskId);
           }
+        });
+      }
+    }
+  }
+
+  // ── Clip button ────────────────────────────────────────────────────────────
+  const clipBtn = card.querySelector(".task-clip");
+  if (clipBtn) {
+    const canLive = task.tmpdir && (task.downloaded >= 5 || task.recorded_segments >= 5);
+    const canDirect = task.status === "completed" && task.output;
+    if (canLive || canDirect) {
+      clipBtn.classList.remove("d-none");
+      if (canDirect) {
+        clipBtn.dataset.outputUrl = `/downloads/${task.output}`;
+      } else {
+        delete clipBtn.dataset.outputUrl;
+      }
+      if (!clipBtn.dataset.listenerAdded) {
+        clipBtn.dataset.listenerAdded = "1";
+        clipBtn.addEventListener("click", () => {
+          openClipMode(taskId, clipBtn.dataset.outputUrl || null);
         });
       }
     }
@@ -1236,6 +1260,148 @@ previewModalEl.addEventListener("hidden.bs.modal", () => {
   previewVideo.pause();
   previewVideo.removeAttribute("src");
   previewVideo.load();
+  deactivateClipMode();
+});
+
+// ── Clip mode ─────────────────────────────────────────────────────────────────
+let _clipTaskId = null;
+let _clipMode   = false;
+
+const clipToolbar       = document.getElementById("clipToolbar");
+const clipToggleBar     = document.getElementById("clipToggleBar");
+const toggleClipBtn     = document.getElementById("toggleClipBtn");
+const clipStartInput    = document.getElementById("clipStart");
+const clipEndInput      = document.getElementById("clipEnd");
+const clipSelection     = document.getElementById("clipSelection");
+const clipStartLabel    = document.getElementById("clipStartLabel");
+const clipEndLabel      = document.getElementById("clipEndLabel");
+const clipDurationLabel = document.getElementById("clipDurationLabel");
+const clipDownloadBtn   = document.getElementById("clipDownloadBtn");
+const clipCancelBtn     = document.getElementById("clipCancelBtn");
+
+function deactivateClipMode() {
+  _clipMode   = false;
+  _clipTaskId = null;
+  if (clipToolbar)   clipToolbar.classList.add("d-none");
+  if (clipToggleBar) clipToggleBar.classList.remove("d-none");
+}
+
+function _activateClipUI() {
+  if (clipToolbar)   clipToolbar.classList.remove("d-none");
+  if (clipToggleBar) clipToggleBar.classList.add("d-none");
+}
+
+function initClipSlider() {
+  let duration = previewVideo.duration;
+  if (!isFinite(duration) || duration <= 0) duration = 3600;
+  const maxVal = String(Math.round(duration * 10) / 10);
+  clipStartInput.max = maxVal;
+  clipEndInput.max   = maxVal;
+  clipStartInput.value = "0";
+  clipEndInput.value   = maxVal;
+  updateClipUI();
+}
+
+function updateClipUI() {
+  const start = parseFloat(clipStartInput.value);
+  const end   = parseFloat(clipEndInput.value);
+  const max   = parseFloat(clipStartInput.max) || 1;
+  clipStartLabel.textContent    = formatDuration(start);
+  clipEndLabel.textContent      = formatDuration(end);
+  clipDurationLabel.textContent = `Clip: ${formatDuration(end - start)}`;
+  clipSelection.style.left  = `${(start / max) * 100}%`;
+  clipSelection.style.width = `${((end - start) / max) * 100}%`;
+}
+
+function openClipMode(taskId, outputUrl = null) {
+  _clipTaskId = taskId;
+  _clipMode   = true;
+  if (!isPreviewVisible()) {
+    if (outputUrl) {
+      openPreviewDirect(outputUrl);
+    } else {
+      openPreview(taskId);
+    }
+  }
+  _activateClipUI();
+  if (previewVideo.readyState >= 1 && isFinite(previewVideo.duration)) {
+    initClipSlider();
+  } else {
+    previewVideo.addEventListener("loadedmetadata", initClipSlider, { once: true });
+  }
+}
+
+// Pause video when user grabs a slider handle so they can see the exact frame
+function _pauseForScrub() {
+  if (!previewVideo.paused) previewVideo.pause();
+}
+clipStartInput.addEventListener("pointerdown", _pauseForScrub);
+clipEndInput.addEventListener("pointerdown",   _pauseForScrub);
+
+clipStartInput.addEventListener("input", () => {
+  let start = parseFloat(clipStartInput.value);
+  const end = parseFloat(clipEndInput.value);
+  if (start >= end - 0.5) {
+    start = Math.max(0, end - 0.5);
+    clipStartInput.value = String(start);
+  }
+  previewVideo.currentTime = start;
+  updateClipUI();
+});
+
+clipEndInput.addEventListener("input", () => {
+  const start = parseFloat(clipStartInput.value);
+  let end = parseFloat(clipEndInput.value);
+  if (end <= start + 0.5) {
+    end = Math.min(parseFloat(clipEndInput.max), start + 0.5);
+    clipEndInput.value = String(end);
+  }
+  previewVideo.currentTime = end;
+  updateClipUI();
+});
+
+clipCancelBtn.addEventListener("click", deactivateClipMode);
+
+toggleClipBtn.addEventListener("click", () => {
+  _activateClipUI();
+  if (previewVideo.readyState >= 1 && isFinite(previewVideo.duration)) {
+    initClipSlider();
+  } else {
+    previewVideo.addEventListener("loadedmetadata", initClipSlider, { once: true });
+  }
+});
+
+clipDownloadBtn.addEventListener("click", async () => {
+  if (!_clipTaskId) return;
+  const start = parseFloat(clipStartInput.value);
+  const end   = parseFloat(clipEndInput.value);
+  const origHTML = clipDownloadBtn.innerHTML;
+  clipDownloadBtn.disabled = true;
+  clipDownloadBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Clipping…';
+  try {
+    const res = await apiFetch(`/api/tasks/${_clipTaskId}/clip`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ start, end }),
+    });
+    if (!res.ok) {
+      const d = await res.json();
+      throw new Error(d.detail || "Clip failed");
+    }
+    const { filename } = await res.json();
+    const a = document.createElement("a");
+    a.href = `/downloads/${filename}`;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    toast(`Clip ready: ${filename}`, "success");
+  } catch (e) {
+    toast(e.message, "danger");
+  } finally {
+    clipDownloadBtn.disabled = false;
+    clipDownloadBtn.innerHTML = origHTML;
+  }
 });
 
 // ── Load existing tasks on page load ─────────────────────────────────────────

@@ -401,6 +401,11 @@ class DownloadRequest(BaseModel):
     concurrency: int = 8
 
 
+class ClipRequest(BaseModel):
+    start: float
+    end: float
+
+
 class AddPlaylistRequest(BaseModel):
     name: str = ""
     url: str = ""
@@ -766,6 +771,118 @@ async def serve_segment(task_id: str, filename: str):
         raise HTTPException(404, "Segment not found")
     media_type = "video/mp2t" if filename.endswith(".ts") else "video/mp4"
     return FileResponse(seg_path, media_type=media_type)
+
+
+def _fmt_hms(secs: float) -> str:
+    """Format seconds as a compact filename-safe string (e.g. 90 → '01m30s')."""
+    total = int(secs)
+    h = total // 3600
+    m = (total % 3600) // 60
+    s = total % 60
+    if h:
+        return f"{h:02d}h{m:02d}m{s:02d}s"
+    return f"{m:02d}m{s:02d}s"
+
+
+@app.post("/api/tasks/{task_id}/clip")
+async def clip_task(task_id: str, req: ClipRequest):
+    """Trim a task's video to the given time range and return the clip filename."""
+    task = tasks.get(task_id)
+    if not task:
+        raise HTTPException(404, "Task not found")
+    if req.start < 0 or req.end <= req.start or (req.end - req.start) < 0.5:
+        raise HTTPException(400, "Invalid clip range (end must be ≥ start + 0.5 s)")
+
+    status = task.get("status")
+    clip_name = None
+
+    # ── Case 1: completed task — clip the final MP4 ──────────────────────────
+    if status == "completed" and task.get("output"):
+        input_path = DOWNLOADS_DIR / task["output"]
+        if not input_path.exists():
+            raise HTTPException(404, "Output file not found")
+        stem = Path(task["output"]).stem
+        clip_name = f"{stem}_clip_{_fmt_hms(req.start)}-{_fmt_hms(req.end)}.mp4"
+        clip_path = DOWNLOADS_DIR / clip_name
+        cmd = [
+            "ffmpeg", "-y",
+            "-ss", str(req.start),
+            "-i", str(input_path),
+            "-t", str(req.end - req.start),
+            "-c", "copy", "-movflags", "+faststart",
+            str(clip_path),
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
+        )
+        await proc.wait()
+        if proc.returncode != 0:
+            raise HTTPException(500, "ffmpeg clip failed")
+        return {"filename": clip_name}
+
+    # ── Case 2: in-progress task — clip from tmpdir segments ─────────────────
+    tmpdir = task.get("tmpdir")
+    if tmpdir and Path(tmpdir).exists() and status in ("downloading", "recording", "stopping"):
+        tmpdir_path = Path(tmpdir)
+        is_cmaf = task.get("is_cmaf", False)
+        seg_ext = task.get("seg_ext", ".ts")
+        stem = task.get("output_name") or task["id"][:8]
+        if stem.endswith(".mp4"):
+            stem = stem[:-4]
+        clip_name = f"{stem}_clip_{_fmt_hms(req.start)}-{_fmt_hms(req.end)}.mp4"
+        clip_path = DOWNLOADS_DIR / clip_name
+
+        if is_cmaf:
+            seg_files = sorted(tmpdir_path.glob(f"seg_*{seg_ext}"))
+            if not seg_files:
+                raise HTTPException(404, "No segments available yet")
+            raw_path = tmpdir_path / "clip_raw.mp4"
+            init_file = tmpdir_path / "init.mp4"
+            loop = asyncio.get_event_loop()
+
+            def _concat_cmaf():
+                with open(raw_path, "wb") as f:
+                    if init_file.exists():
+                        f.write(init_file.read_bytes())
+                    for sf in seg_files:
+                        f.write(sf.read_bytes())
+
+            await loop.run_in_executor(None, _concat_cmaf)
+            cmd = [
+                "ffmpeg", "-y",
+                "-ss", str(req.start),
+                "-i", str(raw_path),
+                "-t", str(req.end - req.start),
+                "-c", "copy", "-movflags", "+faststart",
+                str(clip_path),
+            ]
+        else:
+            seg_files = sorted(tmpdir_path.glob("seg_*.ts"))
+            if not seg_files:
+                raise HTTPException(404, "No segments available yet")
+            list_file = tmpdir_path / "clip_concat.txt"
+            with open(list_file, "w") as f:
+                for sf in seg_files:
+                    f.write(f"file '{sf.absolute()}'\n")
+            cmd = [
+                "ffmpeg", "-y",
+                "-f", "concat", "-safe", "0",
+                "-i", str(list_file),
+                "-ss", str(req.start),
+                "-t", str(req.end - req.start),
+                "-c", "copy", "-movflags", "+faststart",
+                str(clip_path),
+            ]
+
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
+        )
+        await proc.wait()
+        if proc.returncode != 0:
+            raise HTTPException(500, "ffmpeg clip failed")
+        return {"filename": clip_name}
+
+    raise HTTPException(400, "Task cannot be clipped in its current state")
 
 
 @app.get("/downloads/{filename}")
