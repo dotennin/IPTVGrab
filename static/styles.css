@@ -329,7 +329,7 @@ textarea.form-control { resize: vertical; min-height: 120px; }
 .channel-grid-body { overflow: hidden; height: 560px; }
 
 .channel-group-sidebar {
-  width: 150px;
+  width: 120px;
   min-width: 150px;
   border-right: 1px solid var(--card-border);
   overflow-y: auto;
@@ -583,8 +583,22 @@ textarea.form-control { resize: vertical; min-height: 120px; }
 /* ── Mobile responsive ───────────────────────────────────────────────────── */
 @media (max-width: 768px) {
   .channel-grid-body { height: 400px; }
-  .downloads-sidebar { width: 130px; }
   .editor-groups-panel { width: 200px; }
+
+  /* Downloads sidebar → icon-only mode */
+  .downloads-sidebar { width: 60px; padding: 8px 4px; }
+  .dl-cat { justify-content: center; padding: 7px 6px; gap: 4px; white-space: nowrap; }
+  .dl-cat span:first-of-type { display: none; }
+  .dl-sidebar-footer { padding-top: 6px; }
+  #clearCompletedBtn { padding: 6px; }
+  #clearCompletedBtn span { display: none; }
+}
+
+/* ── Tablet channel layout (641-900px): narrow sidebar + 2-col grid ──────── */
+@media (min-width: 641px) and (max-width: 900px) {
+  .channel-group-sidebar { width: 110px; min-width: 110px; }
+  .channel-group-item { font-size: 0.72rem; padding: 5px 8px; }
+  #channelGrid { grid-template-columns: repeat(2, 1fr); }
 }
 
 /* ── Clip toolbar ────────────────────────────────────────────────────────── */

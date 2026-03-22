@@ -45,9 +45,9 @@
     </div>
   </nav>
 
-  <div class="w-full py-4 px-4">
+  <div class="w-full py-2 px-2">
     <!-- Top panels grid -->
-    <div class="grid gap-4 xl:grid-cols-12">
+    <div class="grid gap-2 xl:grid-cols-12">
 
       <!-- Left panel: Input -->
       <div class="xl:col-span-4">
@@ -165,7 +165,7 @@
             <div class="flex items-center gap-2 ml-auto whitespace-nowrap">
               <div class="form-check form-switch d-none mb-0" id="healthOnlyWrap">
                 <input class="form-check-input" type="checkbox" role="switch" id="healthOnlyCheck" />
-                <label class="form-check-label text-sm text-gh-muted" for="healthOnlyCheck">Healthy only</label>
+                <label class="form-check-label text-sm text-gh-muted" for="healthOnlyCheck">Active</label>
               </div>
               <span class="d-none text-sm" id="healthProgressBadge">
                 <i class="fas fa-spinner fa-spin mr-1 text-yellow-400"></i>
@@ -194,7 +194,7 @@
     </div>
 
     <!-- Downloads section -->
-    <div class="mt-4">
+    <div class="mt-2">
       <div class="rounded-lg border border-gh-border bg-gh-surface">
         <div class="flex items-center justify-between px-4 py-2 border-b border-gh-border flex-wrap gap-2">
           <span class="font-medium">
@@ -217,29 +217,29 @@
         <div class="downloads-layout">
           <!-- Category sidebar -->
           <div class="downloads-sidebar">
-            <div class="dl-cat active" data-cat="all">
+            <div class="dl-cat active" data-cat="all" title="All Tasks">
               <i class="fas fa-layer-group"></i>
               <span>All Tasks</span>
               <span class="badge bg-secondary" id="catCount-all">0</span>
             </div>
-            <div class="dl-cat" data-cat="active">
+            <div class="dl-cat" data-cat="active" title="Downloading">
               <i class="fas fa-arrow-circle-down"></i>
               <span>Downloading</span>
               <span class="badge bg-secondary" id="catCount-active">0</span>
             </div>
-            <div class="dl-cat" data-cat="queued">
+            <div class="dl-cat" data-cat="queued" title="Waiting">
               <i class="fas fa-clock"></i>
               <span>Waiting</span>
               <span class="badge bg-secondary" id="catCount-queued">0</span>
             </div>
-            <div class="dl-cat" data-cat="finished">
+            <div class="dl-cat" data-cat="finished" title="Finished">
               <i class="fas fa-check-circle"></i>
               <span>Finished</span>
               <span class="badge bg-secondary" id="catCount-finished">0</span>
             </div>
             <div class="dl-sidebar-footer">
-              <button class="inline-flex items-center justify-center w-full px-2 py-1 border border-[#da3633]/60 text-gh-red hover:bg-[#da3633]/10 rounded text-sm transition-colors" id="clearCompletedBtn" type="button">
-                <i class="fas fa-trash mr-1"></i>Clear failed
+              <button class="inline-flex items-center justify-center w-full px-2 py-1 border border-[#da3633]/60 text-gh-red hover:bg-[#da3633]/10 rounded text-sm transition-colors" id="clearCompletedBtn" title="Clear failed" type="button">
+                <i class="fas fa-trash mr-1"></i><span>Clear failed</span>
               </button>
             </div>
           </div>
