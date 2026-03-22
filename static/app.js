@@ -699,7 +699,7 @@ function updateTaskCard(taskId, task) {
         previewBtn.dataset.listenerAdded = "1";
         previewBtn.addEventListener("click", () => {
           if (previewBtn.dataset.outputUrl) {
-            openPreviewDirect(previewBtn.dataset.outputUrl);
+            openPreviewDirect(previewBtn.dataset.outputUrl, taskId);
           } else {
             openPreview(taskId);
           }
@@ -1222,8 +1222,9 @@ function openHLSPlayer(url, title = "") {
   previewModal.show();
 }
 
-function openPreviewDirect(url) {
+function openPreviewDirect(url, taskId = null) {
   setPreviewTitle("Preview");
+  _currentPreviewTaskId = taskId;
   if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
   previewVideo.pause();
   previewVideo.src = url;
@@ -1233,6 +1234,7 @@ function openPreviewDirect(url) {
 
 function openPreview(taskId) {
   setPreviewTitle("Preview");
+  _currentPreviewTaskId = taskId;
   if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
   previewVideo.pause();
   previewVideo.removeAttribute("src");
@@ -1261,9 +1263,11 @@ previewModalEl.addEventListener("hidden.bs.modal", () => {
   previewVideo.removeAttribute("src");
   previewVideo.load();
   deactivateClipMode();
+  _currentPreviewTaskId = null;
 });
 
 // ── Clip mode ─────────────────────────────────────────────────────────────────
+let _currentPreviewTaskId = null;
 let _clipTaskId = null;
 let _clipMode   = false;
 
@@ -1318,7 +1322,7 @@ function openClipMode(taskId, outputUrl = null) {
   _clipMode   = true;
   if (!isPreviewVisible()) {
     if (outputUrl) {
-      openPreviewDirect(outputUrl);
+      openPreviewDirect(outputUrl, taskId);
     } else {
       openPreview(taskId);
     }
@@ -1363,6 +1367,8 @@ clipEndInput.addEventListener("input", () => {
 clipCancelBtn.addEventListener("click", deactivateClipMode);
 
 toggleClipBtn.addEventListener("click", () => {
+  _clipTaskId = _currentPreviewTaskId;
+  _clipMode   = true;
   _activateClipUI();
   if (previewVideo.readyState >= 1 && isFinite(previewVideo.duration)) {
     initClipSlider();
