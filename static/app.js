@@ -1201,6 +1201,9 @@ previewVideo.addEventListener("webkitendfullscreen", handlePreviewActivity);
 
 function openHLSPlayer(url, title = "") {
   setPreviewTitle(title ? esc(title) : "Watch");
+  _currentPreviewTaskId = null;
+  // Live channel streams have no associated task; clip is not possible
+  if (clipToggleBar) clipToggleBar.classList.add("d-none");
   if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
   previewVideo.pause();
   previewVideo.removeAttribute("src");
@@ -1225,6 +1228,7 @@ function openHLSPlayer(url, title = "") {
 function openPreviewDirect(url, taskId = null) {
   setPreviewTitle("Preview");
   _currentPreviewTaskId = taskId;
+  if (clipToggleBar) clipToggleBar.classList.toggle("d-none", !taskId);
   if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
   previewVideo.pause();
   previewVideo.src = url;
@@ -1235,6 +1239,7 @@ function openPreviewDirect(url, taskId = null) {
 function openPreview(taskId) {
   setPreviewTitle("Preview");
   _currentPreviewTaskId = taskId;
+  if (clipToggleBar) clipToggleBar.classList.toggle("d-none", !taskId);
   if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
   previewVideo.pause();
   previewVideo.removeAttribute("src");
@@ -1287,7 +1292,8 @@ function deactivateClipMode() {
   _clipMode   = false;
   _clipTaskId = null;
   if (clipToolbar)   clipToolbar.classList.add("d-none");
-  if (clipToggleBar) clipToggleBar.classList.remove("d-none");
+  // Restore toggle bar only if there's a task to clip from
+  if (clipToggleBar) clipToggleBar.classList.toggle("d-none", !_currentPreviewTaskId);
 }
 
 function _activateClipUI() {
