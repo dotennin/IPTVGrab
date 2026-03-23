@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Optional
 
 import aiohttp
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -81,6 +81,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if Path(path).suffix.lower() in _STATIC_EXTS:
             return await call_next(request)
 
+        # WebSocket upgrade requests: pass through, auth handled inside WS handler
+        if path.startswith("/ws/"):
+            return await call_next(request)
+
         token = request.cookies.get("session")
         if token and token in sessions:
             return await call_next(request)
@@ -143,6 +147,37 @@ def save_tasks():
 # In-memory registries
 tasks: dict = load_tasks()
 downloaders: dict = {}
+
+# ── WebSocket task subscriptions ─────────────────────────────────────────────
+# task_id -> set of asyncio.Queue (one per connected WebSocket client)
+task_subscribers: dict[str, set] = {}
+
+
+def _ws_publish(task_id: str, data: dict) -> None:
+    """Broadcast a task snapshot to all WebSocket clients watching task_id."""
+    subs = task_subscribers.get(task_id)
+    if not subs:
+        return
+    msg = json.dumps(data, default=str)
+    for q in list(subs):
+        try:
+            q.put_nowait(msg)
+        except asyncio.QueueFull:
+            pass  # slow consumer: skip this frame, client will catch up on next
+
+
+def _ws_subscribe(task_id: str) -> "asyncio.Queue[str]":
+    q: asyncio.Queue = asyncio.Queue(maxsize=128)
+    task_subscribers.setdefault(task_id, set()).add(q)
+    return q
+
+
+def _ws_unsubscribe(task_id: str, q: asyncio.Queue) -> None:
+    subs = task_subscribers.get(task_id)
+    if subs:
+        subs.discard(q)
+        if not subs:
+            task_subscribers.pop(task_id, None)
 
 
 # ── Playlist persistence ──────────────────────────────────────────────────────
@@ -928,8 +963,10 @@ async def _run_download(task_id: str, req: DownloadRequest):
                 dl.cancel()
                 _cleanup_tmpdir(task_id)
                 save_tasks()
+                _ws_publish(task_id, tasks[task_id])
                 return
             tasks[task_id].update(progress)
+            _ws_publish(task_id, tasks[task_id])
             new_status = tasks[task_id].get("status")
             if new_status != prev_status:
                 save_tasks()
@@ -938,9 +975,11 @@ async def _run_download(task_id: str, req: DownloadRequest):
         if final_status == "completed":
             _cleanup_tmpdir(task_id)
             save_tasks()
+            _ws_publish(task_id, tasks[task_id])
     except Exception as e:
         tasks[task_id].update({"status": "failed", "error": str(e)})
         save_tasks()
+        _ws_publish(task_id, tasks[task_id])
     finally:
         downloaders.pop(task_id, None)
         if tasks.get(task_id, {}).get("_auto_delete"):
@@ -1271,6 +1310,54 @@ async def trigger_health_check_route():
     urls = [ch["url"] for g in groups for ch in g.get("channels", []) if ch.get("url")]
     _trigger_health_check(urls)
     return {"ok": True, "total": len(set(urls))}
+
+
+
+# ── WebSocket: task progress streaming ───────────────────────────────────────
+
+@app.websocket("/ws/tasks/{task_id}")
+async def ws_task_updates(websocket: WebSocket, task_id: str):
+    """Stream task progress to connected clients, replacing the 600 ms polling loop."""
+    if AUTH_PASSWORD:
+        token = websocket.cookies.get("session")
+        if not token or token not in sessions:
+            await websocket.close(code=4001, reason="Unauthorized")
+            return
+
+    task = tasks.get(task_id)
+    if not task:
+        await websocket.close(code=4004, reason="Task not found")
+        return
+
+    await websocket.accept()
+
+    # Send current snapshot immediately so the client has something to render
+    await websocket.send_text(json.dumps(task, default=str))
+
+    _terminal = {"completed", "failed", "cancelled", "interrupted"}
+    if task.get("status") in _terminal:
+        await websocket.close()
+        return
+
+    q = _ws_subscribe(task_id)
+    try:
+        while True:
+            try:
+                msg = await asyncio.wait_for(q.get(), timeout=25)
+                await websocket.send_text(msg)
+                if json.loads(msg).get("status") in _terminal:
+                    break
+            except asyncio.TimeoutError:
+                # Keepalive ping so proxies / mobile OS don't kill the connection
+                await websocket.send_text('{"type":"ping"}')
+    except (WebSocketDisconnect, Exception):
+        pass
+    finally:
+        _ws_unsubscribe(task_id, q)
+        try:
+            await websocket.close()
+        except Exception:
+            pass
 
 
 # ── Static files (must be last) ───────────────────────────────────────────────

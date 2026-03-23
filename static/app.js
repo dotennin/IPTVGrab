@@ -4,7 +4,7 @@
 // ── State ────────────────────────────────────────────────────────────────────
 let currentRequest = { url: "", headers: {} };
 let currentStreamInfo = null;
-const pollingTimers = {};
+const taskSockets = {};   // taskId → { ws: WebSocket, stop: () => void }
 
 // ── Health check state ────────────────────────────────────────────────────────
 let healthCache = {};  // url -> {status: "ok"|"dead", checked_at}
@@ -807,33 +807,70 @@ function updateTaskCard(taskId, task) {
   if (statusChanged) updateTaskCount();
 }
 
-// ── Polling ───────────────────────────────────────────────────────────────────
+// ── WebSocket task streaming (replaces polling) ───────────────────────────────
+const _TERMINAL_STATUSES = ["completed", "failed", "cancelled", "interrupted"];
+
 function startPolling(taskId) {
-  if (pollingTimers[taskId]) return;
-  let inFlight = false;
-  pollingTimers[taskId] = setInterval(async () => {
-    if (inFlight) return;
-    inFlight = true;
-    try {
-      const res = await apiFetch(`/api/tasks/${taskId}`);
-      if (!res.ok) { stopPolling(taskId); return; }
-      const task = await res.json();
+  if (taskSockets[taskId]) return;
+
+  let stopped = false;
+  let reconnectDelay = 1000;
+  let reconnectTimer = null;
+
+  function connect() {
+    if (stopped) return;
+    const proto = location.protocol === "https:" ? "wss:" : "ws:";
+    const ws = new WebSocket(`${proto}//${location.host}/ws/tasks/${taskId}`);
+
+    ws.onopen = () => { reconnectDelay = 1000; };
+
+    ws.onmessage = (event) => {
+      let task;
+      try { task = JSON.parse(event.data); } catch (_) { return; }
+      if (task.type === "ping") return;
       updateTaskCard(taskId, task);
-      if (["completed", "failed", "cancelled", "interrupted"].includes(task.status)) {
-        stopPolling(taskId);
+      if (_TERMINAL_STATUSES.includes(task.status)) {
+        stopped = true;
+        taskSockets[taskId]?.ws?.close();
+        delete taskSockets[taskId];
         if (task.status === "completed")
           toast(`${task.output} — completed`, "success");
         else if (task.status === "failed")
           toast(`Failed: ${task.error}`, "danger");
       }
-    } catch (_) { /* network hiccup – keep polling */ }
-    finally { inFlight = false; }
-  }, 600);
+    };
+
+    ws.onclose = () => {
+      if (stopped) return;
+      // Don't reconnect if the task card is already in a terminal state
+      const card = document.getElementById(`task-${taskId}`);
+      if (!card) { stopped = true; delete taskSockets[taskId]; return; }
+      const badge = card.querySelector(".task-status")?.textContent?.toLowerCase() ?? "";
+      if (_TERMINAL_STATUSES.some(s => badge.includes(s))) {
+        stopped = true; delete taskSockets[taskId]; return;
+      }
+      reconnectTimer = setTimeout(connect, reconnectDelay);
+      reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+    };
+
+    ws.onerror = () => ws.close();
+
+    taskSockets[taskId] = {
+      ws,
+      stop() {
+        stopped = true;
+        clearTimeout(reconnectTimer);
+        ws.close();
+        delete taskSockets[taskId];
+      },
+    };
+  }
+
+  connect();
 }
 
 function stopPolling(taskId) {
-  clearInterval(pollingTimers[taskId]);
-  delete pollingTimers[taskId];
+  taskSockets[taskId]?.stop();
 }
 
 async function cancelTask(taskId) {
