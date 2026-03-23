@@ -513,9 +513,9 @@ function addTaskCard(taskId, url) {
     <div class="progress mb-2">
       <div class="progress-bar task-bar" role="progressbar" style="width:0%"></div>
     </div>
-    <div class="d-flex justify-content-between align-items-center">
+    <div class="d-flex justify-content-between align-items-center task-bottom-row">
       <small class="task-info text-muted">Preparing...</small>
-      <div class="d-flex gap-2 align-items-center">
+      <div class="d-flex gap-2 align-items-center flex-wrap">
         <button class="btn btn-sm btn-outline-info task-preview d-none" title="Preview downloaded segments">
           <i class="fas fa-play-circle me-1"></i>Preview
         </button>

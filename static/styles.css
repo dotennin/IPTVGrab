@@ -1122,6 +1122,24 @@ textarea.form-control {
   #clearCompletedBtn span {
     display: none;
   }
+
+  /* Task card: wrap stats + buttons onto separate lines */
+  .task-bottom-row {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .task-info {
+    flex: 1 1 100%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    word-break: normal;
+  }
+
+  .task-card {
+    padding: 10px 12px;
+  }
 }
 
 /* ── Tablet channel layout (641-900px): narrow sidebar + 2-col grid ──────── */
