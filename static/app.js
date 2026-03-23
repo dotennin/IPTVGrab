@@ -170,21 +170,31 @@ document.getElementById("concurrency").addEventListener("input", (e) => {
   document.getElementById("concurrencyVal").textContent = e.target.value;
 });
 
-// ── Tab: toggle common output settings visibility ────────────────────────────
-document.getElementById("playlist-tab").addEventListener("shown.bs.tab", () => {
-  document.getElementById("outputSettingsRow").classList.add("d-none");
-  document.getElementById("parseBtnGroup").classList.add("d-none");
-  document.getElementById("streamInfoPanel").classList.add("d-none");
-  document.getElementById("channelGridPanel").classList.remove("d-none");
-});
+// 定义显示和隐藏的逻辑封装成函数
+const toggleUI = (isPlaylist) => {
+  const outputSettings = document.getElementById("outputSettingsRow");
+  const parseBtnGroup = document.getElementById("parseBtnGroup");
+  const streamInfo = document.getElementById("streamInfoPanel");
+  const channelGrid = document.getElementById("channelGridPanel");
+
+  if (isPlaylist) {
+    outputSettings.classList.add("d-none");
+    parseBtnGroup.classList.add("d-none");
+    streamInfo.classList.add("d-none");
+    channelGrid.classList.remove("d-none");
+  } else {
+    outputSettings.classList.remove("d-none");
+    parseBtnGroup.classList.remove("d-none");
+    streamInfo.classList.remove("d-none");
+    channelGrid.classList.add("d-none");
+  }
+};
+
+// 绑定事件
+document.getElementById("playlist-tab").addEventListener("click", () => toggleUI(true));
 
 ["url-tab", "curl-tab"].forEach((id) => {
-  document.getElementById(id).addEventListener("shown.bs.tab", () => {
-    document.getElementById("outputSettingsRow").classList.remove("d-none");
-    document.getElementById("parseBtnGroup").classList.remove("d-none");
-    document.getElementById("streamInfoPanel").classList.remove("d-none");
-    document.getElementById("channelGridPanel").classList.add("d-none");
-  });
+  document.getElementById(id).addEventListener("click", () => toggleUI(false));
 });
 
 // ── Header rows ───────────────────────────────────────────────────────────────
