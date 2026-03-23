@@ -38,16 +38,24 @@ Browse channels from your IPTV playlist, filtered by group. Click any card to st
 pip install -r requirements.txt
 
 # 2. Start on default port 8765
-python run.py
+python3 run.py
 
 # 3. Custom port and download directory
-python run.py --port 9000 --downloads-dir /mnt/videos
+python3 run.py --port 9000 --downloads-dir /mnt/videos
 
 # 4. With password protection
-AUTH_PASSWORD=secret python run.py
+AUTH_PASSWORD=secret python3 run.py
+
+# 5. Development mode (auto-reload on code changes)
+python3 run.py --dev
 ```
 
 Open **http://localhost:8765** in your browser.
+
+**Note:** On macOS with Homebrew Python, you may need to install with:
+```bash
+pip3 install --break-system-packages -r requirements.txt
+```
 
 ### CLI options
 
@@ -56,9 +64,22 @@ Open **http://localhost:8765** in your browser.
 | `--port` | `-p` | `8765` | TCP port |
 | `--downloads-dir` | `-d` | `./downloads` | Where MP4 files are saved |
 | `--host` | | `0.0.0.0` | Bind address |
-| `--dev` | | off | Enable uvicorn `--reload` |
+| `--dev` | | off | Enable uvicorn auto-reload for development |
 
 Environment variables `PORT`, `DOWNLOADS_DIR`, and `AUTH_PASSWORD` are also respected (CLI flags take precedence).
+
+**ffmpeg requirement:** FFmpeg must be installed and available on your `$PATH`. It is used for merging segments into the final MP4 file.
+
+```bash
+# macOS
+brew install ffmpeg
+
+# Ubuntu/Debian
+sudo apt-get install ffmpeg
+
+# Verify installation
+ffmpeg -version
+```
 
 ---
 
@@ -267,6 +288,13 @@ Clip files are saved alongside the full download as `{name}_clip_{HH-MM-SS}-{HH-
 | Dependency | Notes |
 |---|---|
 | Python 3.9+ | 3.11+ recommended |
-| ffmpeg | Must be on `$PATH`; used for segment merging |
-| See `requirements.txt` | fastapi, uvicorn, aiohttp, m3u8, pycryptodome |
+| ffmpeg | Must be on `$PATH`; used for segment merging and remuxing |
+| fastapi | Web framework |
+| uvicorn | ASGI server |
+| aiohttp | Async HTTP client for segment downloads |
+| m3u8 | M3U8/M3U playlist parser |
+| pycryptodome | AES-128 decryption for encrypted streams |
+| python-multipart | Form data handling |
+
+All Python dependencies are listed in `requirements.txt` and installed via `pip install -r requirements.txt`.
 
