@@ -1,0 +1,30 @@
+[package]
+name    = "mobile-ffi"
+version.workspace = true
+edition.workspace = true
+
+[features]
+default = []
+cli = ["uniffi/cli"]
+
+[lib]
+name       = "mobile_ffi"
+crate-type = ["cdylib", "staticlib"]
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+required-features = ["cli"]
+
+[dependencies]
+m3u8-core  = { path = "../m3u8-core" }
+server     = { path = "../server" }
+uniffi     = { workspace = true }
+tokio      = { workspace = true }
+serde      = { workspace = true }
+serde_json = { workspace = true }
+uuid       = { workspace = true }
+thiserror  = { workspace = true }
+
+[build-dependencies]
+uniffi = { workspace = true, features = ["build"] }

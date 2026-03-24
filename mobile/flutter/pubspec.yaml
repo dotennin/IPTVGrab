@@ -1,0 +1,22 @@
+name: m3u8_on_device
+description: Flutter app that runs the Rust M3U8 server locally on-device.
+publish_to: "none"
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  ffi: ^2.1.2
+  ffmpeg_kit_flutter_new_min: ^3.1.0
+  path_provider: ^2.1.5
+  video_player: ^2.9.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true

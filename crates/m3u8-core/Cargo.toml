@@ -1,0 +1,24 @@
+[package]
+name    = "m3u8-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+tokio       = { workspace = true }
+tokio-util  = { workspace = true }
+futures     = { workspace = true }
+reqwest     = { workspace = true }
+m3u8-rs     = { workspace = true }
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+aes         = { workspace = true }
+cbc         = { workspace = true }
+cipher      = { workspace = true }
+hex         = { workspace = true }
+uuid        = { workspace = true }
+anyhow      = { workspace = true }
+thiserror   = { workspace = true }
+tracing     = { workspace = true }
+url         = { workspace = true }
+regex-lite  = "0.1"
+chrono      = { workspace = true }
