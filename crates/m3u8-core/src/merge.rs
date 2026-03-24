@@ -9,6 +9,13 @@ use tracing::debug;
 
 use crate::error::DownloadError;
 
+fn map_ffmpeg_spawn_error(error: std::io::Error) -> DownloadError {
+    if error.kind() == std::io::ErrorKind::NotFound {
+        return DownloadError::Merge(format!("ffmpeg not found: {error}"));
+    }
+    DownloadError::Merge(format!("Failed to spawn ffmpeg: {error}"))
+}
+
 /// Merge MPEG-TS segments into an MP4 using ffmpeg concat demuxer.
 /// Yields progress percentage (0–98) via the provided callback.
 /// If `cancelled` becomes true while ffmpeg is running, ffmpeg is killed and
@@ -53,7 +60,7 @@ where
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
         .spawn()
-        .map_err(|e| DownloadError::Merge(format!("Failed to spawn ffmpeg: {e}")))?;
+        .map_err(map_ffmpeg_spawn_error)?;
 
     wait_ffmpeg(proc, total_secs, &mut progress_cb, cancelled).await
 }
@@ -122,9 +129,7 @@ where
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped());
 
-    let proc = cmd
-        .spawn()
-        .map_err(|e| DownloadError::Merge(format!("Failed to spawn ffmpeg: {e}")))?;
+    let proc = cmd.spawn().map_err(map_ffmpeg_spawn_error)?;
 
     wait_ffmpeg(proc, total_secs, &mut progress_cb, cancelled).await
 }
@@ -194,4 +199,18 @@ where
         )));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ffmpeg_spawn_error_reports_missing_binary_clearly() {
+        let error = std::io::Error::new(std::io::ErrorKind::NotFound, "No such file or directory");
+        let mapped = map_ffmpeg_spawn_error(error).to_string();
+
+        assert!(mapped.contains("ffmpeg not found"));
+        assert!(mapped.contains("No such file or directory"));
+    }
 }

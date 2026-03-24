@@ -6,7 +6,7 @@ plugins {
 }
 
 android {
-    namespace = "com.m3u8downloader.m3u8_on_device"
+    namespace = "com.iptvgrab.app"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -21,7 +21,7 @@ android {
 
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.m3u8downloader.m3u8_on_device"
+        applicationId = "com.iptvgrab.app"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = maxOf(flutter.minSdkVersion, 24)

@@ -108,6 +108,8 @@ class HealthCheckEntry {
   final String status;
   final double checkedAt;
 
+  bool get isAvailable => status == 'ok';
+
   factory HealthCheckEntry.fromJson(Map<String, dynamic> json) {
     return HealthCheckEntry(
       status: _asString(json['status']),
@@ -355,9 +357,19 @@ class DownloadTask {
 
   bool get needsLocalMerge =>
       status == 'failed' &&
-      (error?.toLowerCase().contains('ffmpeg not found') ?? false) &&
+      indicatesMissingFfmpeg(error) &&
       tmpdir != null &&
       tmpdir!.isNotEmpty;
+}
+
+bool indicatesMissingFfmpeg(String? error) {
+  final normalized = error?.toLowerCase();
+  if (normalized == null || normalized.isEmpty) {
+    return false;
+  }
+  return normalized.contains('ffmpeg not found') ||
+      (normalized.contains('failed to spawn ffmpeg') &&
+          normalized.contains('no such file or directory'));
 }
 
 int _asInt(dynamic value) {

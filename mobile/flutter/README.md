@@ -1,6 +1,6 @@
-# m3u8_on_device
+# IPTVGrab
 
-A Flutter shell that boots the embedded Rust M3U8 server on-device and talks to it over localhost.
+A Flutter shell that boots the embedded Rust IPTVGrab server on-device and talks to it over localhost.
 
 ## Getting Started
 

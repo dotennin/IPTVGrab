@@ -1,4 +1,4 @@
-package com.m3u8downloader.m3u8_on_device
+package com.iptvgrab.app
 
 import io.flutter.embedding.android.FlutterActivity
 

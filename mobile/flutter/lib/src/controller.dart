@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'api_client.dart';
@@ -27,20 +27,27 @@ class AppController extends ChangeNotifier {
   final Map<String, DownloadTask> _tasksById = <String, DownloadTask>{};
   final Map<String, WebSocket> _taskSockets = <String, WebSocket>{};
   final Set<String> _userRequestedStops = <String>{};
+  final Set<String> _autoFinalizeRequested = <String>{};
+  final Set<String> _autoFinalizingTasks = <String>{};
 
   Timer? _tasksRefreshTimer;
   Timer? _healthRefreshTimer;
   bool _refreshingTasks = false;
   bool _isBusy = false;
   bool _disposed = false;
+  bool _recoveringFromResume = false;
   bool _localServerRunning = false;
+  bool _shouldKeepLocalServerRunning = true;
+  bool _startupHealthCheckRequested = false;
   bool? _authRequired;
 
   String? _localServerError;
   String? _localDownloadsDir;
+  String? _serverAuthPassword;
   ParsedStreamInfo? _parsedInfo;
   List<Playlist> _playlists = const [];
   HealthCheckSnapshot? _healthSnapshot;
+  int? _preferredLocalServerPort;
 
   bool get isBusy => _isBusy;
   bool get localServerRunning => _localServerRunning;
@@ -59,6 +66,8 @@ class AppController extends ChangeNotifier {
   Map<String, HealthCheckEntry> get healthCache =>
       _healthSnapshot?.cache ?? const <String, HealthCheckEntry>{};
   Map<String, String> get mediaRequestHeaders => api.mediaHeaders();
+  bool isAutoFinalizingTask(String taskId) =>
+      _autoFinalizingTasks.contains(taskId);
 
   List<DownloadTask> get tasks {
     final values = _tasksById.values.toList();
@@ -83,9 +92,16 @@ class AppController extends ChangeNotifier {
   }) async {
     return _runBusy(() async {
       final downloadsDir = await _ensureDownloadsDir();
+      final normalizedPassword = _normalizePassword(authPassword);
+      final restartPort = _preferredLocalServerPort;
+      _localDownloadsDir = downloadsDir;
+      _serverAuthPassword = normalizedPassword;
+      _shouldKeepLocalServerRunning = true;
+      _startupHealthCheckRequested = false;
 
       if (forceRestart) {
         _stopTaskSync();
+        _stopHealthSync();
         _closeAllSockets();
         try {
           localServer.stop();
@@ -94,54 +110,41 @@ class AppController extends ChangeNotifier {
         }
       }
 
-      final existingBaseUrl = _currentNativeLocalServerBaseUrl();
-      final baseUrl = forceRestart || existingBaseUrl == null
+      final baseUrl = forceRestart
           ? _startNativeLocalServer(
               downloadsDir: downloadsDir,
-              authPassword: authPassword,
+              authPassword: normalizedPassword,
+              port: restartPort,
             )
-          : existingBaseUrl;
+          : await _ensureReachableLocalServer(
+              downloadsDir: downloadsDir,
+              authPassword: normalizedPassword,
+              port: restartPort,
+            );
 
-      api.baseUrl = baseUrl;
-      _localServerRunning = true;
-      _localDownloadsDir = downloadsDir;
-      _localServerError = null;
-      _parsedInfo = null;
-
-      _authRequired = await api.fetchAuthStatus();
-      if ((_authRequired ?? false) &&
-          authPassword != null &&
-          authPassword.isNotEmpty) {
-        await api.login(authPassword);
-        _authRequired = await api.fetchAuthStatus();
-      }
-
-      if (readyForApi) {
-        await refreshData();
-        _startTaskSync();
-      } else {
-        _tasksById.clear();
-        _playlists = const [];
-        _stopTaskSync();
-        _closeAllSockets();
-      }
+      await _connectToLocalServer(
+        baseUrl: baseUrl,
+        authPassword: normalizedPassword,
+        allowAutoLogin: true,
+      );
     });
   }
 
   Future<void> refreshLocalServer() async {
     return _runBusy(() async {
-      final baseUrl = _currentNativeLocalServerBaseUrl();
-      if (baseUrl == null || baseUrl.isEmpty) {
-        throw ApiException('The on-device Rust server is not running.');
-      }
-      api.baseUrl = baseUrl;
-      _localServerRunning = true;
-      _localServerError = null;
-      _authRequired = await api.fetchAuthStatus();
-      if (readyForApi) {
-        await refreshData();
-        _startTaskSync();
-      }
+      final downloadsDir = _localDownloadsDir ?? await _ensureDownloadsDir();
+      _localDownloadsDir = downloadsDir;
+      _shouldKeepLocalServerRunning = true;
+      final baseUrl = await _ensureReachableLocalServer(
+        downloadsDir: downloadsDir,
+        authPassword: _serverAuthPassword,
+        port: _preferredLocalServerPort,
+      );
+      await _connectToLocalServer(
+        baseUrl: baseUrl,
+        authPassword: _serverAuthPassword,
+        allowAutoLogin: true,
+      );
     });
   }
 
@@ -153,13 +156,18 @@ class AppController extends ChangeNotifier {
         throw ApiException(error.message);
       }
 
+      _shouldKeepLocalServerRunning = false;
+      _startupHealthCheckRequested = false;
+      _serverAuthPassword = null;
       _localServerRunning = false;
       _localServerError = null;
       _authRequired = false;
       _parsedInfo = null;
       _playlists = const [];
+      _healthSnapshot = null;
       _tasksById.clear();
       _stopTaskSync();
+      _stopHealthSync();
       _closeAllSockets();
       api.disconnect();
     });
@@ -169,6 +177,7 @@ class AppController extends ChangeNotifier {
     return _runBusy(() async {
       await api.login(password);
       _authRequired = await api.fetchAuthStatus();
+      _startupHealthCheckRequested = false;
       await refreshData();
       _startTaskSync();
     });
@@ -184,16 +193,22 @@ class AppController extends ChangeNotifier {
       _playlists = const [];
       _healthSnapshot = null;
       _parsedInfo = null;
+      _startupHealthCheckRequested = false;
       notifyListeners();
     });
   }
 
-  Future<void> refreshData() async {
+  Future<void> refreshData({bool runHealthCheckAfterRefresh = false}) async {
     await Future.wait(<Future<void>>[
       refreshPlaylists(),
       refreshTasks(),
       refreshHealthCheck(),
     ]);
+    if (runHealthCheckAfterRefresh) {
+      await _refreshHealthAfterPlaylistMutation();
+      return;
+    }
+    unawaited(_ensureStartupHealthCheck());
   }
 
   Future<void> parseInput({
@@ -242,11 +257,16 @@ class AppController extends ChangeNotifier {
     return _runBusy(() async {
       if (!task.isTerminal) {
         _userRequestedStops.add(task.id);
+        if (task.isRecording) {
+          _autoFinalizeRequested.add(task.id);
+        }
       }
       final status = await api.deleteOrStopTask(task.id);
       if (status == 'deleted') {
         _tasksById.remove(task.id);
         _userRequestedStops.remove(task.id);
+        _autoFinalizeRequested.remove(task.id);
+        _autoFinalizingTasks.remove(task.id);
         await _closeSocket(task.id);
       }
       notifyListeners();
@@ -275,6 +295,8 @@ class AppController extends ChangeNotifier {
   Future<String> restartRecording(String taskId) async {
     return _runBusy(() async {
       _userRequestedStops.remove(taskId);
+      _autoFinalizeRequested.remove(taskId);
+      _autoFinalizingTasks.remove(taskId);
       final newTaskId = await api.restartRecording(taskId);
       unawaited(_refreshTasksQuietly());
       _startTaskSync();
@@ -285,6 +307,7 @@ class AppController extends ChangeNotifier {
   Future<String> forkRecording(String taskId) async {
     return _runBusy(() async {
       _userRequestedStops.add(taskId);
+      _autoFinalizeRequested.add(taskId);
       final newTaskId = await api.forkRecording(taskId);
       unawaited(_refreshTasksQuietly());
       _startTaskSync();
@@ -313,19 +336,12 @@ class AppController extends ChangeNotifier {
 
   Future<String> finalizeTaskLocally(DownloadTask task) async {
     return _runBusy(() async {
-      final downloadsDir = _requireLocalDownloadsDir();
-      final result = await mobileFfmpeg.mergeTask(
-        task: task,
-        downloadsDir: downloadsDir,
-      );
-      await api.completeLocalMerge(
-        task.id,
-        filename: result.filename,
-        size: result.size,
-        durationSec: result.durationSec,
-      );
-      await refreshTasks();
-      return result.filename;
+      final filename = await _finalizeTaskLocallyImpl(task);
+      final latest = await api.fetchTasks();
+      await _storeTasks(latest);
+      _autoFinalizeRequested.remove(task.id);
+      _autoFinalizingTasks.remove(task.id);
+      return filename;
     });
   }
 
@@ -336,11 +352,7 @@ class AppController extends ChangeNotifier {
     _refreshingTasks = true;
     try {
       final latest = await api.fetchTasks();
-      _tasksById
-        ..clear()
-        ..addEntries(latest.map((task) => MapEntry(task.id, task)));
-      await _syncTaskSockets();
-      notifyListeners();
+      await _storeTasks(latest);
     } on ApiException catch (error) {
       _handleAuthFailure(error);
       rethrow;
@@ -379,6 +391,7 @@ class AppController extends ChangeNotifier {
   Future<void> runHealthCheck() async {
     return _runBusy(() async {
       await api.runHealthCheck();
+      _startupHealthCheckRequested = true;
       await refreshHealthCheck();
       _syncHealthPolling();
     });
@@ -392,6 +405,7 @@ class AppController extends ChangeNotifier {
     return _runBusy(() async {
       await api.addPlaylist(name: name, url: url, raw: raw);
       await refreshPlaylists();
+      await _refreshHealthAfterPlaylistMutation();
     });
   }
 
@@ -408,6 +422,7 @@ class AppController extends ChangeNotifier {
     return _runBusy(() async {
       await api.refreshPlaylist(playlistId);
       await refreshPlaylists();
+      await _refreshHealthAfterPlaylistMutation();
     });
   }
 
@@ -422,6 +437,29 @@ class AppController extends ChangeNotifier {
   Uri watchProxyUri(String streamUrl) => api.watchProxyUri(streamUrl);
 
   HealthCheckEntry? healthForUrl(String url) => healthCache[url];
+
+  Future<void> handleAppLifecycleState(AppLifecycleState state) async {
+    if (_disposed) {
+      return;
+    }
+    switch (state) {
+      case AppLifecycleState.resumed:
+        await _recoverLocalServerAfterResume();
+        return;
+      case AppLifecycleState.inactive:
+        return;
+      case AppLifecycleState.hidden:
+      case AppLifecycleState.paused:
+      case AppLifecycleState.detached:
+        _stopTaskSync();
+        _stopHealthSync();
+        _closeAllSockets();
+        if (!_disposed) {
+          notifyListeners();
+        }
+        return;
+    }
+  }
 
   bool treatTaskAsStopped(DownloadTask task) {
     if (!_userRequestedStops.contains(task.id)) {
@@ -545,12 +583,14 @@ class AppController extends ChangeNotifier {
           }
           final task = DownloadTask.fromJson(decoded);
           _tasksById[task.id] = task;
+          _reconcileTaskFlags();
           if (task.isTerminal) {
             unawaited(_closeSocket(task.id));
           }
           if (!_disposed) {
             notifyListeners();
           }
+          unawaited(_maybeAutoFinalizeTask(task));
         },
         onDone: () => _scheduleSocketReconnect(taskId),
         onError: (_) => _scheduleSocketReconnect(taskId),
@@ -586,6 +626,20 @@ class AppController extends ChangeNotifier {
     await socket?.close();
   }
 
+  Future<void> _storeTasks(List<DownloadTask> latest) async {
+    _tasksById
+      ..clear()
+      ..addEntries(latest.map((task) => MapEntry(task.id, task)));
+    await _syncTaskSockets();
+    _reconcileTaskFlags();
+    if (!_disposed) {
+      notifyListeners();
+    }
+    for (final task in _tasksById.values) {
+      unawaited(_maybeAutoFinalizeTask(task));
+    }
+  }
+
   Future<void> _refreshTasksQuietly() async {
     try {
       await refreshTasks();
@@ -612,7 +666,11 @@ class AppController extends ChangeNotifier {
 
   Future<String> _ensureDownloadsDir() async {
     final baseDir = await getApplicationDocumentsDirectory();
-    final downloadsDir = Directory('${baseDir.path}/m3u8-downloader');
+    final downloadsDir = Directory('${baseDir.path}/iptvgrab');
+    final legacyDownloadsDir = Directory('${baseDir.path}/m3u8-downloader');
+    if (!await downloadsDir.exists() && await legacyDownloadsDir.exists()) {
+      await legacyDownloadsDir.rename(downloadsDir.path);
+    }
     await downloadsDir.create(recursive: true);
     return downloadsDir.path;
   }
@@ -620,10 +678,12 @@ class AppController extends ChangeNotifier {
   String _startNativeLocalServer({
     required String downloadsDir,
     String? authPassword,
+    int? port,
   }) {
     try {
       return localServer.start(
         downloadsDir: downloadsDir,
+        port: port ?? 0,
         authPassword: authPassword,
       );
     } on LocalServerBridgeException catch (error) {
@@ -647,7 +707,227 @@ class AppController extends ChangeNotifier {
     return downloadsDir;
   }
 
+  String? _normalizePassword(String? password) {
+    if (password == null) {
+      return null;
+    }
+    final trimmed = password.trim();
+    return trimmed.isEmpty ? null : trimmed;
+  }
+
+  Future<void> _connectToLocalServer({
+    required String baseUrl,
+    String? authPassword,
+    required bool allowAutoLogin,
+  }) async {
+    _rememberLocalServerBaseUrl(baseUrl);
+    _localServerRunning = true;
+    _localServerError = null;
+    _parsedInfo = null;
+
+    _authRequired = await api.fetchAuthStatus();
+    final normalizedPassword = _normalizePassword(authPassword);
+    if ((_authRequired ?? false) &&
+        allowAutoLogin &&
+        normalizedPassword != null) {
+      await api.login(normalizedPassword);
+      _authRequired = await api.fetchAuthStatus();
+    }
+
+    if (readyForApi) {
+      await refreshData();
+      _startTaskSync();
+      return;
+    }
+
+    _tasksById.clear();
+    _playlists = const [];
+    _stopTaskSync();
+    _stopHealthSync();
+    _closeAllSockets();
+  }
+
+  Future<void> _ensureStartupHealthCheck() async {
+    if (_startupHealthCheckRequested || !readyForApi || healthState.running) {
+      return;
+    }
+    _startupHealthCheckRequested = true;
+    try {
+      await api.runHealthCheck();
+      await refreshHealthCheck();
+      _syncHealthPolling();
+    } on ApiException catch (error) {
+      if (error.statusCode == 409) {
+        await refreshHealthCheck();
+        return;
+      }
+      _startupHealthCheckRequested = false;
+      _handleAuthFailure(error);
+      debugPrint('Initial channel health scan failed: ${error.message}');
+    }
+  }
+
+  Future<void> _refreshHealthAfterPlaylistMutation() async {
+    if (!readyForApi) {
+      return;
+    }
+    _startupHealthCheckRequested = true;
+    try {
+      await api.runHealthCheck();
+      await refreshHealthCheck();
+      _syncHealthPolling();
+    } on ApiException catch (error) {
+      if (error.statusCode == 409) {
+        await refreshHealthCheck();
+        return;
+      }
+      _handleAuthFailure(error);
+      debugPrint(
+        'Playlist-triggered channel health scan failed: ${error.message}',
+      );
+    }
+  }
+
+  Future<void> _recoverLocalServerAfterResume() async {
+    if (_recoveringFromResume || !_shouldKeepLocalServerRunning) {
+      return;
+    }
+    _recoveringFromResume = true;
+    try {
+      final downloadsDir = _localDownloadsDir ?? await _ensureDownloadsDir();
+      _localDownloadsDir = downloadsDir;
+      final baseUrl = await _ensureReachableLocalServer(
+        downloadsDir: downloadsDir,
+        authPassword: _serverAuthPassword,
+        port: _preferredLocalServerPort,
+      );
+      await _connectToLocalServer(
+        baseUrl: baseUrl,
+        authPassword: _serverAuthPassword,
+        allowAutoLogin: true,
+      );
+    } on ApiException catch (error) {
+      _localServerError = error.message;
+    } finally {
+      _recoveringFromResume = false;
+      if (!_disposed) {
+        notifyListeners();
+      }
+    }
+  }
+
+  void _rememberLocalServerBaseUrl(String baseUrl) {
+    api.baseUrl = baseUrl;
+    final uri = Uri.tryParse(baseUrl);
+    if (uri != null && uri.hasPort && uri.port > 0) {
+      _preferredLocalServerPort = uri.port;
+    }
+  }
+
+  Future<String?> _currentReachableLocalServerBaseUrl() async {
+    final baseUrl = _currentNativeLocalServerBaseUrl();
+    if (baseUrl == null || baseUrl.isEmpty) {
+      return null;
+    }
+    return await api.probeBaseUrl(baseUrl) ? baseUrl : null;
+  }
+
+  Future<String> _ensureReachableLocalServer({
+    required String downloadsDir,
+    String? authPassword,
+    int? port,
+  }) async {
+    final reachableBaseUrl = await _currentReachableLocalServerBaseUrl();
+    if (reachableBaseUrl != null) {
+      return reachableBaseUrl;
+    }
+
+    final staleBaseUrl = _currentNativeLocalServerBaseUrl();
+    if (staleBaseUrl != null && staleBaseUrl.isNotEmpty) {
+      try {
+        localServer.stop();
+      } on LocalServerBridgeException catch (error) {
+        debugPrint('Failed to stop stale local server: ${error.message}');
+      }
+    }
+
+    return _startNativeLocalServer(
+      downloadsDir: downloadsDir,
+      authPassword: authPassword,
+      port: port,
+    );
+  }
+
+  Future<String> _finalizeTaskLocallyImpl(DownloadTask task) async {
+    try {
+      final downloadsDir = _requireLocalDownloadsDir();
+      final result = await mobileFfmpeg.mergeTask(
+        task: task,
+        downloadsDir: downloadsDir,
+      );
+      await api.completeLocalMerge(
+        task.id,
+        filename: result.filename,
+        size: result.size,
+        durationSec: result.durationSec,
+      );
+      return result.filename;
+    } on ApiException {
+      rethrow;
+    } on Exception catch (error) {
+      throw ApiException(error.toString());
+    }
+  }
+
+  Future<void> _maybeAutoFinalizeTask(DownloadTask task) async {
+    if (!_autoFinalizeRequested.contains(task.id) ||
+        !task.needsLocalMerge ||
+        _autoFinalizingTasks.contains(task.id)) {
+      return;
+    }
+
+    _autoFinalizingTasks.add(task.id);
+    if (!_disposed) {
+      notifyListeners();
+    }
+
+    try {
+      await _finalizeTaskLocallyImpl(task);
+      final latest = await api.fetchTasks();
+      await _storeTasks(latest);
+    } on ApiException {
+      _autoFinalizeRequested.remove(task.id);
+    } finally {
+      _autoFinalizingTasks.remove(task.id);
+      if (!_disposed) {
+        notifyListeners();
+      }
+    }
+  }
+
+  void _reconcileTaskFlags() {
+    final knownTaskIds = _tasksById.keys.toSet();
+    _userRequestedStops.removeWhere((taskId) => !knownTaskIds.contains(taskId));
+    _autoFinalizeRequested
+        .removeWhere((taskId) => !knownTaskIds.contains(taskId));
+    _autoFinalizingTasks
+        .removeWhere((taskId) => !knownTaskIds.contains(taskId));
+
+    for (final task in _tasksById.values) {
+      if (task.status == 'completed' ||
+          task.status == 'cancelled' ||
+          task.status == 'interrupted') {
+        _userRequestedStops.remove(task.id);
+        _autoFinalizeRequested.remove(task.id);
+        _autoFinalizingTasks.remove(task.id);
+      } else if (task.status == 'failed' && !task.needsLocalMerge) {
+        _autoFinalizeRequested.remove(task.id);
+        _autoFinalizingTasks.remove(task.id);
+      }
+    }
+  }
+
   bool _shouldUseLocalFfmpeg(ApiException error) {
-    return error.message.toLowerCase().contains('ffmpeg not found');
+    return indicatesMissingFfmpeg(error.message);
   }
 }

@@ -6,8 +6,8 @@ RUSTC := $(shell rustup which rustc --toolchain $(RUSTUP_TOOLCHAIN))
 CARGO := env RUSTC="$(RUSTC)" rustup run $(RUSTUP_TOOLCHAIN) cargo
 FLUTTER ?= flutter
 FLUTTER_APP ?= mobile/flutter
-FLUTTER_PROJECT_NAME ?= m3u8_on_device
-FLUTTER_ORG ?= com.m3u8downloader
+FLUTTER_PROJECT_NAME ?= iptvgrab
+FLUTTER_ORG ?= com.iptvgrab
 IOS_XCFRAMEWORK ?= target/MobileFfi.xcframework
 ANDROID_NDK_HOME ?= $(or $(ANDROID_NDK_ROOT),$(firstword $(sort $(wildcard $(HOME)/Library/Android/sdk/ndk/*) $(wildcard $(HOME)/Library/Android/sdk/ndk-bundle))))
 

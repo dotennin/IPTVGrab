@@ -1,8 +1,11 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:photo_manager/photo_manager.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:video_player/video_player.dart';
 
 import 'api_client.dart';
@@ -26,19 +29,27 @@ class M3u8FlutterClientApp extends StatefulWidget {
   State<M3u8FlutterClientApp> createState() => _M3u8FlutterClientAppState();
 }
 
-class _M3u8FlutterClientAppState extends State<M3u8FlutterClientApp> {
+class _M3u8FlutterClientAppState extends State<M3u8FlutterClientApp>
+    with WidgetsBindingObserver {
   late final AppController _controller;
   int _index = 0;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _controller = AppController();
     unawaited(_controller.bootstrapLocalServer());
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    unawaited(_controller.handleAppLifecycleState(state));
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _controller.dispose();
     super.dispose();
   }
@@ -47,7 +58,7 @@ class _M3u8FlutterClientAppState extends State<M3u8FlutterClientApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'M3U8 On-Device',
+      title: 'IPTVGrab',
       theme: ThemeData(
         useMaterial3: true,
         brightness: Brightness.dark,
@@ -142,7 +153,7 @@ class _M3u8FlutterClientAppState extends State<M3u8FlutterClientApp> {
               title: const Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  Text('M3U8 On-Device'),
+                  Text('IPTVGrab'),
                   SizedBox(height: 2),
                   Text(
                     'Local downloader, live preview, clip & playlists',
@@ -835,13 +846,15 @@ class _TasksTab extends StatelessWidget {
         itemCount: tasks.length,
         itemBuilder: (context, index) {
           final task = tasks[index];
+          final autoFinalizing = controller.isAutoFinalizingTask(task.id);
           final treatedAsStopped = controller.treatTaskAsStopped(task);
           final statusLabel = _taskStatusLabel(task, controller);
           final statusColor = _taskStatusColor(task, controller);
           final displayError = _taskErrorMessage(task, controller);
-          final progressValue = task.isRecording || task.isStopping
-              ? null
-              : task.progress.clamp(0, 100) / 100;
+          final progressValue =
+              task.isRecording || task.isStopping || autoFinalizing
+                  ? null
+                  : task.progress.clamp(0, 100) / 100;
           return Card(
             margin: const EdgeInsets.only(bottom: 12),
             child: Padding(
@@ -957,7 +970,9 @@ class _TasksTab extends StatelessWidget {
                     runSpacing: 8,
                     children: <Widget>[
                       FilledButton.tonalIcon(
-                        onPressed: controller.isBusy || task.isStopping
+                        onPressed: controller.isBusy ||
+                                task.isStopping ||
+                                autoFinalizing
                             ? null
                             : () async {
                                 try {
@@ -966,7 +981,16 @@ class _TasksTab extends StatelessWidget {
                                   if (!context.mounted) {
                                     return;
                                   }
-                                  _showMessage(context, 'Task action: $result');
+                                  if (task.isRecording &&
+                                      result == 'stopping') {
+                                    _showMessage(
+                                      context,
+                                      'Stop requested. Saving on-device with FFmpegKit...',
+                                    );
+                                  } else {
+                                    _showMessage(
+                                        context, 'Task action: $result');
+                                  }
                                 } on ApiException catch (error) {
                                   if (!context.mounted) {
                                     return;
@@ -975,20 +999,24 @@ class _TasksTab extends StatelessWidget {
                                       error: true);
                                 }
                               },
-                        icon: Icon(task.isRecording
-                            ? Icons.stop
-                            : task.isStopping
-                                ? Icons.hourglass_bottom
-                                : task.isTerminal
-                                    ? Icons.delete
-                                    : Icons.close),
-                        label: Text(task.isRecording
-                            ? 'Stop'
-                            : task.isStopping
-                                ? 'Stopping...'
-                                : task.isTerminal
-                                    ? 'Delete'
-                                    : 'Cancel'),
+                        icon: Icon(autoFinalizing
+                            ? Icons.save_alt_rounded
+                            : task.isRecording
+                                ? Icons.stop
+                                : task.isStopping
+                                    ? Icons.hourglass_bottom
+                                    : task.isTerminal
+                                        ? Icons.delete
+                                        : Icons.close),
+                        label: Text(autoFinalizing
+                            ? 'Saving...'
+                            : task.isRecording
+                                ? 'Stop & save'
+                                : task.isStopping
+                                    ? 'Stopping...'
+                                    : task.isTerminal
+                                        ? 'Delete'
+                                        : 'Cancel'),
                       ),
                       if (task.canResume)
                         OutlinedButton.icon(
@@ -1084,7 +1112,7 @@ class _TasksTab extends StatelessWidget {
                         ),
                       if (task.needsLocalMerge)
                         FilledButton.tonalIcon(
-                          onPressed: controller.isBusy
+                          onPressed: controller.isBusy || autoFinalizing
                               ? null
                               : () async {
                                   try {
@@ -1101,6 +1129,11 @@ class _TasksTab extends StatelessWidget {
                                       uri: controller.downloadUri(filename),
                                       httpHeaders:
                                           controller.mediaRequestHeaders,
+                                      localFilePath: _localMediaPathOrNull(
+                                        controller,
+                                        filename,
+                                      ),
+                                      localFileName: filename,
                                     );
                                   } on ApiException catch (error) {
                                     if (!context.mounted) {
@@ -1111,7 +1144,9 @@ class _TasksTab extends StatelessWidget {
                                   }
                                 },
                           icon: const Icon(Icons.build_circle_outlined),
-                          label: const Text('Finalize locally'),
+                          label: Text(autoFinalizing
+                              ? 'Saving locally...'
+                              : 'Finalize locally'),
                         ),
                       if (task.canClip)
                         OutlinedButton.icon(
@@ -1129,9 +1164,33 @@ class _TasksTab extends StatelessWidget {
                             title: task.output!,
                             uri: controller.downloadUri(task.output!),
                             httpHeaders: controller.mediaRequestHeaders,
+                            localFilePath:
+                                _localMediaPathOrNull(controller, task.output!),
+                            localFileName: task.output!,
                           ),
                           icon: const Icon(Icons.play_circle_fill),
                           label: const Text('Watch file'),
+                        ),
+                      if (task.output != null)
+                        OutlinedButton.icon(
+                          onPressed: () => _shareLocalMediaFromController(
+                            context,
+                            controller,
+                            task.output!,
+                          ),
+                          icon: const Icon(Icons.ios_share),
+                          label: const Text('Share'),
+                        ),
+                      if (task.output != null)
+                        OutlinedButton.icon(
+                          onPressed: () =>
+                              _saveLocalMediaToPhotosFromController(
+                            context,
+                            controller,
+                            task.output!,
+                          ),
+                          icon: const Icon(Icons.photo_library_outlined),
+                          label: const Text('Save to Photos'),
                         ),
                       if (task.output != null)
                         OutlinedButton.icon(
@@ -1198,6 +1257,7 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
   late final TextEditingController _searchController;
   String? _selectedPlaylistId;
   String _selectedGroup = 'All groups';
+  bool _showUnavailableChannels = false;
 
   @override
   void initState() {
@@ -1253,6 +1313,10 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
       }
     }
     final query = _searchController.text.trim().toLowerCase();
+    final scopedAvailableCount = playlistScoped
+        .where((item) =>
+            controller.healthForUrl(item.channel.url)?.isAvailable == true)
+        .length;
     final visibleItems = playlistScoped.where((item) {
       final matchesGroup =
           activeGroup == 'All groups' || item.channel.groupName == activeGroup;
@@ -1263,8 +1327,19 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
         item.playlist.name,
       ].join(' ').toLowerCase();
       final matchesQuery = query.isEmpty || haystack.contains(query);
-      return matchesGroup && matchesQuery;
+      if (!matchesGroup || !matchesQuery) {
+        return false;
+      }
+      if (_showUnavailableChannels) {
+        return true;
+      }
+      return controller.healthForUrl(item.channel.url)?.isAvailable == true;
     }).toList();
+    final waitingForInitialHealthResults = !_showUnavailableChannels &&
+        controller.healthCache.isEmpty &&
+        controller.healthState.running;
+    final hiddenUnavailableCount =
+        math.max(0, playlistScoped.length - visibleItems.length);
 
     return Column(
       children: <Widget>[
@@ -1346,7 +1421,9 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
                     ? null
                     : () async {
                         try {
-                          await controller.refreshData();
+                          await controller.refreshData(
+                            runHealthCheckAfterRefresh: true,
+                          );
                         } on ApiException catch (error) {
                           if (!context.mounted) {
                             return;
@@ -1405,6 +1482,32 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
                       ),
                     ],
                   ],
+                ),
+              ),
+            ),
+          ),
+        if (controller.playlists.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: Card(
+              child: SwitchListTile.adaptive(
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                value: _showUnavailableChannels,
+                onChanged: (value) =>
+                    setState(() => _showUnavailableChannels = value),
+                secondary: Icon(
+                  _showUnavailableChannels
+                      ? Icons.visibility_outlined
+                      : Icons.visibility_off_outlined,
+                ),
+                title: const Text('Show unavailable channels'),
+                subtitle: Text(
+                  _showUnavailableChannels
+                      ? 'Showing all channels, including dead or unchecked entries.'
+                      : waitingForInitialHealthResults
+                          ? 'Initial health scan is running. Only confirmed available channels will appear.'
+                          : 'Showing confirmed available channels only. Hidden now: $hiddenUnavailableCount.',
                 ),
               ),
             ),
@@ -1476,9 +1579,38 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
               ],
             ),
           ),
+        if (controller.playlists.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: Row(
+              children: <Widget>[
+                Text(
+                  _showUnavailableChannels
+                      ? 'Visible ${visibleItems.length} / ${playlistScoped.length}'
+                      : 'Available ${visibleItems.length} / ${playlistScoped.length}',
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(color: _appTextMuted),
+                ),
+                const SizedBox(width: 12),
+                if (controller.healthCache.isNotEmpty ||
+                    controller.healthState.running)
+                  Text(
+                    'Healthy cached: $scopedAvailableCount',
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodySmall
+                        ?.copyWith(color: _appTextMuted),
+                  ),
+              ],
+            ),
+          ),
         Expanded(
           child: RefreshIndicator(
-            onRefresh: controller.refreshData,
+            onRefresh: () => controller.refreshData(
+              runHealthCheckAfterRefresh: true,
+            ),
             child: controller.playlists.isEmpty
                 ? ListView(
                     padding: const EdgeInsets.all(24),
@@ -1492,13 +1624,24 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
                 : visibleItems.isEmpty
                     ? ListView(
                         padding: const EdgeInsets.all(24),
-                        children: const <Widget>[
-                          SizedBox(height: 72),
-                          Icon(Icons.search_off, size: 48),
-                          SizedBox(height: 12),
+                        children: <Widget>[
+                          const SizedBox(height: 72),
+                          Icon(
+                            waitingForInitialHealthResults
+                                ? Icons.health_and_safety_outlined
+                                : Icons.search_off,
+                            size: 48,
+                          ),
+                          const SizedBox(height: 12),
                           Center(
-                              child: Text(
-                                  'No channels match the current filters.')),
+                            child: Text(
+                              waitingForInitialHealthResults
+                                  ? 'Scanning channel availability. Unavailable channels stay hidden until results arrive.'
+                                  : _showUnavailableChannels
+                                      ? 'No channels match the current filters.'
+                                      : 'No available channels match the current filters. Turn on "Show unavailable channels" to inspect dead entries.',
+                            ),
+                          ),
                         ],
                       )
                     : GridView.builder(
@@ -1709,6 +1852,8 @@ Future<void> _openMediaPlayer(
   required Uri uri,
   required Map<String, String> httpHeaders,
   bool isLive = false,
+  String? localFilePath,
+  String? localFileName,
 }) {
   return Navigator.of(context).push(
     MaterialPageRoute<void>(
@@ -1717,6 +1862,8 @@ Future<void> _openMediaPlayer(
         uri: uri,
         httpHeaders: httpHeaders,
         isLive: isLive,
+        localFilePath: localFilePath,
+        localFileName: localFileName,
       ),
     ),
   );
@@ -1728,12 +1875,16 @@ class _MediaPlayerPage extends StatefulWidget {
     required this.uri,
     required this.httpHeaders,
     this.isLive = false,
+    this.localFilePath,
+    this.localFileName,
   });
 
   final String title;
   final Uri uri;
   final Map<String, String> httpHeaders;
   final bool isLive;
+  final String? localFilePath;
+  final String? localFileName;
 
   @override
   State<_MediaPlayerPage> createState() => _MediaPlayerPageState();
@@ -1763,6 +1914,7 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
     try {
       await _controller.initialize();
       await _controller.setLooping(!widget.isLive);
+      await _controller.setVolume(_muted ? 0 : 1);
       await _controller.play();
       if (!mounted) {
         return;
@@ -1932,6 +2084,28 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
             : AppBar(
                 title: Text(widget.title),
                 actions: <Widget>[
+                  if (widget.localFilePath != null &&
+                      widget.localFileName != null)
+                    IconButton(
+                      tooltip: 'Share file',
+                      onPressed: () => _shareLocalMediaFile(
+                        context,
+                        File(widget.localFilePath!),
+                        filename: widget.localFileName!,
+                      ),
+                      icon: const Icon(Icons.ios_share),
+                    ),
+                  if (widget.localFilePath != null &&
+                      widget.localFileName != null)
+                    IconButton(
+                      tooltip: 'Save to Photos',
+                      onPressed: () => _saveLocalMediaToPhotos(
+                        context,
+                        File(widget.localFilePath!),
+                        filename: widget.localFileName!,
+                      ),
+                      icon: const Icon(Icons.photo_library_outlined),
+                    ),
                   IconButton(
                     tooltip: 'Copy URL',
                     onPressed: () => _copyToClipboard(
@@ -1968,8 +2142,8 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
                           Expanded(
                             child: Text(
                               widget.isLive
-                                  ? 'Live stream / preview'
-                                  : 'Drag the timeline, clip a segment, or go fullscreen.',
+                                  ? 'Live stream / preview. Use fullscreen when you want an immersive view.'
+                                  : 'Pause, seek, clip a segment, or go fullscreen.',
                               style: Theme.of(context)
                                   .textTheme
                                   .bodySmall
@@ -1997,6 +2171,7 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
   Widget _buildControls(BuildContext context) {
     final current = _controller.value.position;
     final total = _controller.value.duration;
+    final hasTimeline = _initialized && !widget.isLive && total > Duration.zero;
     return AnimatedOpacity(
       duration: const Duration(milliseconds: 180),
       opacity: !_isFullscreen || _showControls ? 1 : 0,
@@ -2060,11 +2235,11 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: <Widget>[
-                    if (!widget.isLive && _initialized)
+                    if (hasTimeline)
                       VideoProgressIndicator(
                         _controller,
                         allowScrubbing: true,
-                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        padding: const EdgeInsets.symmetric(vertical: 10),
                         colors: const VideoProgressColors(
                           playedColor: _appPrimary,
                           bufferedColor: Color(0xFF475569),
@@ -2073,7 +2248,7 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
                       ),
                     Row(
                       children: <Widget>[
-                        if (!widget.isLive)
+                        if (hasTimeline)
                           IconButton(
                             onPressed:
                                 _initialized ? () => _seekRelative(-10) : null,
@@ -2087,7 +2262,7 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
                                 : Icons.play_arrow,
                           ),
                         ),
-                        if (!widget.isLive)
+                        if (hasTimeline)
                           IconButton(
                             onPressed:
                                 _initialized ? () => _seekRelative(10) : null,
@@ -2142,6 +2317,446 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _ClipSelection {
+  const _ClipSelection({
+    required this.start,
+    required this.end,
+  });
+
+  final double start;
+  final double end;
+}
+
+class _ClipEditorDialog extends StatefulWidget {
+  const _ClipEditorDialog({
+    required this.task,
+    required this.uri,
+    required this.httpHeaders,
+  });
+
+  final DownloadTask task;
+  final Uri uri;
+  final Map<String, String> httpHeaders;
+
+  @override
+  State<_ClipEditorDialog> createState() => _ClipEditorDialogState();
+}
+
+class _ClipEditorDialogState extends State<_ClipEditorDialog> {
+  static const double _minimumClipLength = 0.5;
+
+  late final TextEditingController _startController;
+  late final TextEditingController _endController;
+
+  VideoPlayerController? _previewController;
+  String? _previewError;
+  bool _previewReady = false;
+  late double _clipStart;
+  late double _clipEnd;
+
+  @override
+  void initState() {
+    super.initState();
+    _clipStart = 0;
+    final initialEnd =
+        widget.task.durationSec != null && widget.task.durationSec! > 30
+            ? 30.0
+            : widget.task.durationSec ?? 10.0;
+    _clipEnd = math.max(_minimumClipLength, initialEnd);
+    _startController = TextEditingController(text: '0.0');
+    _endController = TextEditingController(text: _clipEnd.toStringAsFixed(1));
+    unawaited(_initializePreview());
+  }
+
+  @override
+  void dispose() {
+    _previewController?.removeListener(_handlePreviewUpdate);
+    _previewController?.dispose();
+    _startController.dispose();
+    _endController.dispose();
+    super.dispose();
+  }
+
+  double get _playerDurationSeconds {
+    final controller = _previewController;
+    if (controller == null || !controller.value.isInitialized) {
+      return 0;
+    }
+    return controller.value.duration.inMilliseconds / 1000;
+  }
+
+  double get _currentPreviewSeconds {
+    final controller = _previewController;
+    if (controller == null || !controller.value.isInitialized) {
+      return 0;
+    }
+    final current = controller.value.position.inMilliseconds / 1000;
+    final max = _effectiveMaxDuration;
+    return current.clamp(0.0, max).toDouble();
+  }
+
+  double get _effectiveMaxDuration {
+    final fromTask = widget.task.durationSec ?? 0;
+    final fromPreview = _playerDurationSeconds;
+    final resolved = math.max(fromTask, fromPreview);
+    if (resolved > 0) {
+      return resolved;
+    }
+    return math.max(_clipEnd, 120.0);
+  }
+
+  bool get _hasRangeSlider =>
+      (widget.task.hasKnownDuration || _playerDurationSeconds > 0) &&
+      _effectiveMaxDuration >= 1;
+
+  Future<void> _initializePreview() async {
+    try {
+      final controller = VideoPlayerController.networkUrl(
+        widget.uri,
+        httpHeaders: widget.httpHeaders,
+      );
+      _previewController = controller;
+      controller.addListener(_handlePreviewUpdate);
+      await controller.initialize();
+      await controller.setLooping(false);
+      await controller.pause();
+      if (!mounted) {
+        controller.removeListener(_handlePreviewUpdate);
+        await controller.dispose();
+        return;
+      }
+      setState(() {
+        _previewReady = true;
+        _applyRangeState(
+          start: _clipStart,
+          end: _clipEnd,
+          syncTextFields: true,
+        );
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() => _previewError = error.toString());
+    }
+  }
+
+  void _handlePreviewUpdate() {
+    if (!mounted) {
+      return;
+    }
+    setState(() {});
+  }
+
+  void _syncTextFields() {
+    _startController.value = TextEditingValue(
+      text: _clipStart.toStringAsFixed(1),
+      selection: TextSelection.collapsed(
+        offset: _clipStart.toStringAsFixed(1).length,
+      ),
+    );
+    _endController.value = TextEditingValue(
+      text: _clipEnd.toStringAsFixed(1),
+      selection: TextSelection.collapsed(
+        offset: _clipEnd.toStringAsFixed(1).length,
+      ),
+    );
+  }
+
+  void _applyRangeState({
+    required double start,
+    required double end,
+    required bool syncTextFields,
+  }) {
+    final max = _effectiveMaxDuration;
+    var nextStart = start.clamp(0.0, max).toDouble();
+    var nextEnd = end.clamp(0.0, max).toDouble();
+
+    if ((nextEnd - nextStart) < _minimumClipLength) {
+      nextEnd = math.min(max, nextStart + _minimumClipLength);
+      if ((nextEnd - nextStart) < _minimumClipLength) {
+        nextStart = math.max(0.0, nextEnd - _minimumClipLength);
+      }
+    }
+
+    _clipStart = nextStart;
+    _clipEnd = nextEnd;
+    if (syncTextFields) {
+      _syncTextFields();
+    }
+  }
+
+  void _setRange({
+    double? start,
+    double? end,
+    bool syncTextFields = true,
+  }) {
+    setState(() {
+      _applyRangeState(
+        start: start ?? _clipStart,
+        end: end ?? _clipEnd,
+        syncTextFields: syncTextFields,
+      );
+    });
+  }
+
+  Future<void> _seekTo(double seconds) async {
+    final controller = _previewController;
+    if (controller == null || !controller.value.isInitialized) {
+      return;
+    }
+    final max = controller.value.duration > Duration.zero
+        ? controller.value.duration.inMilliseconds / 1000
+        : _effectiveMaxDuration;
+    final clamped = seconds.clamp(0.0, max).toDouble();
+    await controller.seekTo(Duration(milliseconds: (clamped * 1000).round()));
+  }
+
+  Future<void> _seekRelative(double seconds) async {
+    await _seekTo(_currentPreviewSeconds + seconds);
+  }
+
+  Future<void> _togglePreviewPlayback() async {
+    final controller = _previewController;
+    if (controller == null || !controller.value.isInitialized) {
+      return;
+    }
+    if (controller.value.isPlaying) {
+      await controller.pause();
+      return;
+    }
+    await controller.play();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final previewController = _previewController;
+    final previewAspect = previewController != null &&
+            previewController.value.isInitialized &&
+            previewController.value.aspectRatio > 0
+        ? previewController.value.aspectRatio
+        : 16 / 9;
+    final playerDuration = _playerDurationSeconds;
+    final currentPreview = _currentPreviewSeconds;
+
+    return AlertDialog(
+      title: const Text('Create clip'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              'Preview the media, scrub to the right frame, then set the clip start/end from the current playback position.',
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: _appTextMuted),
+            ),
+            const SizedBox(height: 12),
+            AspectRatio(
+              aspectRatio: previewAspect,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: Colors.black,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(16),
+                  child: _previewError != null
+                      ? Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Text(
+                              _previewError!,
+                              style: TextStyle(
+                                color: Theme.of(context).colorScheme.error,
+                              ),
+                            ),
+                          ),
+                        )
+                      : !_previewReady || previewController == null
+                          ? const Center(child: CircularProgressIndicator())
+                          : VideoPlayer(previewController),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            if (_previewReady && previewController != null) ...<Widget>[
+              if (playerDuration > 0)
+                Slider(
+                  value: currentPreview.clamp(0.0, playerDuration),
+                  min: 0,
+                  max: playerDuration,
+                  onChanged: (value) => unawaited(_seekTo(value)),
+                ),
+              Row(
+                children: <Widget>[
+                  Text(
+                    playerDuration > 0
+                        ? '${_formatSeconds(currentPreview)} / ${_formatSeconds(playerDuration)}'
+                        : 'Current: ${_formatSeconds(currentPreview)}',
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodySmall
+                        ?.copyWith(color: _appTextMuted),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    onPressed: () => unawaited(_seekRelative(-5)),
+                    icon: const Icon(Icons.replay_5),
+                  ),
+                  IconButton(
+                    onPressed: _togglePreviewPlayback,
+                    icon: Icon(
+                      previewController.value.isPlaying
+                          ? Icons.pause
+                          : Icons.play_arrow,
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => unawaited(_seekRelative(5)),
+                    icon: const Icon(Icons.forward_5),
+                  ),
+                ],
+              ),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: <Widget>[
+                  OutlinedButton.icon(
+                    onPressed: () => _setRange(start: currentPreview),
+                    icon: const Icon(Icons.flag_outlined),
+                    label: const Text('Set start here'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: () => _setRange(end: currentPreview),
+                    icon: const Icon(Icons.outlined_flag),
+                    label: const Text('Set end here'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: () => unawaited(_seekTo(_clipStart)),
+                    icon: const Icon(Icons.first_page),
+                    label: const Text('Jump to start'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: () => unawaited(_seekTo(_clipEnd)),
+                    icon: const Icon(Icons.last_page),
+                    label: const Text('Jump to end'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+            ],
+            if (_hasRangeSlider) ...<Widget>[
+              Row(
+                children: <Widget>[
+                  Expanded(
+                    child: _InfoChip(
+                      label: 'Start',
+                      value: _formatSeconds(_clipStart),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _InfoChip(
+                      label: 'End',
+                      value: _formatSeconds(_clipEnd),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _InfoChip(
+                      label: 'Length',
+                      value: _formatSeconds(_clipEnd - _clipStart),
+                    ),
+                  ),
+                ],
+              ),
+              RangeSlider(
+                values: RangeValues(_clipStart, _clipEnd),
+                min: 0,
+                max: _effectiveMaxDuration,
+                divisions:
+                    math.max(1, math.min(600, _effectiveMaxDuration.round())),
+                labels: RangeLabels(
+                  _formatSeconds(_clipStart),
+                  _formatSeconds(_clipEnd),
+                ),
+                onChanged: (values) => _setRange(
+                  start: values.start,
+                  end: values.end,
+                ),
+              ),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: <Widget>[
+                  for (final preset in <double>[15, 30, 60])
+                    if (_effectiveMaxDuration >= preset)
+                      OutlinedButton(
+                        onPressed: () => _setRange(
+                          end: math.min(
+                              _clipStart + preset, _effectiveMaxDuration),
+                        ),
+                        child: Text('${preset.toInt()}s'),
+                      ),
+                ],
+              ),
+              const SizedBox(height: 12),
+            ],
+            TextField(
+              controller: _startController,
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(
+                labelText: 'Start (seconds)',
+              ),
+              onChanged: (value) {
+                final parsed = double.tryParse(value.trim());
+                if (parsed == null) {
+                  return;
+                }
+                _setRange(start: parsed, syncTextFields: false);
+              },
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _endController,
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(
+                labelText: 'End (seconds)',
+              ),
+              onChanged: (value) {
+                final parsed = double.tryParse(value.trim());
+                if (parsed == null) {
+                  return;
+                }
+                _setRange(end: parsed, syncTextFields: false);
+              },
+            ),
+          ],
+        ),
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: (_clipEnd - _clipStart) < _minimumClipLength
+              ? null
+              : () => Navigator.of(context).pop(
+                    _ClipSelection(start: _clipStart, end: _clipEnd),
+                  ),
+          child: const Text('Clip'),
+        ),
+      ],
     );
   }
 }
@@ -2234,169 +2849,25 @@ Future<void> _showClipDialog(
   AppController controller,
   DownloadTask task,
 ) async {
-  double clipStart = 0;
-  final maxDuration = task.durationSec ?? 120;
-  final defaultEnd = task.durationSec != null && task.durationSec! > 30
-      ? 30.0
-      : task.durationSec ?? 10;
-  double clipEnd = defaultEnd;
-  final startController = TextEditingController(text: '0');
-  final endController =
-      TextEditingController(text: defaultEnd.toStringAsFixed(1));
-  final hasSlider = task.hasKnownDuration && maxDuration >= 1;
-
   try {
-    final result = await showDialog<bool>(
+    final previewUri = task.output != null
+        ? controller.downloadUri(task.output!)
+        : controller.previewUri(task.id);
+    final selection = await showDialog<_ClipSelection>(
       context: context,
-      builder: (dialogContext) {
-        return StatefulBuilder(
-          builder: (context, setLocalState) => AlertDialog(
-            title: const Text('Create clip'),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  if (hasSlider) ...<Widget>[
-                    Text(
-                      'Choose a clip range on the downloaded timeline.',
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodySmall
-                          ?.copyWith(color: _appTextMuted),
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: <Widget>[
-                        Expanded(
-                          child: _InfoChip(
-                            label: 'Start',
-                            value: _formatSeconds(clipStart),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: _InfoChip(
-                            label: 'End',
-                            value: _formatSeconds(clipEnd),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: _InfoChip(
-                            label: 'Length',
-                            value: _formatSeconds(clipEnd - clipStart),
-                          ),
-                        ),
-                      ],
-                    ),
-                    RangeSlider(
-                      values: RangeValues(clipStart, clipEnd),
-                      min: 0,
-                      max: maxDuration,
-                      divisions:
-                          math.max(1, math.min(600, maxDuration.round())),
-                      labels: RangeLabels(
-                        _formatSeconds(clipStart),
-                        _formatSeconds(clipEnd),
-                      ),
-                      onChanged: (values) {
-                        setLocalState(() {
-                          clipStart = values.start;
-                          clipEnd = values.end;
-                          startController.text = clipStart.toStringAsFixed(1);
-                          endController.text = clipEnd.toStringAsFixed(1);
-                        });
-                      },
-                    ),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: <Widget>[
-                        for (final preset in <double>[15, 30, 60])
-                          if (maxDuration >= preset)
-                            OutlinedButton(
-                              onPressed: () {
-                                setLocalState(() {
-                                  clipEnd =
-                                      math.min(clipStart + preset, maxDuration);
-                                  startController.text =
-                                      clipStart.toStringAsFixed(1);
-                                  endController.text =
-                                      clipEnd.toStringAsFixed(1);
-                                });
-                              },
-                              child: Text('${preset.toInt()}s'),
-                            ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                  ],
-                  TextField(
-                    controller: startController,
-                    keyboardType:
-                        const TextInputType.numberWithOptions(decimal: true),
-                    decoration: const InputDecoration(
-                      labelText: 'Start (seconds)',
-                    ),
-                    onChanged: (value) {
-                      final parsed = double.tryParse(value.trim());
-                      if (parsed == null) {
-                        return;
-                      }
-                      setLocalState(() {
-                        clipStart = parsed.clamp(0, maxDuration).toDouble();
-                      });
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: endController,
-                    keyboardType:
-                        const TextInputType.numberWithOptions(decimal: true),
-                    decoration: const InputDecoration(
-                      labelText: 'End (seconds)',
-                    ),
-                    onChanged: (value) {
-                      final parsed = double.tryParse(value.trim());
-                      if (parsed == null) {
-                        return;
-                      }
-                      setLocalState(() {
-                        clipEnd = parsed.clamp(0, maxDuration).toDouble();
-                      });
-                    },
-                  ),
-                ],
-              ),
-            ),
-            actions: <Widget>[
-              TextButton(
-                onPressed: () => Navigator.of(dialogContext).pop(false),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.of(dialogContext).pop(true),
-                child: const Text('Clip'),
-              ),
-            ],
-          ),
-        );
-      },
+      builder: (_) => _ClipEditorDialog(
+        task: task,
+        uri: previewUri,
+        httpHeaders: controller.mediaRequestHeaders,
+      ),
     );
 
-    if (result != true || !context.mounted) {
+    if (selection == null || !context.mounted) {
       return;
     }
 
-    final startTime = double.tryParse(startController.text.trim());
-    final endTime = double.tryParse(endController.text.trim());
-    if (startTime == null || endTime == null) {
-      _showMessage(context, 'Please enter valid clip timestamps.', error: true);
-      return;
-    }
-
-    final filename = await controller.clipTask(task, startTime, endTime);
+    final filename =
+        await controller.clipTask(task, selection.start, selection.end);
     if (!context.mounted) {
       return;
     }
@@ -2411,15 +2882,160 @@ Future<void> _showClipDialog(
       title: filename,
       uri: controller.downloadUri(filename),
       httpHeaders: controller.mediaRequestHeaders,
+      localFilePath: _localMediaPathOrNull(controller, filename),
+      localFileName: filename,
     );
   } on ApiException catch (error) {
     if (!context.mounted) {
       return;
     }
     _showMessage(context, error.message, error: true);
-  } finally {
-    startController.dispose();
-    endController.dispose();
+  }
+}
+
+File _localMediaFile(AppController controller, String filename) {
+  final path = _localMediaPathOrNull(controller, filename);
+  if (path == null) {
+    throw ApiException('Local downloads directory is not ready yet.');
+  }
+  return File(path);
+}
+
+String? _localMediaPathOrNull(AppController controller, String filename) {
+  final downloadsDir = controller.localDownloadsDir;
+  if (downloadsDir == null || downloadsDir.isEmpty) {
+    return null;
+  }
+  return '$downloadsDir/$filename';
+}
+
+Future<void> _shareLocalMediaFromController(
+  BuildContext context,
+  AppController controller,
+  String filename,
+) async {
+  try {
+    await _shareLocalMediaFile(
+      context,
+      _localMediaFile(controller, filename),
+      filename: filename,
+    );
+  } on ApiException catch (error) {
+    if (!context.mounted) {
+      return;
+    }
+    _showMessage(context, error.message, error: true);
+  }
+}
+
+Future<void> _saveLocalMediaToPhotosFromController(
+  BuildContext context,
+  AppController controller,
+  String filename,
+) async {
+  try {
+    await _saveLocalMediaToPhotos(
+      context,
+      _localMediaFile(controller, filename),
+      filename: filename,
+    );
+  } on ApiException catch (error) {
+    if (!context.mounted) {
+      return;
+    }
+    _showMessage(context, error.message, error: true);
+  }
+}
+
+Rect? _shareOriginForContext(BuildContext context) {
+  final renderObject = context.findRenderObject();
+  if (renderObject is! RenderBox) {
+    return null;
+  }
+  final origin = renderObject.localToGlobal(Offset.zero);
+  return origin & renderObject.size;
+}
+
+Future<void> _shareLocalMediaFile(
+  BuildContext context,
+  File file, {
+  required String filename,
+}) async {
+  try {
+    if (!await file.exists()) {
+      throw ApiException('Local media file not found: $filename');
+    }
+    await SharePlus.instance.share(
+      ShareParams(
+        files: <XFile>[
+          XFile(
+            file.path,
+            mimeType: 'video/mp4',
+            name: filename,
+          ),
+        ],
+        title: filename,
+        subject: filename,
+        text: filename,
+        sharePositionOrigin: _shareOriginForContext(context),
+      ),
+    );
+  } on ApiException catch (error) {
+    if (!context.mounted) {
+      return;
+    }
+    _showMessage(context, error.message, error: true);
+  } on Exception catch (error) {
+    if (!context.mounted) {
+      return;
+    }
+    _showMessage(context, error.toString(), error: true);
+  }
+}
+
+Future<void> _saveLocalMediaToPhotos(
+  BuildContext context,
+  File file, {
+  required String filename,
+}) async {
+  try {
+    if (!await file.exists()) {
+      throw ApiException('Local media file not found: $filename');
+    }
+
+    final permission = await PhotoManager.requestPermissionExtend(
+      requestOption: const PermissionRequestOption(
+        iosAccessLevel: IosAccessLevel.addOnly,
+        androidPermission: AndroidPermission(
+          type: RequestType.video,
+          mediaLocation: false,
+        ),
+      ),
+    );
+    if (!permission.hasAccess) {
+      throw ApiException(
+        'Photo library permission is required before videos can be exported to Photos.',
+      );
+    }
+
+    await PhotoManager.editor.saveVideo(
+      file,
+      title: filename.replaceFirst(RegExp(r'\.mp4$'), ''),
+    );
+    if (!context.mounted) {
+      return;
+    }
+    _showMessage(context, 'Saved to Photos.');
+  } on ApiException catch (error) {
+    if (!context.mounted) {
+      return;
+    }
+    _showMessage(context, error.message, error: true);
+  } on Exception catch (error) {
+    if (!context.mounted) {
+      return;
+    }
+    _showMessage(context, error.toString(), error: true);
   }
 }
 
@@ -2557,6 +3173,9 @@ Color _statusColor(String status) {
 }
 
 Color _taskStatusColor(DownloadTask task, AppController controller) {
+  if (controller.isAutoFinalizingTask(task.id)) {
+    return _appWarning;
+  }
   if (controller.treatTaskAsStopped(task)) {
     return Colors.blueGrey;
   }
@@ -2567,6 +3186,9 @@ Color _taskStatusColor(DownloadTask task, AppController controller) {
 }
 
 String _taskStatusLabel(DownloadTask task, AppController controller) {
+  if (controller.isAutoFinalizingTask(task.id)) {
+    return 'Saving locally';
+  }
   if (controller.treatTaskAsStopped(task)) {
     return 'Stopped';
   }
@@ -2581,6 +3203,9 @@ String _taskStatusLabel(DownloadTask task, AppController controller) {
 
 String? _taskErrorMessage(DownloadTask task, AppController controller) {
   final error = task.error?.trim();
+  if (controller.isAutoFinalizingTask(task.id)) {
+    return null;
+  }
   if (error == null || error.isEmpty) {
     return null;
   }

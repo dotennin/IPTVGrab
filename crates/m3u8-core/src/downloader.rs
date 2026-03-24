@@ -74,7 +74,11 @@ impl Downloader {
         let client = self.make_client()?;
         let content = fetch_text_retry(&client, &self.config.url, self.config.retry).await?;
         let playlist = parse_playlist(&content)?;
-        Ok(crate::parser::playlist_to_info(&playlist, &self.config.url))
+        Ok(crate::parser::playlist_to_info(
+            &playlist,
+            &content,
+            &self.config.url,
+        ))
     }
 
     // ── Main download entry point ─────────────────────────────────────────────
@@ -119,15 +123,14 @@ impl Downloader {
         // If master, pick quality variant
         let (media_playlist, base_url) = match &top_playlist {
             Playlist::MasterPlaylist(master) => {
-                let chosen_url = pick_quality(master, &self.config.quality, &self.config.url);
+                let chosen_url =
+                    pick_quality(master, &content, &self.config.quality, &self.config.url);
                 let media_content =
                     fetch_text_retry(&client, &chosen_url, self.config.retry).await?;
                 let media_pl = match parse_playlist(&media_content)? {
                     Playlist::MediaPlaylist(m) => m,
                     _ => return Err(DownloadError::Parse("Expected media playlist".into())),
                 };
-                let _audio_url = find_audio_playlist(master, &self.config.url)
-                    .map(|u| resolve(&u, &self.config.url));
                 (media_pl, chosen_url)
             }
             Playlist::MediaPlaylist(m) => (m.clone(), self.config.url.clone()),
@@ -140,7 +143,7 @@ impl Downloader {
 
         // Find audio rendition from master (if applicable)
         let audio_url: Option<String> = if let Playlist::MasterPlaylist(master) = &top_playlist {
-            find_audio_playlist(master, &self.config.url)
+            find_audio_playlist(master, &content, &base_url, &self.config.url)
         } else {
             None
         };
@@ -510,6 +513,14 @@ impl Downloader {
         let mut seen_uris: HashSet<String> = HashSet::new();
         let mut audio_seen_uris: HashSet<String> = HashSet::new();
         let mut current_audio_pl: Option<MediaPlaylist> = None;
+        if let (Some(audio_dir), Some(aurl)) = (audio_tmpdir.as_ref(), audio_url) {
+            if let Ok(audio_pl) = self
+                .fetch_audio_init(client, aurl, audio_dir, base_url)
+                .await
+            {
+                current_audio_pl = Some(audio_pl);
+            }
+        }
 
         let poll_interval = (current_pl.target_duration as f64 / 2.0).max(1.0);
 
@@ -703,11 +714,12 @@ impl Downloader {
             }
 
             // Re-fetch audio playlist
-            if let Some(aurl) = audio_url {
-                if let Ok(text) = fetch_text_retry(client, aurl, self.config.retry).await {
-                    if let Ok(Playlist::MediaPlaylist(pl)) = parse_playlist(&text) {
-                        current_audio_pl = Some(pl);
-                    }
+            if let (Some(audio_dir), Some(aurl)) = (audio_tmpdir.as_ref(), audio_url) {
+                if let Ok(audio_pl) = self
+                    .fetch_audio_init(client, aurl, audio_dir, base_url)
+                    .await
+                {
+                    current_audio_pl = Some(audio_pl);
                 }
             }
         }

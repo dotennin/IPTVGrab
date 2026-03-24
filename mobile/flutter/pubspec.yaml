@@ -1,5 +1,5 @@
-name: m3u8_on_device
-description: Flutter app that runs the Rust M3U8 server locally on-device.
+name: iptvgrab
+description: Flutter app that runs the Rust IPTVGrab server locally on-device.
 publish_to: "none"
 version: 0.1.0+1
 
@@ -13,6 +13,8 @@ dependencies:
   ffmpeg_kit_flutter_new_min: ^3.1.0
   path_provider: ^2.1.5
   video_player: ^2.9.2
+  share_plus: ^12.0.1
+  photo_manager: ^3.9.0
 
 dev_dependencies:
   flutter_test:

@@ -1,4 +1,4 @@
-# M3U8 Downloader — Rust Edition
+# IPTVGrab — Rust Edition
 
 完整的 HLS/M3U8 下载器，包含：
 - **Rust 核心库** (`crates/m3u8-core`) — 分片下载、AES-128 解密、CMAF/MPEG-TS 合并

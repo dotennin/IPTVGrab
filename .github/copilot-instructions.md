@@ -1,4 +1,4 @@
-# GitHub Copilot Instructions — m3u8-downloader-rs
+# GitHub Copilot Instructions — IPTVGrab
 
 ## Project overview
 

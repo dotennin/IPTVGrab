@@ -212,6 +212,25 @@ class ApiClient {
     await _requestJson('POST', '/api/playlists/$playlistId/refresh');
   }
 
+  Future<bool> probeBaseUrl(String baseUrl) async {
+    final uri =
+        Uri.parse(normalizeBaseUrl(baseUrl)).resolve('/api/auth/status');
+    try {
+      final request =
+          await _httpClient.getUrl(uri).timeout(const Duration(seconds: 2));
+      request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+      if (hasSession) {
+        request.headers.set(HttpHeaders.cookieHeader, _sessionCookie!);
+      }
+      final response =
+          await request.close().timeout(const Duration(seconds: 2));
+      await response.drain<void>();
+      return response.statusCode == HttpStatus.ok;
+    } on Exception {
+      return false;
+    }
+  }
+
   Future<WebSocket> connectTaskSocket(String taskId) {
     final uri = taskWebSocketUri(taskId);
     final headers = <String, dynamic>{};

@@ -1,10 +1,29 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use m3u8_rs::{AlternativeMediaType, KeyMethod, MediaPlaylist, Playlist};
 use url::Url;
 
 use crate::error::DownloadError;
-use crate::types::{StreamInfo, StreamKind, VariantInfo};
+use crate::types::{Quality, StreamInfo, StreamKind, VariantInfo};
+
+#[derive(Debug, Clone)]
+struct ParsedMasterVariant {
+    info: VariantInfo,
+    audio_group: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct ParsedMasterAudioRendition {
+    group_id: String,
+    uri: String,
+    is_default: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+struct ParsedMasterManifest {
+    variants: Vec<ParsedMasterVariant>,
+    audio_renditions: Vec<ParsedMasterAudioRendition>,
+}
 
 /// Resolve a relative URI against a base URL.
 pub fn resolve(uri: &str, base: &str) -> String {
@@ -29,27 +48,36 @@ pub fn parse_playlist(content: &str) -> Result<Playlist, DownloadError> {
 }
 
 /// Extract StreamInfo metadata from a playlist.
-pub fn playlist_to_info(playlist: &Playlist, base_url: &str) -> StreamInfo {
+pub fn playlist_to_info(playlist: &Playlist, content: &str, base_url: &str) -> StreamInfo {
     match playlist {
         Playlist::MasterPlaylist(master) => {
-            let mut streams: Vec<VariantInfo> = master
-                .variants
-                .iter()
-                .map(|v| {
-                    let res = v.resolution.map(|r| format!("{}x{}", r.width, r.height));
-                    let label = match v.resolution {
-                        Some(r) => format!("{}p", r.height),
-                        None => format!("{}kbps", v.bandwidth / 1000),
-                    };
-                    VariantInfo {
-                        url: resolve(&v.uri, base_url),
-                        bandwidth: v.bandwidth,
-                        resolution: res,
-                        label,
-                        codecs: v.codecs.clone(),
-                    }
+            let mut streams = parse_master_manifest(content, base_url)
+                .map(|parsed| {
+                    parsed
+                        .variants
+                        .into_iter()
+                        .map(|variant| variant.info)
+                        .collect::<Vec<_>>()
                 })
-                .collect();
+                .filter(|streams| !streams.is_empty())
+                .unwrap_or_else(|| {
+                    master
+                        .variants
+                        .iter()
+                        .map(|v| {
+                            let resolution =
+                                v.resolution.map(|r| format!("{}x{}", r.width, r.height));
+                            let bandwidth = v.bandwidth;
+                            VariantInfo {
+                                url: resolve(&v.uri, base_url),
+                                bandwidth,
+                                label: variant_label(resolution.as_deref(), bandwidth),
+                                resolution,
+                                codecs: v.codecs.clone(),
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                });
             streams.sort_by(|a, b| b.bandwidth.cmp(&a.bandwidth));
             StreamInfo {
                 kind: StreamKind::Master,
@@ -83,20 +111,51 @@ pub fn playlist_to_info(playlist: &Playlist, base_url: &str) -> StreamInfo {
 /// Pick quality variant URL from a master playlist.
 pub fn pick_quality(
     master: &m3u8_rs::MasterPlaylist,
-    quality: &crate::Quality,
+    content: &str,
+    quality: &Quality,
     base_url: &str,
 ) -> String {
-    let mut variants = master.variants.clone();
+    let mut variants = parse_master_manifest(content, base_url)
+        .map(|parsed| {
+            parsed
+                .variants
+                .into_iter()
+                .map(|variant| variant.info)
+                .collect::<Vec<_>>()
+        })
+        .filter(|variants| !variants.is_empty())
+        .unwrap_or_else(|| {
+            master
+                .variants
+                .iter()
+                .map(|variant| VariantInfo {
+                    url: resolve(&variant.uri, base_url),
+                    bandwidth: variant.bandwidth,
+                    resolution: variant
+                        .resolution
+                        .map(|r| format!("{}x{}", r.width, r.height)),
+                    label: variant_label(
+                        variant
+                            .resolution
+                            .map(|r| format!("{}x{}", r.width, r.height))
+                            .as_deref(),
+                        variant.bandwidth,
+                    ),
+                    codecs: variant.codecs.clone(),
+                })
+                .collect::<Vec<_>>()
+        });
+
     variants.sort_by(|a, b| b.bandwidth.cmp(&a.bandwidth));
     if variants.is_empty() {
         return base_url.to_string();
     }
     let chosen = match quality {
-        crate::Quality::Best => &variants[0],
-        crate::Quality::Worst => variants.last().unwrap(),
-        crate::Quality::Index(i) => &variants[(*i).min(variants.len() - 1)],
+        Quality::Best => &variants[0],
+        Quality::Worst => variants.last().unwrap(),
+        Quality::Index(i) => &variants[(*i).min(variants.len() - 1)],
     };
-    resolve(&chosen.uri, base_url)
+    chosen.url.clone()
 }
 
 /// Detect if segments are CMAF/fMP4 format (vs MPEG-TS).
@@ -111,8 +170,19 @@ pub fn is_cmaf(media: &MediaPlaylist) -> bool {
 }
 
 /// Find default audio rendition URI from a master playlist (for demuxed CMAF).
-pub fn find_audio_playlist(master: &m3u8_rs::MasterPlaylist, base_url: &str) -> Option<String> {
-    let audio_groups: std::collections::HashSet<String> = master
+pub fn find_audio_playlist(
+    master: &m3u8_rs::MasterPlaylist,
+    content: &str,
+    chosen_variant_url: &str,
+    base_url: &str,
+) -> Option<String> {
+    if let Some(parsed) = parse_master_manifest(content, base_url) {
+        if let Some(uri) = pick_audio_rendition_from_manifest(&parsed, chosen_variant_url) {
+            return Some(uri);
+        }
+    }
+
+    let audio_groups: HashSet<String> = master
         .variants
         .iter()
         .filter_map(|v| v.audio.clone())
@@ -120,7 +190,6 @@ pub fn find_audio_playlist(master: &m3u8_rs::MasterPlaylist, base_url: &str) -> 
     if audio_groups.is_empty() {
         return None;
     }
-    // Prefer DEFAULT=YES
     master
         .alternatives
         .iter()
@@ -199,4 +268,238 @@ pub async fn fetch_text_retry(
 ) -> Result<String, DownloadError> {
     let bytes = fetch_bytes_retry(client, url, retry).await?;
     String::from_utf8(bytes).map_err(|e| DownloadError::Parse(e.to_string()))
+}
+
+fn parse_master_manifest(content: &str, base_url: &str) -> Option<ParsedMasterManifest> {
+    let mut parsed = ParsedMasterManifest::default();
+    let mut pending_variant_attrs: Option<HashMap<String, String>> = None;
+
+    for raw_line in content.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() {
+            continue;
+        }
+
+        if let Some(attrs) = line.strip_prefix("#EXT-X-STREAM-INF:") {
+            pending_variant_attrs = Some(parse_attribute_list(attrs));
+            continue;
+        }
+
+        if let Some(attrs) = line.strip_prefix("#EXT-X-MEDIA:") {
+            let attrs = parse_attribute_list(attrs);
+            if !attrs
+                .get("TYPE")
+                .map(|value| value.eq_ignore_ascii_case("AUDIO"))
+                .unwrap_or(false)
+            {
+                continue;
+            }
+            let (Some(group_id), Some(uri)) = (attrs.get("GROUP-ID"), attrs.get("URI")) else {
+                continue;
+            };
+            parsed.audio_renditions.push(ParsedMasterAudioRendition {
+                group_id: group_id.clone(),
+                uri: resolve(uri, base_url),
+                is_default: attrs
+                    .get("DEFAULT")
+                    .map(|value| value.eq_ignore_ascii_case("YES"))
+                    .unwrap_or(false),
+            });
+            continue;
+        }
+
+        if line.starts_with('#') {
+            continue;
+        }
+
+        let Some(attrs) = pending_variant_attrs.take() else {
+            continue;
+        };
+        let bandwidth = parse_bandwidth(&attrs);
+        let resolution = attrs.get("RESOLUTION").cloned();
+        parsed.variants.push(ParsedMasterVariant {
+            info: VariantInfo {
+                url: resolve(line, base_url),
+                bandwidth,
+                resolution: resolution.clone(),
+                label: variant_label(resolution.as_deref(), bandwidth),
+                codecs: attrs.get("CODECS").cloned(),
+            },
+            audio_group: attrs.get("AUDIO").cloned(),
+        });
+    }
+
+    if parsed.variants.is_empty() && parsed.audio_renditions.is_empty() {
+        None
+    } else {
+        Some(parsed)
+    }
+}
+
+fn pick_audio_rendition_from_manifest(
+    parsed: &ParsedMasterManifest,
+    chosen_variant_url: &str,
+) -> Option<String> {
+    let selected_group = parsed
+        .variants
+        .iter()
+        .find(|variant| variant.info.url == chosen_variant_url)
+        .and_then(|variant| variant.audio_group.clone())
+        .or_else(|| {
+            let groups: HashSet<String> = parsed
+                .variants
+                .iter()
+                .filter_map(|variant| variant.audio_group.clone())
+                .collect();
+            if groups.len() == 1 {
+                groups.into_iter().next()
+            } else {
+                None
+            }
+        });
+
+    if let Some(group_id) = selected_group {
+        if let Some(uri) = parsed
+            .audio_renditions
+            .iter()
+            .find(|audio| audio.group_id == group_id && audio.is_default)
+            .or_else(|| {
+                parsed
+                    .audio_renditions
+                    .iter()
+                    .find(|audio| audio.group_id == group_id)
+            })
+            .map(|audio| audio.uri.clone())
+        {
+            return Some(uri);
+        }
+    }
+
+    if parsed.audio_renditions.len() == 1 {
+        return parsed
+            .audio_renditions
+            .first()
+            .map(|audio| audio.uri.clone());
+    }
+
+    None
+}
+
+fn parse_attribute_list(attrs: &str) -> HashMap<String, String> {
+    let mut pairs = Vec::new();
+    let mut current = String::new();
+    let mut in_quotes = false;
+
+    for ch in attrs.chars() {
+        match ch {
+            '"' => {
+                in_quotes = !in_quotes;
+                current.push(ch);
+            }
+            ',' if !in_quotes => {
+                if !current.trim().is_empty() {
+                    pairs.push(current.trim().to_string());
+                }
+                current.clear();
+            }
+            _ => current.push(ch),
+        }
+    }
+    if !current.trim().is_empty() {
+        pairs.push(current.trim().to_string());
+    }
+
+    pairs
+        .into_iter()
+        .filter_map(|pair| {
+            let (key, value) = pair.split_once('=')?;
+            Some((
+                key.trim().to_string(),
+                value.trim().trim_matches('"').to_string(),
+            ))
+        })
+        .collect()
+}
+
+fn parse_bandwidth(attrs: &HashMap<String, String>) -> u64 {
+    attrs
+        .get("AVERAGE-BANDWIDTH")
+        .or_else(|| attrs.get("BANDWIDTH"))
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(0)
+}
+
+fn variant_label(resolution: Option<&str>, bandwidth: u64) -> String {
+    if let Some(resolution) = resolution {
+        if let Some(height) = resolution.split('x').nth(1) {
+            return format!("{height}p");
+        }
+    }
+    format!("{}kbps", bandwidth / 1000)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SAMPLE_MASTER: &str = r#"#EXTM3U
+#EXT-X-VERSION:6
+#EXT-X-INDEPENDENT-SEGMENTS
+#EXT-X-STREAM-INF:AUDIO="audio_0",BANDWIDTH=4735442,FRAME-RATE=29.97,RESOLUTION=1920x1080,AVERAGE-BANDWIDTH=4735442,CODECS="avc1.640028,mp4a.40.2"
+0.m3u8
+#EXT-X-STREAM-INF:AUDIO="audio_0",BANDWIDTH=3855442,FRAME-RATE=29.97,RESOLUTION=1280x720,AVERAGE-BANDWIDTH=3855442,CODECS="avc1.640028,mp4a.40.2"
+1.m3u8
+#EXT-X-STREAM-INF:AUDIO="audio_0",BANDWIDTH=2755442,FRAME-RATE=29.97,RESOLUTION=960x540,AVERAGE-BANDWIDTH=2755442,CODECS="avc1.4D4028,mp4a.40.2"
+2.m3u8
+#EXT-X-STREAM-INF:AUDIO="audio_0",BANDWIDTH=1105478,FRAME-RATE=29.97,RESOLUTION=640x360,AVERAGE-BANDWIDTH=1105478,CODECS="avc1.4D4028,mp4a.40.2"
+3.m3u8
+#EXT-X-STREAM-INF:AUDIO="audio_0",BANDWIDTH=568678,FRAME-RATE=29.97,RESOLUTION=384x216,AVERAGE-BANDWIDTH=568678,CODECS="avc1.4D4028,mp4a.40.2"
+4.m3u8
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio_0",NAME="und",AUTOSELECT=YES,DEFAULT=YES,FORCED=NO,LANGUAGE="und",URI="5.m3u8"
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio_0",NAME="und_2",AUTOSELECT=NO,DEFAULT=NO,FORCED=NO,LANGUAGE="und",URI="6.m3u8"
+"#;
+
+    const BASE_URL: &str = "https://example.com/master.m3u8";
+
+    #[test]
+    fn playlist_to_info_recovers_variants_when_audio_tags_follow_streams() {
+        let playlist = parse_playlist(SAMPLE_MASTER).unwrap();
+        let info = playlist_to_info(&playlist, SAMPLE_MASTER, BASE_URL);
+
+        assert_eq!(info.kind, StreamKind::Master);
+        assert_eq!(info.streams.len(), 5);
+        assert_eq!(info.streams[0].url, "https://example.com/0.m3u8");
+        assert_eq!(info.streams[4].url, "https://example.com/4.m3u8");
+    }
+
+    #[test]
+    fn pick_quality_ignores_audio_tag_parser_regression() {
+        let playlist = parse_playlist(SAMPLE_MASTER).unwrap();
+        let Playlist::MasterPlaylist(master) = playlist else {
+            panic!("expected master playlist");
+        };
+
+        assert_eq!(
+            pick_quality(&master, SAMPLE_MASTER, &Quality::Best, BASE_URL),
+            "https://example.com/0.m3u8"
+        );
+        assert_eq!(
+            pick_quality(&master, SAMPLE_MASTER, &Quality::Worst, BASE_URL),
+            "https://example.com/4.m3u8"
+        );
+    }
+
+    #[test]
+    fn find_audio_playlist_recovers_default_audio_rendition() {
+        let playlist = parse_playlist(SAMPLE_MASTER).unwrap();
+        let Playlist::MasterPlaylist(master) = playlist else {
+            panic!("expected master playlist");
+        };
+        let chosen = pick_quality(&master, SAMPLE_MASTER, &Quality::Best, BASE_URL);
+
+        assert_eq!(
+            find_audio_playlist(&master, SAMPLE_MASTER, &chosen, BASE_URL),
+            Some("https://example.com/5.m3u8".into())
+        );
+    }
 }

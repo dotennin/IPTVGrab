@@ -1448,70 +1448,119 @@ async fn preview_playlist(
     AxumPath(task_id): AxumPath<String>,
 ) -> impl IntoResponse {
     let tasks = state.tasks.read().await;
-    let Some(task) = tasks.get(&task_id) else {
+    let Some(task) = tasks.get(&task_id).cloned() else {
         return (StatusCode::NOT_FOUND, "Task not found".to_string()).into_response();
     };
-    let Some(ref tmpdir) = task.tmpdir else {
-        return (StatusCode::NOT_FOUND, "No preview yet".to_string()).into_response();
-    };
-    let tmpdir = PathBuf::from(tmpdir);
-    let seg_ext = task.seg_ext.clone().unwrap_or_else(|| ".ts".into());
-    let target_dur = task.target_duration.unwrap_or(6.0) as u32;
-    let is_terminal = matches!(
-        task.status.as_str(),
-        "completed" | "failed" | "cancelled" | "merging" | "stopping" | "interrupted"
-    );
     drop(tasks);
 
-    let segs = contiguous_segments(&tmpdir, &seg_ext);
-    if segs.is_empty() {
+    let (tmpdir, seg_ext, target_dur, is_terminal) = match preview_task_context(&task) {
+        Ok(context) => context,
+        Err(error) => return error.into_response(),
+    };
+
+    let video_segs = contiguous_segments(&tmpdir, &seg_ext);
+    if video_segs.is_empty() {
         return (StatusCode::NOT_FOUND, "No segments yet".to_string()).into_response();
     }
 
-    let body = build_m3u8(
-        &segs,
+    let audio_dir = preview_audio_dir(&tmpdir);
+    let audio_segs = contiguous_segments(&audio_dir, &seg_ext);
+    if !audio_segs.is_empty() {
+        return preview_manifest_response(build_preview_master_m3u8(&task_id));
+    }
+
+    preview_manifest_response(build_m3u8(
+        &video_segs,
         target_dur,
         is_terminal,
         &format!("/api/tasks/{task_id}/seg"),
-        None,
-    );
-    (
-        StatusCode::OK,
-        [
-            (header::CONTENT_TYPE, "application/vnd.apple.mpegurl"),
-            (header::CACHE_CONTROL, "no-cache, no-store, must-revalidate"),
-        ],
-        body,
-    )
-        .into_response()
+        preview_map_uri(&task, &tmpdir, &task_id).as_deref(),
+    ))
+}
+
+async fn preview_video_playlist(
+    State(state): State<AppState>,
+    AxumPath(task_id): AxumPath<String>,
+) -> impl IntoResponse {
+    let tasks = state.tasks.read().await;
+    let Some(task) = tasks.get(&task_id).cloned() else {
+        return (StatusCode::NOT_FOUND, "Task not found".to_string()).into_response();
+    };
+    drop(tasks);
+
+    let (tmpdir, seg_ext, target_dur, is_terminal) = match preview_task_context(&task) {
+        Ok(context) => context,
+        Err(error) => return error.into_response(),
+    };
+
+    match build_preview_media_playlist(
+        &tmpdir,
+        &seg_ext,
+        target_dur,
+        is_terminal,
+        &format!("/api/tasks/{task_id}/seg"),
+        preview_map_uri(&task, &tmpdir, &task_id).as_deref(),
+    ) {
+        Ok(body) => preview_manifest_response(body),
+        Err(error) => error.into_response(),
+    }
+}
+
+async fn preview_audio_playlist(
+    State(state): State<AppState>,
+    AxumPath(task_id): AxumPath<String>,
+) -> impl IntoResponse {
+    let tasks = state.tasks.read().await;
+    let Some(task) = tasks.get(&task_id).cloned() else {
+        return (StatusCode::NOT_FOUND, "Task not found".to_string()).into_response();
+    };
+    drop(tasks);
+
+    let (tmpdir, seg_ext, target_dur, is_terminal) = match preview_task_context(&task) {
+        Ok(context) => context,
+        Err(error) => return error.into_response(),
+    };
+    let audio_dir = preview_audio_dir(&tmpdir);
+
+    match build_preview_media_playlist(
+        &audio_dir,
+        &seg_ext,
+        target_dur,
+        is_terminal,
+        &format!("/api/tasks/{task_id}/audio"),
+        preview_audio_map_uri(&task, &tmpdir, &task_id).as_deref(),
+    ) {
+        Ok(body) => preview_manifest_response(body),
+        Err(error) => error.into_response(),
+    }
 }
 
 async fn serve_segment(
     State(state): State<AppState>,
     AxumPath((task_id, filename)): AxumPath<(String, String)>,
 ) -> impl IntoResponse {
-    let valid = regex_lite::Regex::new(r"^seg_\d{6}\.(ts|m4s|mp4)$").unwrap();
-    if !valid.is_match(&filename) && filename != "init.mp4" {
-        return StatusCode::FORBIDDEN.into_response();
-    }
-    let tasks = state.tasks.read().await;
-    let Some(ref tmpdir) = tasks.get(&task_id).and_then(|t| t.tmpdir.clone()) else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-    let seg_path = PathBuf::from(tmpdir).join(&filename);
-    drop(tasks);
-    if !seg_path.exists() {
-        return StatusCode::NOT_FOUND.into_response();
-    }
-    let ct = if filename.ends_with(".ts") {
-        "video/mp2t"
-    } else {
-        "video/mp4"
-    };
-    match tokio::fs::read(&seg_path).await {
-        Ok(bytes) => (StatusCode::OK, [(header::CONTENT_TYPE, ct)], bytes).into_response(),
-        Err(_) => StatusCode::NOT_FOUND.into_response(),
-    }
+    serve_preview_file(
+        state,
+        task_id,
+        filename.clone(),
+        None,
+        preview_segment_content_type(&filename, false),
+    )
+    .await
+}
+
+async fn serve_audio_segment(
+    State(state): State<AppState>,
+    AxumPath((task_id, filename)): AxumPath<(String, String)>,
+) -> impl IntoResponse {
+    serve_preview_file(
+        state,
+        task_id,
+        filename.clone(),
+        Some("audio"),
+        preview_segment_content_type(&filename, true),
+    )
+    .await
 }
 
 async fn serve_download(
@@ -2407,6 +2456,83 @@ fn contiguous_segments(dir: &Path, ext: &str) -> Vec<PathBuf> {
     result
 }
 
+fn preview_task_context(task: &Task) -> Result<(PathBuf, String, u32, bool), (StatusCode, String)> {
+    let Some(ref tmpdir) = task.tmpdir else {
+        return Err((StatusCode::NOT_FOUND, "No preview yet".to_string()));
+    };
+    Ok((
+        PathBuf::from(tmpdir),
+        task.seg_ext.clone().unwrap_or_else(|| ".ts".into()),
+        task.target_duration.unwrap_or(6.0) as u32,
+        matches!(
+            task.status.as_str(),
+            "completed" | "failed" | "cancelled" | "merging" | "stopping" | "interrupted"
+        ),
+    ))
+}
+
+fn preview_audio_dir(tmpdir: &Path) -> PathBuf {
+    tmpdir.join("audio")
+}
+
+fn preview_map_uri(task: &Task, tmpdir: &Path, task_id: &str) -> Option<String> {
+    if task.is_cmaf != Some(true) {
+        return None;
+    }
+    let init_path = tmpdir.join("init.mp4");
+    if !init_path.exists() {
+        return None;
+    }
+    Some(format!("/api/tasks/{task_id}/seg/init.mp4"))
+}
+
+fn preview_audio_map_uri(task: &Task, tmpdir: &Path, task_id: &str) -> Option<String> {
+    if task.is_cmaf != Some(true) {
+        return None;
+    }
+    let init_path = preview_audio_dir(tmpdir).join("init.mp4");
+    if !init_path.exists() {
+        return None;
+    }
+    Some(format!("/api/tasks/{task_id}/audio/init.mp4"))
+}
+
+fn build_preview_media_playlist(
+    dir: &Path,
+    seg_ext: &str,
+    target_dur: u32,
+    is_terminal: bool,
+    base_url: &str,
+    map_uri: Option<&str>,
+) -> Result<String, (StatusCode, String)> {
+    let segs = contiguous_segments(dir, seg_ext);
+    if segs.is_empty() {
+        return Err((StatusCode::NOT_FOUND, "No segments yet".to_string()));
+    }
+    Ok(build_m3u8(
+        &segs,
+        target_dur,
+        is_terminal,
+        base_url,
+        map_uri,
+    ))
+}
+
+fn build_preview_master_m3u8(task_id: &str) -> String {
+    [
+        "#EXTM3U".to_string(),
+        "#EXT-X-VERSION:7".to_string(),
+        "#EXT-X-INDEPENDENT-SEGMENTS".to_string(),
+        format!(
+            "#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID=\"preview-audio\",NAME=\"Audio\",DEFAULT=YES,AUTOSELECT=YES,URI=\"/api/tasks/{task_id}/preview-audio.m3u8\""
+        ),
+        format!(
+            "#EXT-X-STREAM-INF:BANDWIDTH=1,AUDIO=\"preview-audio\"\n/api/tasks/{task_id}/preview-video.m3u8"
+        ),
+    ]
+    .join("\n")
+}
+
 fn build_m3u8(
     segs: &[PathBuf],
     target_dur: u32,
@@ -2437,6 +2563,72 @@ fn build_m3u8(
         lines.push("#EXT-X-ENDLIST".to_string());
     }
     lines.join("\n")
+}
+
+fn preview_manifest_response(body: String) -> Response {
+    (
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, "application/vnd.apple.mpegurl"),
+            (header::CACHE_CONTROL, "no-cache, no-store, must-revalidate"),
+        ],
+        body,
+    )
+        .into_response()
+}
+
+fn preview_segment_content_type(filename: &str, is_audio: bool) -> &'static str {
+    if filename.ends_with(".ts") {
+        "video/mp2t"
+    } else if is_audio {
+        "audio/mp4"
+    } else {
+        "video/mp4"
+    }
+}
+
+fn preview_segment_is_valid(filename: &str) -> bool {
+    regex_lite::Regex::new(r"^seg_\d{6}\.(ts|m4s|mp4)$")
+        .unwrap()
+        .is_match(filename)
+        || filename == "init.mp4"
+}
+
+async fn serve_preview_file(
+    state: AppState,
+    task_id: String,
+    filename: String,
+    subdir: Option<&str>,
+    content_type: &'static str,
+) -> Response {
+    if !preview_segment_is_valid(&filename) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+
+    let tasks = state.tasks.read().await;
+    let Some(ref tmpdir) = tasks.get(&task_id).and_then(|task| task.tmpdir.clone()) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let mut path = PathBuf::from(tmpdir);
+    if let Some(subdir) = subdir {
+        path = path.join(subdir);
+    }
+    let seg_path = path.join(&filename);
+    drop(tasks);
+
+    if !seg_path.exists() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    match tokio::fs::read(&seg_path).await {
+        Ok(bytes) => (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, content_type)],
+            bytes,
+        )
+            .into_response(),
+        Err(_) => StatusCode::NOT_FOUND.into_response(),
+    }
 }
 
 fn parse_m3u_text(text: &str) -> Vec<Channel> {
@@ -2539,6 +2731,99 @@ mod tests {
         assert!(
             out.contains("/api/watch/proxy?url=https%3A%2F%2Fexample.com%2Flive%2Fseg_000001.ts")
         );
+    }
+
+    #[test]
+    fn preview_map_uri_uses_init_segment_for_cmaf_tasks() {
+        let tmpdir = std::env::temp_dir().join(format!("m3u8-preview-test-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&tmpdir).unwrap();
+        std::fs::write(tmpdir.join("init.mp4"), b"init").unwrap();
+
+        let task = Task {
+            id: "task-1".into(),
+            url: "https://example.com/test.m3u8".into(),
+            status: "downloading".into(),
+            progress: 10,
+            total: 1,
+            downloaded: 0,
+            failed: 0,
+            speed_mbps: 0.0,
+            bytes_downloaded: 0,
+            output: None,
+            size: 0,
+            error: None,
+            created_at: 0.0,
+            req_headers: HashMap::new(),
+            output_name: None,
+            quality: "best".into(),
+            concurrency: 8,
+            tmpdir: Some(tmpdir.to_string_lossy().to_string()),
+            is_cmaf: Some(true),
+            seg_ext: Some(".m4s".into()),
+            target_duration: Some(6.0),
+            duration_sec: None,
+            recorded_segments: None,
+            elapsed_sec: None,
+        };
+
+        assert_eq!(
+            preview_map_uri(&task, &tmpdir, "task-1"),
+            Some("/api/tasks/task-1/seg/init.mp4".into())
+        );
+
+        let _ = std::fs::remove_dir_all(&tmpdir);
+    }
+
+    #[test]
+    fn preview_audio_map_uri_uses_audio_init_segment() {
+        let tmpdir =
+            std::env::temp_dir().join(format!("m3u8-preview-audio-test-{}", Uuid::new_v4()));
+        let audio_dir = preview_audio_dir(&tmpdir);
+        std::fs::create_dir_all(&audio_dir).unwrap();
+        std::fs::write(audio_dir.join("init.mp4"), b"audio-init").unwrap();
+
+        let task = Task {
+            id: "task-1".into(),
+            url: "https://example.com/test.m3u8".into(),
+            status: "downloading".into(),
+            progress: 10,
+            total: 1,
+            downloaded: 0,
+            failed: 0,
+            speed_mbps: 0.0,
+            bytes_downloaded: 0,
+            output: None,
+            size: 0,
+            error: None,
+            created_at: 0.0,
+            req_headers: HashMap::new(),
+            output_name: None,
+            quality: "best".into(),
+            concurrency: 8,
+            tmpdir: Some(tmpdir.to_string_lossy().to_string()),
+            is_cmaf: Some(true),
+            seg_ext: Some(".m4s".into()),
+            target_duration: Some(6.0),
+            duration_sec: None,
+            recorded_segments: None,
+            elapsed_sec: None,
+        };
+
+        assert_eq!(
+            preview_audio_map_uri(&task, &tmpdir, "task-1"),
+            Some("/api/tasks/task-1/audio/init.mp4".into())
+        );
+
+        let _ = std::fs::remove_dir_all(&tmpdir);
+    }
+
+    #[test]
+    fn preview_master_playlist_links_video_and_audio_manifests() {
+        let body = build_preview_master_m3u8("task-1");
+
+        assert!(body.contains("/api/tasks/task-1/preview-video.m3u8"));
+        assert!(body.contains("/api/tasks/task-1/preview-audio.m3u8"));
+        assert!(body.contains("#EXT-X-MEDIA:TYPE=AUDIO"));
     }
 
     #[tokio::test]
@@ -2680,7 +2965,16 @@ fn build_api_router() -> Router<AppState> {
         .route("/api/tasks/:id/fork", post(fork_recording))
         .route("/api/tasks/:id/restart", post(restart_task))
         .route("/api/tasks/:id/preview.m3u8", get(preview_playlist))
+        .route(
+            "/api/tasks/:id/preview-video.m3u8",
+            get(preview_video_playlist),
+        )
+        .route(
+            "/api/tasks/:id/preview-audio.m3u8",
+            get(preview_audio_playlist),
+        )
         .route("/api/tasks/:id/seg/:filename", get(serve_segment))
+        .route("/api/tasks/:id/audio/:filename", get(serve_audio_segment))
         .route("/api/watch/proxy", get(watch_proxy))
         .route("/downloads/:filename", get(serve_download))
         .route("/api/playlists", get(list_playlists).post(add_playlist))
