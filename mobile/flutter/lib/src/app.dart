@@ -9,6 +9,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:video_player/video_player.dart';
 
 import 'api_client.dart';
+import 'background_execution_bridge.dart';
 import 'controller.dart';
 import 'models.dart';
 
@@ -1284,25 +1285,31 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
       );
     }
 
-    final allItems = controller.playlists
+    final rawItems = controller.playlists
         .expand(
           (playlist) => playlist.channels.map((channel) =>
-              _PlaylistBrowserItem(playlist: playlist, channel: channel)),
+              _PlaylistBrowserItem.fromPlaylist(playlist, channel)),
         )
         .toList();
-    final playlistScoped = _selectedPlaylistId == null
-        ? allItems
-        : allItems
-            .where((item) => item.playlist.id == _selectedPlaylistId)
-            .toList();
-    final availableGroups = <String>{
-      'All groups',
-      ...playlistScoped.map((item) => item.channel.groupName),
-    }.toList()
-      ..sort();
-    final activeGroup = availableGroups.contains(_selectedGroup)
-        ? _selectedGroup
-        : 'All groups';
+    final mergedGroups =
+        controller.mergedPlaylistConfig?.groups ?? const <MergedGroup>[];
+    final mergedItems = mergedGroups
+        .where((group) => group.enabled)
+        .expand(
+          (group) => group.channels.where((channel) => channel.enabled).map(
+              (channel) => _PlaylistBrowserItem.fromMerged(group, channel)),
+        )
+        .toList();
+    final usingMergedView =
+        _selectedPlaylistId == null && controller.mergedPlaylistConfig != null;
+    final playlistScoped = usingMergedView
+        ? mergedItems
+        : _selectedPlaylistId == null
+            ? rawItems
+            : rawItems
+                .where((item) => item.playlistId == _selectedPlaylistId)
+                .toList();
+
     Playlist? selectedPlaylist;
     if (_selectedPlaylistId != null) {
       for (final playlist in controller.playlists) {
@@ -1312,19 +1319,27 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
         }
       }
     }
+
+    final availableGroups = <String>{
+      'All groups',
+      ...playlistScoped
+          .map((item) => item.groupName)
+          .where((group) => group.isNotEmpty),
+    }.toList()
+      ..sort();
+    final activeGroup = availableGroups.contains(_selectedGroup)
+        ? _selectedGroup
+        : 'All groups';
     final query = _searchController.text.trim().toLowerCase();
-    final scopedAvailableCount = playlistScoped
-        .where((item) =>
-            controller.healthForUrl(item.channel.url)?.isAvailable == true)
-        .length;
     final visibleItems = playlistScoped.where((item) {
       final matchesGroup =
-          activeGroup == 'All groups' || item.channel.groupName == activeGroup;
+          activeGroup == 'All groups' || item.groupName == activeGroup;
       final haystack = <String>[
-        item.channel.name,
-        item.channel.url,
-        item.channel.groupName,
-        item.playlist.name,
+        item.channelName,
+        item.channelUrl,
+        item.groupName,
+        item.playlistName,
+        item.sourcePlaylistName ?? '',
       ].join(' ').toLowerCase();
       final matchesQuery = query.isEmpty || haystack.contains(query);
       if (!matchesGroup || !matchesQuery) {
@@ -1333,66 +1348,105 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
       if (_showUnavailableChannels) {
         return true;
       }
-      return controller.healthForUrl(item.channel.url)?.isAvailable == true;
+      return controller.healthForUrl(item.channelUrl)?.isAvailable == true;
     }).toList();
     final waitingForInitialHealthResults = !_showUnavailableChannels &&
         controller.healthCache.isEmpty &&
-        controller.healthState.running;
+        controller.healthState.running &&
+        playlistScoped.isNotEmpty;
     final hiddenUnavailableCount =
         math.max(0, playlistScoped.length - visibleItems.length);
+    final playlistSummary = usingMergedView
+        ? 'Merged all-playlists view'
+        : selectedPlaylist?.name ?? 'All playlists';
 
     return Column(
       children: <Widget>[
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
           child: Row(
             children: <Widget>[
               Expanded(
-                child: Text(
-                  'Channels & playlists',
-                  style: Theme.of(context).textTheme.titleLarge,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      'Channels',
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      playlistSummary,
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(color: _appTextMuted),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
                 ),
               ),
               if (selectedPlaylist != null)
-                PopupMenuButton<String>(
-                  tooltip: 'Manage selected playlist',
-                  onSelected: (value) async {
-                    try {
-                      if (value == 'refresh') {
-                        await controller.refreshPlaylist(selectedPlaylist!.id);
-                        if (!context.mounted) {
-                          return;
-                        }
-                        _showMessage(context, 'Playlist refreshed.');
-                      } else if (value == 'delete') {
-                        await controller.deletePlaylist(selectedPlaylist!.id);
-                        if (!context.mounted) {
-                          return;
-                        }
-                        setState(() => _selectedPlaylistId = null);
-                        _showMessage(context, 'Playlist deleted.');
-                      }
-                    } on ApiException catch (error) {
-                      if (!context.mounted) {
-                        return;
-                      }
-                      _showMessage(context, error.message, error: true);
+                Builder(
+                  builder: (context) {
+                    final playlist = selectedPlaylist;
+                    if (playlist == null) {
+                      return const SizedBox.shrink();
                     }
+                    return PopupMenuButton<String>(
+                      tooltip: 'Manage selected playlist',
+                      onSelected: (value) async {
+                        try {
+                          if (value == 'refresh') {
+                            await controller.refreshPlaylist(playlist.id);
+                            if (!context.mounted) {
+                              return;
+                            }
+                            _showMessage(context, 'Playlist refreshed.');
+                          } else if (value == 'edit') {
+                            await _showEditPlaylistDialog(
+                              context,
+                              controller,
+                              playlist,
+                            );
+                          } else if (value == 'delete') {
+                            await controller.deletePlaylist(playlist.id);
+                            if (!context.mounted) {
+                              return;
+                            }
+                            setState(() => _selectedPlaylistId = null);
+                            _showMessage(context, 'Playlist deleted.');
+                          }
+                        } on ApiException catch (error) {
+                          if (!context.mounted) {
+                            return;
+                          }
+                          _showMessage(context, error.message, error: true);
+                        }
+                      },
+                      itemBuilder: (context) => const <PopupMenuEntry<String>>[
+                        PopupMenuItem<String>(
+                          value: 'refresh',
+                          child: Text('Refresh selected'),
+                        ),
+                        PopupMenuItem<String>(
+                          value: 'edit',
+                          child: Text('Edit selected'),
+                        ),
+                        PopupMenuItem<String>(
+                          value: 'delete',
+                          child: Text('Delete selected'),
+                        ),
+                      ],
+                      icon: const Icon(Icons.more_horiz),
+                    );
                   },
-                  itemBuilder: (context) => const <PopupMenuEntry<String>>[
-                    PopupMenuItem(
-                      value: 'refresh',
-                      child: Text('Refresh selected'),
-                    ),
-                    PopupMenuItem(
-                      value: 'delete',
-                      child: Text('Delete selected'),
-                    ),
-                  ],
-                  icon: const Icon(Icons.more_horiz),
                 ),
-              if (selectedPlaylist != null) const SizedBox(width: 8),
-              OutlinedButton.icon(
+              IconButton.filledTonal(
+                tooltip: controller.healthState.running
+                    ? 'Channel health check is running'
+                    : 'Run health check',
                 onPressed: controller.isBusy || controller.healthState.running
                     ? null
                     : () async {
@@ -1410,13 +1464,15 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
                           _showMessage(context, error.message, error: true);
                         }
                       },
-                icon: const Icon(Icons.health_and_safety_outlined),
-                label: Text(
-                    controller.healthState.running ? 'Checking...' : 'Health'),
+                icon: Icon(
+                  controller.healthState.running
+                      ? Icons.sync
+                      : Icons.health_and_safety_outlined,
+                ),
               ),
-              const SizedBox(width: 8),
-              IconButton(
-                tooltip: 'Refresh playlists',
+              const SizedBox(width: 6),
+              IconButton.filledTonal(
+                tooltip: 'Refresh channels',
                 onPressed: controller.isBusy
                     ? null
                     : () async {
@@ -1433,42 +1489,149 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
                       },
                 icon: const Icon(Icons.refresh),
               ),
-              FilledButton.icon(
+              const SizedBox(width: 6),
+              IconButton.filledTonal(
+                tooltip: 'Edit all playlists',
+                onPressed: controller.isBusy
+                    ? null
+                    : () async {
+                        final saved = await Navigator.of(context).push<bool>(
+                          MaterialPageRoute<bool>(
+                            builder: (_) => _AllPlaylistsEditorPage(
+                              controller: controller,
+                            ),
+                          ),
+                        );
+                        if (saved == true && context.mounted) {
+                          _showMessage(context, 'All playlists config saved.');
+                        }
+                      },
+                icon: const Icon(Icons.edit_note),
+              ),
+              const SizedBox(width: 6),
+              IconButton.filled(
+                tooltip: 'Add playlist',
                 onPressed: controller.isBusy
                     ? null
                     : () => _showAddPlaylistDialog(context, controller),
                 icon: const Icon(Icons.add),
-                label: const Text('Add'),
               ),
             ],
           ),
         ),
-        if (controller.healthState.running || controller.healthCache.isNotEmpty)
+        if (controller.playlists.isNotEmpty)
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
             child: Card(
               child: Padding(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(14),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
+                    TextField(
+                      controller: _searchController,
+                      decoration: InputDecoration(
+                        isDense: true,
+                        prefixIcon: const Icon(Icons.search),
+                        suffixIcon: _searchController.text.isEmpty
+                            ? null
+                            : IconButton(
+                                onPressed: () {
+                                  _searchController.clear();
+                                  setState(() {});
+                                },
+                                icon: const Icon(Icons.close),
+                              ),
+                        labelText: 'Search channels, groups or playlist names',
+                      ),
+                    ),
+                    const SizedBox(height: 12),
                     Row(
                       children: <Widget>[
-                        const Icon(Icons.favorite_outline, color: _appAccent),
-                        const SizedBox(width: 8),
                         Expanded(
-                          child: Text(
-                            controller.healthState.running
-                                ? 'Health check running'
-                                : 'Health cache ready',
-                            style: Theme.of(context).textTheme.titleMedium,
+                          child: DropdownButtonFormField<String>(
+                            initialValue: _selectedPlaylistId ?? '__all__',
+                            decoration: const InputDecoration(
+                              isDense: true,
+                              labelText: 'Playlist',
+                            ),
+                            items: <DropdownMenuItem<String>>[
+                              const DropdownMenuItem<String>(
+                                value: '__all__',
+                                child: Text('All playlists'),
+                              ),
+                              ...controller.playlists.map(
+                                (playlist) => DropdownMenuItem<String>(
+                                  value: playlist.id,
+                                  child: Text(playlist.name),
+                                ),
+                              ),
+                            ],
+                            onChanged: (value) {
+                              setState(() {
+                                _selectedPlaylistId =
+                                    value == null || value == '__all__'
+                                        ? null
+                                        : value;
+                              });
+                            },
                           ),
                         ),
-                        Text(
-                          controller.healthState.total > 0
-                              ? '${controller.healthState.done}/${controller.healthState.total}'
-                              : '${controller.healthCache.length} cached',
-                          style: const TextStyle(color: _appTextMuted),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: DropdownButtonFormField<String>(
+                            initialValue: activeGroup,
+                            decoration: const InputDecoration(
+                              isDense: true,
+                              labelText: 'Group',
+                            ),
+                            items: availableGroups
+                                .map(
+                                  (group) => DropdownMenuItem<String>(
+                                    value: group,
+                                    child: Text(group),
+                                  ),
+                                )
+                                .toList(),
+                            onChanged: (value) {
+                              if (value == null) {
+                                return;
+                              }
+                              setState(() => _selectedGroup = value);
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: <Widget>[
+                        FilterChip(
+                          selected: _showUnavailableChannels,
+                          onSelected: (value) =>
+                              setState(() => _showUnavailableChannels = value),
+                          avatar: Icon(
+                            _showUnavailableChannels
+                                ? Icons.visibility_outlined
+                                : Icons.visibility_off_outlined,
+                            size: 18,
+                          ),
+                          label: const Text('Unavailable'),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            waitingForInitialHealthResults
+                                ? 'Channel health scan is still running.'
+                                : _showUnavailableChannels
+                                    ? 'Showing ${visibleItems.length}/${playlistScoped.length} matching channels.'
+                                    : 'Healthy ${visibleItems.length}/${playlistScoped.length} · Hidden $hiddenUnavailableCount',
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(color: _appTextMuted),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
                       ],
                     ),
@@ -1484,126 +1647,6 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
                   ],
                 ),
               ),
-            ),
-          ),
-        if (controller.playlists.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            child: Card(
-              child: SwitchListTile.adaptive(
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                value: _showUnavailableChannels,
-                onChanged: (value) =>
-                    setState(() => _showUnavailableChannels = value),
-                secondary: Icon(
-                  _showUnavailableChannels
-                      ? Icons.visibility_outlined
-                      : Icons.visibility_off_outlined,
-                ),
-                title: const Text('Show unavailable channels'),
-                subtitle: Text(
-                  _showUnavailableChannels
-                      ? 'Showing all channels, including dead or unchecked entries.'
-                      : waitingForInitialHealthResults
-                          ? 'Initial health scan is running. Only confirmed available channels will appear.'
-                          : 'Showing confirmed available channels only. Hidden now: $hiddenUnavailableCount.',
-                ),
-              ),
-            ),
-          ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-          child: TextField(
-            controller: _searchController,
-            decoration: InputDecoration(
-              prefixIcon: const Icon(Icons.search),
-              suffixIcon: _searchController.text.isEmpty
-                  ? null
-                  : IconButton(
-                      onPressed: () {
-                        _searchController.clear();
-                        setState(() {});
-                      },
-                      icon: const Icon(Icons.close),
-                    ),
-              labelText: 'Search channels, groups or playlist names',
-            ),
-          ),
-        ),
-        if (controller.playlists.isNotEmpty)
-          SizedBox(
-            height: 48,
-            child: ListView(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              scrollDirection: Axis.horizontal,
-              children: <Widget>[
-                Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: ChoiceChip(
-                    selected: _selectedPlaylistId == null,
-                    label: const Text('All playlists'),
-                    onSelected: (_) =>
-                        setState(() => _selectedPlaylistId = null),
-                  ),
-                ),
-                for (final playlist in controller.playlists)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: ChoiceChip(
-                      selected: _selectedPlaylistId == playlist.id,
-                      label: Text(playlist.name),
-                      onSelected: (_) =>
-                          setState(() => _selectedPlaylistId = playlist.id),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        if (availableGroups.length > 1)
-          SizedBox(
-            height: 48,
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-              scrollDirection: Axis.horizontal,
-              children: <Widget>[
-                for (final group in availableGroups)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: ChoiceChip(
-                      selected: activeGroup == group,
-                      label: Text(group),
-                      onSelected: (_) => setState(() => _selectedGroup = group),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        if (controller.playlists.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            child: Row(
-              children: <Widget>[
-                Text(
-                  _showUnavailableChannels
-                      ? 'Visible ${visibleItems.length} / ${playlistScoped.length}'
-                      : 'Available ${visibleItems.length} / ${playlistScoped.length}',
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodySmall
-                      ?.copyWith(color: _appTextMuted),
-                ),
-                const SizedBox(width: 12),
-                if (controller.healthCache.isNotEmpty ||
-                    controller.healthState.running)
-                  Text(
-                    'Healthy cached: $scopedAvailableCount',
-                    style: Theme.of(context)
-                        .textTheme
-                        .bodySmall
-                        ?.copyWith(color: _appTextMuted),
-                  ),
-              ],
             ),
           ),
         Expanded(
@@ -1637,9 +1680,11 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
                             child: Text(
                               waitingForInitialHealthResults
                                   ? 'Scanning channel availability. Unavailable channels stay hidden until results arrive.'
-                                  : _showUnavailableChannels
-                                      ? 'No channels match the current filters.'
-                                      : 'No available channels match the current filters. Turn on "Show unavailable channels" to inspect dead entries.',
+                                  : usingMergedView && playlistScoped.isEmpty
+                                      ? 'No enabled channels are exposed by the merged all-playlists view. Open "Edit all" to re-enable groups or channels.'
+                                      : _showUnavailableChannels
+                                          ? 'No channels match the current filters.'
+                                          : 'No available channels match the current filters. Turn on "Show unavailable channels" to inspect dead entries.',
                             ),
                           ),
                         ],
@@ -1648,36 +1693,37 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
                         padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                         gridDelegate:
                             const SliverGridDelegateWithMaxCrossAxisExtent(
-                          maxCrossAxisExtent: 360,
+                          maxCrossAxisExtent: 320,
                           mainAxisSpacing: 12,
                           crossAxisSpacing: 12,
-                          mainAxisExtent: 228,
+                          mainAxisExtent: 134,
                         ),
                         itemCount: visibleItems.length,
                         itemBuilder: (context, index) {
                           final item = visibleItems[index];
                           final health =
-                              controller.healthForUrl(item.channel.url);
+                              controller.healthForUrl(item.channelUrl);
+                          final meta = <String>[
+                            item.playlistName,
+                            if (item.groupName.isNotEmpty) item.groupName,
+                          ].join(' • ');
                           return Card(
                             child: Padding(
-                              padding: const EdgeInsets.all(16),
+                              padding: const EdgeInsets.all(14),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: <Widget>[
                                   Row(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
                                     children: <Widget>[
-                                      _ChannelLogo(
-                                          url: item.channel.logo, size: 48),
-                                      const SizedBox(width: 12),
+                                      _ChannelLogo(url: item.logoUrl, size: 40),
+                                      const SizedBox(width: 10),
                                       Expanded(
                                         child: Column(
                                           crossAxisAlignment:
                                               CrossAxisAlignment.start,
                                           children: <Widget>[
                                             Text(
-                                              item.channel.name,
+                                              item.channelName,
                                               style: Theme.of(context)
                                                   .textTheme
                                                   .titleMedium,
@@ -1686,12 +1732,14 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
                                             ),
                                             const SizedBox(height: 4),
                                             Text(
-                                              item.playlist.name,
+                                              meta,
                                               style: Theme.of(context)
                                                   .textTheme
                                                   .bodySmall
                                                   ?.copyWith(
                                                       color: _appTextMuted),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
                                             ),
                                           ],
                                         ),
@@ -1699,7 +1747,6 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
                                       Container(
                                         width: 12,
                                         height: 12,
-                                        margin: const EdgeInsets.only(top: 6),
                                         decoration: BoxDecoration(
                                           color: _healthStatusColor(
                                               health?.status),
@@ -1708,70 +1755,65 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
                                       ),
                                     ],
                                   ),
-                                  const SizedBox(height: 12),
-                                  Wrap(
-                                    spacing: 8,
-                                    runSpacing: 8,
-                                    children: <Widget>[
-                                      Chip(label: Text(item.channel.groupName)),
-                                      Chip(
-                                        label: Text(
-                                          health == null
-                                              ? 'Unchecked'
-                                              : _titleCase(health.status),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 12),
-                                  Text(
-                                    item.channel.url,
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .bodySmall
-                                        ?.copyWith(color: _appTextMuted),
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
                                   const Spacer(),
-                                  Wrap(
-                                    spacing: 8,
-                                    runSpacing: 8,
+                                  Row(
                                     children: <Widget>[
-                                      FilledButton.icon(
-                                        onPressed: () => _openMediaPlayer(
-                                          context,
-                                          title: item.channel.name,
-                                          uri: controller
-                                              .watchProxyUri(item.channel.url),
-                                          httpHeaders:
-                                              controller.mediaRequestHeaders,
-                                          isLive: true,
+                                      Expanded(
+                                        child: FilledButton.tonalIcon(
+                                          style: FilledButton.styleFrom(
+                                            minimumSize:
+                                                const Size.fromHeight(40),
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 12,
+                                              vertical: 8,
+                                            ),
+                                          ),
+                                          onPressed: () => _openMediaPlayer(
+                                            context,
+                                            title: item.channelName,
+                                            uri: controller.watchProxyUri(
+                                              item.channelUrl,
+                                            ),
+                                            httpHeaders:
+                                                controller.mediaRequestHeaders,
+                                            isLive: true,
+                                            copyUrl: item.channelUrl,
+                                            copyLabel:
+                                                'Original stream URL copied.',
+                                            onGrabRequested: () {
+                                              Navigator.of(context).maybePop();
+                                              controller.suggestDownloadUrl(
+                                                item.channelUrl,
+                                              );
+                                              widget.onUseChannel();
+                                            },
+                                            allowPictureInPicture: true,
+                                          ),
+                                          icon: const Icon(
+                                              Icons.play_circle_fill),
+                                          label: const Text(''),
                                         ),
-                                        icon:
-                                            const Icon(Icons.play_circle_fill),
-                                        label: const Text('Watch'),
                                       ),
-                                      OutlinedButton.icon(
+                                      const SizedBox(width: 8),
+                                      IconButton.filledTonal(
+                                        tooltip:
+                                            'Open Grab with this stream URL',
                                         onPressed: () {
                                           controller.suggestDownloadUrl(
-                                              item.channel.url);
+                                            item.channelUrl,
+                                          );
                                           widget.onUseChannel();
-                                          _showMessage(context,
-                                              'Filled the download URL from channels.');
                                         },
-                                        icon: const Icon(Icons.call_made),
-                                        label: const Text('Use'),
+                                        icon: const Icon(
+                                            Icons.download_for_offline),
                                       ),
-                                      IconButton(
-                                        tooltip: 'Copy watch proxy URL',
+                                      const SizedBox(width: 4),
+                                      IconButton.outlined(
+                                        tooltip: 'Copy source M3U8 URL',
                                         onPressed: () => _copyToClipboard(
                                           context,
-                                          controller
-                                              .watchProxyUri(item.channel.url)
-                                              .toString(),
-                                          label:
-                                              'Watch proxy URL copied. It still requires the active session cookie when auth is enabled.',
+                                          item.channelUrl,
+                                          label: 'Original stream URL copied.',
                                         ),
                                         icon: const Icon(Icons.copy),
                                       ),
@@ -1792,12 +1834,53 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
 
 class _PlaylistBrowserItem {
   const _PlaylistBrowserItem({
-    required this.playlist,
-    required this.channel,
+    required this.playlistId,
+    required this.playlistName,
+    required this.channelName,
+    required this.channelUrl,
+    required this.groupName,
+    required this.logoUrl,
+    this.sourcePlaylistName,
   });
 
-  final Playlist playlist;
-  final PlaylistChannel channel;
+  factory _PlaylistBrowserItem.fromPlaylist(
+    Playlist playlist,
+    PlaylistChannel channel,
+  ) {
+    return _PlaylistBrowserItem(
+      playlistId: playlist.id,
+      playlistName: playlist.name,
+      channelName: channel.name,
+      channelUrl: channel.url,
+      groupName: channel.groupName,
+      logoUrl: channel.logo,
+      sourcePlaylistName: playlist.name,
+    );
+  }
+
+  factory _PlaylistBrowserItem.fromMerged(
+    MergedGroup group,
+    MergedChannel channel,
+  ) {
+    return _PlaylistBrowserItem(
+      playlistId: channel.sourcePlaylistId ?? '__merged__',
+      playlistName:
+          channel.sourcePlaylistName ?? (channel.custom ? 'Custom' : 'Merged'),
+      channelName: channel.name,
+      channelUrl: channel.url,
+      groupName: group.name,
+      logoUrl: channel.tvgLogo,
+      sourcePlaylistName: channel.sourcePlaylistName,
+    );
+  }
+
+  final String playlistId;
+  final String playlistName;
+  final String channelName;
+  final String channelUrl;
+  final String groupName;
+  final String? logoUrl;
+  final String? sourcePlaylistName;
 }
 
 class _ChannelLogo extends StatelessWidget {
@@ -1854,6 +1937,10 @@ Future<void> _openMediaPlayer(
   bool isLive = false,
   String? localFilePath,
   String? localFileName,
+  String? copyUrl,
+  String? copyLabel,
+  VoidCallback? onGrabRequested,
+  bool allowPictureInPicture = false,
 }) {
   return Navigator.of(context).push(
     MaterialPageRoute<void>(
@@ -1864,6 +1951,10 @@ Future<void> _openMediaPlayer(
         isLive: isLive,
         localFilePath: localFilePath,
         localFileName: localFileName,
+        copyUrl: copyUrl,
+        copyLabel: copyLabel,
+        onGrabRequested: onGrabRequested,
+        allowPictureInPicture: allowPictureInPicture,
       ),
     ),
   );
@@ -1877,6 +1968,10 @@ class _MediaPlayerPage extends StatefulWidget {
     this.isLive = false,
     this.localFilePath,
     this.localFileName,
+    this.copyUrl,
+    this.copyLabel,
+    this.onGrabRequested,
+    this.allowPictureInPicture = false,
   });
 
   final String title;
@@ -1885,6 +1980,10 @@ class _MediaPlayerPage extends StatefulWidget {
   final bool isLive;
   final String? localFilePath;
   final String? localFileName;
+  final String? copyUrl;
+  final String? copyLabel;
+  final VoidCallback? onGrabRequested;
+  final bool allowPictureInPicture;
 
   @override
   State<_MediaPlayerPage> createState() => _MediaPlayerPageState();
@@ -1897,6 +1996,7 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
   bool _isFullscreen = false;
   bool _showControls = true;
   bool _muted = false;
+  bool _enteringPictureInPicture = false;
   Timer? _controlsTimer;
 
   @override
@@ -2018,6 +2118,52 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
     });
   }
 
+  String get _resolvedCopyUrl => widget.copyUrl ?? widget.uri.toString();
+
+  String get _resolvedCopyLabel =>
+      widget.copyLabel ??
+      'Media URL copied. It still requires the active session cookie when auth is enabled.';
+
+  bool get _canUsePictureInPicture =>
+      widget.allowPictureInPicture && (Platform.isAndroid || Platform.isIOS);
+
+  Future<void> _enterPictureInPicture() async {
+    if (_enteringPictureInPicture) {
+      return;
+    }
+    setState(() => _enteringPictureInPicture = true);
+    try {
+      final entered =
+          await BackgroundExecutionBridge.instance.enterPictureInPicture(
+        uri: widget.uri,
+        headers: widget.httpHeaders,
+        position: widget.isLive ? null : await _controller.position,
+      );
+      if (!mounted) {
+        return;
+      }
+      if (entered && Platform.isIOS) {
+        await _controller.pause();
+      }
+      if (!entered) {
+        _showMessage(
+          context,
+          'Picture-in-picture is unavailable on this device.',
+          error: true,
+        );
+      }
+    } on BackgroundExecutionBridgeException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _showMessage(context, error.message, error: true);
+    } finally {
+      if (mounted) {
+        setState(() => _enteringPictureInPicture = false);
+      }
+    }
+  }
+
   @override
   void dispose() {
     _controlsTimer?.cancel();
@@ -2106,13 +2252,20 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
                       ),
                       icon: const Icon(Icons.photo_library_outlined),
                     ),
+                  if (_canUsePictureInPicture)
+                    IconButton(
+                      tooltip: 'Picture in picture',
+                      onPressed: _enteringPictureInPicture
+                          ? null
+                          : _enterPictureInPicture,
+                      icon: const Icon(Icons.picture_in_picture_alt_outlined),
+                    ),
                   IconButton(
                     tooltip: 'Copy URL',
                     onPressed: () => _copyToClipboard(
                       context,
-                      widget.uri.toString(),
-                      label:
-                          'Media URL copied. It still requires the active session cookie when auth is enabled.',
+                      _resolvedCopyUrl,
+                      label: _resolvedCopyLabel,
                     ),
                     icon: const Icon(Icons.copy),
                   ),
@@ -2153,10 +2306,37 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
                         ],
                       ),
                       const SizedBox(height: 12),
+                      if (widget.onGrabRequested != null ||
+                          _canUsePictureInPicture)
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: <Widget>[
+                            if (widget.onGrabRequested != null)
+                              OutlinedButton.icon(
+                                onPressed: widget.onGrabRequested,
+                                icon: const Icon(Icons.download_for_offline),
+                                label: const Text('Grab'),
+                              ),
+                            if (_canUsePictureInPicture)
+                              OutlinedButton.icon(
+                                onPressed: _enteringPictureInPicture
+                                    ? null
+                                    : _enterPictureInPicture,
+                                icon: const Icon(
+                                  Icons.picture_in_picture_alt_outlined,
+                                ),
+                                label: const Text('Picture in picture'),
+                              ),
+                          ],
+                        ),
+                      if (widget.onGrabRequested != null ||
+                          _canUsePictureInPicture)
+                        const SizedBox(height: 12),
                       Align(
                         alignment: Alignment.centerLeft,
                         child: SelectableText(
-                          widget.uri.toString(),
+                          _resolvedCopyUrl,
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
                       ),
@@ -2315,6 +2495,892 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AllPlaylistsEditorPage extends StatefulWidget {
+  const _AllPlaylistsEditorPage({required this.controller});
+
+  final AppController controller;
+
+  @override
+  State<_AllPlaylistsEditorPage> createState() =>
+      _AllPlaylistsEditorPageState();
+}
+
+class _AllPlaylistsEditorPageState extends State<_AllPlaylistsEditorPage> {
+  late MergedPlaylistConfig _draft;
+  String? _selectedGroupId;
+  bool _dirty = false;
+  bool _saving = false;
+  bool _refreshing = false;
+  bool _copyingExport = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _hydrateFromController();
+  }
+
+  MergedGroup? get _selectedGroup {
+    final selectedId = _selectedGroupId;
+    if (selectedId == null) {
+      return null;
+    }
+    for (final group in _draft.groups) {
+      if (group.id == selectedId) {
+        return group;
+      }
+    }
+    return null;
+  }
+
+  void _hydrateFromController() {
+    final config = widget.controller.mergedPlaylistConfig;
+    _draft =
+        (config ?? MergedPlaylistConfig(groups: const <MergedGroup>[])).copy();
+    if (_selectedGroupId != null &&
+        _draft.groups.any((group) => group.id == _selectedGroupId)) {
+      return;
+    }
+    _selectedGroupId = _draft.groups.isEmpty ? null : _draft.groups.first.id;
+  }
+
+  Future<void> _handleClose() async {
+    if (!_dirty) {
+      Navigator.of(context).pop(false);
+      return;
+    }
+    final discard = await _confirmDiscardChanges(
+      'Discard your unsaved All Playlists edits?',
+    );
+    if (!mounted || !discard) {
+      return;
+    }
+    Navigator.of(context).pop(false);
+  }
+
+  Future<bool> _confirmDiscardChanges(String message) async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Unsaved changes'),
+          content: Text(message),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Keep editing'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Discard'),
+            ),
+          ],
+        );
+      },
+    );
+    return result == true;
+  }
+
+  void _replaceGroups(
+    List<MergedGroup> groups, {
+    required bool markDirty,
+    String? selectedGroupId,
+  }) {
+    setState(() {
+      _draft = MergedPlaylistConfig(groups: groups);
+      if (selectedGroupId != null) {
+        _selectedGroupId = selectedGroupId;
+      }
+      if (_selectedGroupId != null &&
+          !_draft.groups.any((group) => group.id == _selectedGroupId)) {
+        _selectedGroupId =
+            _draft.groups.isEmpty ? null : _draft.groups.first.id;
+      }
+      if (markDirty) {
+        _dirty = true;
+      }
+    });
+  }
+
+  void _toggleGroupEnabled(String groupId, bool enabled) {
+    final next = _draft.groups
+        .map(
+          (group) => group.id == groupId
+              ? group.copyWith(enabled: enabled)
+              : group.copy(),
+        )
+        .toList();
+    _replaceGroups(next, markDirty: true);
+  }
+
+  void _toggleChannelEnabled(String channelId, bool enabled) {
+    final selectedGroup = _selectedGroup;
+    if (selectedGroup == null) {
+      return;
+    }
+    final nextGroups = _draft.groups.map((group) {
+      if (group.id != selectedGroup.id) {
+        return group.copy();
+      }
+      return group.copyWith(
+        channels: group.channels
+            .map(
+              (channel) => channel.id == channelId
+                  ? channel.copyWith(enabled: enabled)
+                  : channel.copy(),
+            )
+            .toList(),
+      );
+    }).toList();
+    _replaceGroups(nextGroups,
+        markDirty: true, selectedGroupId: selectedGroup.id);
+  }
+
+  void _reorderGroups(int oldIndex, int newIndex) {
+    final next = _draft.groups.map((group) => group.copy()).toList();
+    if (newIndex > oldIndex) {
+      newIndex -= 1;
+    }
+    final moved = next.removeAt(oldIndex);
+    next.insert(newIndex, moved);
+    _replaceGroups(next, markDirty: true, selectedGroupId: moved.id);
+  }
+
+  void _reorderChannels(int oldIndex, int newIndex) {
+    final selectedGroup = _selectedGroup;
+    if (selectedGroup == null) {
+      return;
+    }
+    if (newIndex > oldIndex) {
+      newIndex -= 1;
+    }
+    final nextChannels =
+        selectedGroup.channels.map((channel) => channel.copy()).toList();
+    final moved = nextChannels.removeAt(oldIndex);
+    nextChannels.insert(newIndex, moved);
+    final nextGroups = _draft.groups.map((group) {
+      if (group.id != selectedGroup.id) {
+        return group.copy();
+      }
+      return group.copyWith(channels: nextChannels);
+    }).toList();
+    _replaceGroups(nextGroups,
+        markDirty: true, selectedGroupId: selectedGroup.id);
+  }
+
+  Future<void> _deleteGroup(MergedGroup group) async {
+    if (!group.custom) {
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Delete custom group'),
+          content:
+              Text('Delete "${group.name}" and all of its custom channels?'),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Delete'),
+            ),
+          ],
+        );
+      },
+    );
+    if (confirmed != true) {
+      return;
+    }
+    final next = _draft.groups
+        .where((candidate) => candidate.id != group.id)
+        .map((candidate) => candidate.copy())
+        .toList();
+    _replaceGroups(next, markDirty: true);
+  }
+
+  Future<void> _deleteCustomChannel(MergedChannel channel) async {
+    final group = _selectedGroup;
+    if (group == null || !channel.custom) {
+      return;
+    }
+    final nextGroups = _draft.groups.map((candidate) {
+      if (candidate.id != group.id) {
+        return candidate.copy();
+      }
+      return candidate.copyWith(
+        channels: candidate.channels
+            .where((item) => item.id != channel.id)
+            .map((item) => item.copy())
+            .toList(),
+      );
+    }).toList();
+    _replaceGroups(nextGroups, markDirty: true, selectedGroupId: group.id);
+  }
+
+  Future<void> _showAddGroupDialog() async {
+    final controller = TextEditingController();
+    try {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) {
+          return AlertDialog(
+            title: const Text('Add custom group'),
+            content: TextField(
+              controller: controller,
+              autofocus: true,
+              decoration: const InputDecoration(
+                labelText: 'Group name',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            actions: <Widget>[
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(dialogContext).pop(true),
+                child: const Text('Add group'),
+              ),
+            ],
+          );
+        },
+      );
+      if (confirmed != true) {
+        return;
+      }
+      final name = controller.text.trim();
+      if (name.isEmpty) {
+        _showMessage(context, 'Group name is required.', error: true);
+        return;
+      }
+      if (_draft.groups.any((group) => group.name == name)) {
+        _showMessage(context, 'Group already exists.', error: true);
+        return;
+      }
+      final next = <MergedGroup>[
+        MergedGroup(
+          id: _randomEditorId('g'),
+          name: name,
+          enabled: true,
+          custom: true,
+          channels: const <MergedChannel>[],
+        ),
+        ..._draft.groups.map((group) => group.copy()),
+      ];
+      _replaceGroups(next, markDirty: true, selectedGroupId: next.first.id);
+    } finally {
+      controller.dispose();
+    }
+  }
+
+  Future<void> _showChannelDialog({MergedChannel? existing}) async {
+    final group = _selectedGroup;
+    if (group == null) {
+      _showMessage(context, 'Select a group first.', error: true);
+      return;
+    }
+    final nameController = TextEditingController(text: existing?.name ?? '');
+    final urlController = TextEditingController(text: existing?.url ?? '');
+    final logoController = TextEditingController(text: existing?.tvgLogo ?? '');
+    try {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) {
+          return AlertDialog(
+            title: Text(existing == null
+                ? 'Add custom channel'
+                : 'Edit custom channel'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  TextField(
+                    controller: nameController,
+                    decoration: const InputDecoration(
+                      labelText: 'Channel name',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: urlController,
+                    decoration: const InputDecoration(
+                      labelText: 'M3U8 URL',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: logoController,
+                    decoration: const InputDecoration(
+                      labelText: 'Logo URL (optional)',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: <Widget>[
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(dialogContext).pop(true),
+                child: Text(existing == null ? 'Add channel' : 'Save'),
+              ),
+            ],
+          );
+        },
+      );
+      if (confirmed != true) {
+        return;
+      }
+      final name = nameController.text.trim();
+      final url = urlController.text.trim();
+      final logo = logoController.text.trim();
+      if (name.isEmpty || url.isEmpty) {
+        _showMessage(context, 'Name and URL are required.', error: true);
+        return;
+      }
+      final nextGroups = _draft.groups.map((candidate) {
+        if (candidate.id != group.id) {
+          return candidate.copy();
+        }
+        final nextChannels =
+            candidate.channels.map((channel) => channel.copy()).toList();
+        if (existing == null) {
+          nextChannels.insert(
+            0,
+            MergedChannel(
+              id: _randomEditorId('cc'),
+              name: name,
+              url: url,
+              enabled: true,
+              custom: true,
+              group: group.name,
+              tvgLogo: logo,
+              sourcePlaylistId: null,
+              sourcePlaylistName: null,
+            ),
+          );
+        } else {
+          final index =
+              nextChannels.indexWhere((channel) => channel.id == existing.id);
+          if (index >= 0) {
+            nextChannels[index] = nextChannels[index].copyWith(
+              name: name,
+              url: url,
+              tvgLogo: logo,
+              group: group.name,
+            );
+          }
+        }
+        return candidate.copyWith(channels: nextChannels);
+      }).toList();
+      _replaceGroups(nextGroups, markDirty: true, selectedGroupId: group.id);
+    } finally {
+      nameController.dispose();
+      urlController.dispose();
+      logoController.dispose();
+    }
+  }
+
+  Future<void> _refreshAll() async {
+    if (_dirty) {
+      final discard = await _confirmDiscardChanges(
+        'Refreshing will replace your unsaved local edits with the latest merged playlist data. Continue?',
+      );
+      if (!discard) {
+        return;
+      }
+    }
+    setState(() => _refreshing = true);
+    try {
+      await widget.controller.refreshAllPlaylists();
+      _hydrateFromController();
+      if (!mounted) {
+        return;
+      }
+      setState(() => _dirty = false);
+      _showMessage(context, 'All playlists refreshed.');
+    } on ApiException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _showMessage(context, error.message, error: true);
+    } finally {
+      if (mounted) {
+        setState(() => _refreshing = false);
+      }
+    }
+  }
+
+  Future<void> _copyExport() async {
+    setState(() => _copyingExport = true);
+    try {
+      final content = await widget.controller.fetchMergedExport();
+      if (!mounted) {
+        return;
+      }
+      await _copyToClipboard(
+        context,
+        content,
+        label: 'Merged M3U copied to clipboard.',
+      );
+    } on ApiException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _showMessage(context, error.message, error: true);
+    } finally {
+      if (mounted) {
+        setState(() => _copyingExport = false);
+      }
+    }
+  }
+
+  Future<void> _save() async {
+    setState(() => _saving = true);
+    try {
+      await widget.controller.saveMergedPlaylists(_draft.copy());
+      if (!mounted) {
+        return;
+      }
+      Navigator.of(context).pop(true);
+    } on ApiException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _showMessage(context, error.message, error: true);
+    } finally {
+      if (mounted) {
+        setState(() => _saving = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final selectedGroup = _selectedGroup;
+    return PopScope<bool>(
+      canPop: !_dirty,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) {
+          return;
+        }
+        await _handleClose();
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          leading: IconButton(
+            onPressed: _handleClose,
+            icon: const Icon(Icons.arrow_back),
+          ),
+          title: const Text('All playlists editor'),
+          actions: <Widget>[
+            IconButton(
+              tooltip: 'Copy merged M3U',
+              onPressed: _copyingExport ? null : _copyExport,
+              icon: const Icon(Icons.content_copy),
+            ),
+            IconButton(
+              tooltip: 'Refresh all playlists',
+              onPressed: _refreshing ? null : _refreshAll,
+              icon: const Icon(Icons.refresh),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: FilledButton(
+                onPressed: _saving ? null : _save,
+                child: Text(_saving ? 'Saving...' : 'Save'),
+              ),
+            ),
+          ],
+        ),
+        body: Column(
+          children: <Widget>[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    'Reorder groups and channels, toggle availability, and manage custom groups or custom channels before saving.',
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodySmall
+                        ?.copyWith(color: _appTextMuted),
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: <Widget>[
+                      FilledButton.tonalIcon(
+                        onPressed: _showAddGroupDialog,
+                        icon: const Icon(Icons.create_new_folder_outlined),
+                        label: const Text('Add group'),
+                      ),
+                      if (selectedGroup != null)
+                        FilledButton.tonalIcon(
+                          onPressed: () => _showChannelDialog(),
+                          icon: const Icon(Icons.add_link_outlined),
+                          label: const Text('Add channel'),
+                        ),
+                      Chip(
+                        label: Text('${_draft.groups.length} groups'),
+                      ),
+                      if (selectedGroup != null)
+                        Chip(
+                          label: Text(
+                            '${selectedGroup.channels.length} channels in ${selectedGroup.name}',
+                          ),
+                        ),
+                      if (_dirty)
+                        const Chip(
+                          avatar: Icon(Icons.edit, size: 18),
+                          label: Text('Unsaved changes'),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: _draft.groups.isEmpty
+                  ? ListView(
+                      padding: const EdgeInsets.all(24),
+                      children: const <Widget>[
+                        SizedBox(height: 96),
+                        Icon(Icons.playlist_play, size: 48),
+                        SizedBox(height: 12),
+                        Center(
+                          child: Text(
+                            'No merged playlist data yet. Refresh all playlists or add a custom group.',
+                          ),
+                        ),
+                      ],
+                    )
+                  : ReorderableListView.builder(
+                      buildDefaultDragHandles: false,
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                      itemCount: _draft.groups.length,
+                      onReorder: _reorderGroups,
+                      itemBuilder: (context, index) {
+                        final group = _draft.groups[index];
+                        final isSelected = group.id == _selectedGroupId;
+                        final enabledChannels = group.channels
+                            .where((channel) => channel.enabled)
+                            .length;
+                        return Card(
+                          key: ValueKey(group.id),
+                          margin: const EdgeInsets.only(bottom: 12),
+                          child: Column(
+                            children: <Widget>[
+                              InkWell(
+                                onTap: () {
+                                  setState(() {
+                                    _selectedGroupId =
+                                        isSelected ? null : group.id;
+                                  });
+                                },
+                                child: Padding(
+                                  padding: const EdgeInsets.all(14),
+                                  child: Row(
+                                    children: <Widget>[
+                                      ReorderableDelayedDragStartListener(
+                                        index: index,
+                                        child: const Padding(
+                                          padding: EdgeInsets.only(right: 8),
+                                          child: Icon(Icons.drag_indicator),
+                                        ),
+                                      ),
+                                      Checkbox(
+                                        value: group.enabled,
+                                        onChanged: (value) =>
+                                            _toggleGroupEnabled(
+                                                group.id, value ?? true),
+                                      ),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: <Widget>[
+                                            Text(
+                                              group.name,
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .titleMedium,
+                                            ),
+                                            const SizedBox(height: 4),
+                                            Text(
+                                              '${group.custom ? 'Custom group' : 'Source group'} • $enabledChannels/${group.channels.length} enabled',
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .bodySmall
+                                                  ?.copyWith(
+                                                      color: _appTextMuted),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      if (group.custom)
+                                        IconButton(
+                                          tooltip: 'Delete custom group',
+                                          onPressed: () => _deleteGroup(group),
+                                          icon:
+                                              const Icon(Icons.delete_outline),
+                                        ),
+                                      Icon(
+                                        isSelected
+                                            ? Icons.expand_less
+                                            : Icons.expand_more,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                              if (isSelected) ...<Widget>[
+                                const Divider(height: 1),
+                                Padding(
+                                  padding:
+                                      const EdgeInsets.fromLTRB(14, 12, 14, 14),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: <Widget>[
+                                      Wrap(
+                                        spacing: 8,
+                                        runSpacing: 8,
+                                        children: <Widget>[
+                                          Chip(
+                                            label: Text(
+                                              '${group.channels.length} channels',
+                                            ),
+                                          ),
+                                          if (!group.enabled)
+                                            const Chip(
+                                                label: Text('Group disabled')),
+                                          FilledButton.tonalIcon(
+                                            onPressed: () =>
+                                                _showChannelDialog(),
+                                            icon: const Icon(
+                                                Icons.add_link_outlined),
+                                            label: const Text('Add channel'),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 12),
+                                      if (group.channels.isEmpty)
+                                        Text(
+                                          'No channels in this group yet.',
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .bodySmall
+                                              ?.copyWith(color: _appTextMuted),
+                                        )
+                                      else
+                                        ReorderableListView.builder(
+                                          buildDefaultDragHandles: false,
+                                          shrinkWrap: true,
+                                          physics:
+                                              const NeverScrollableScrollPhysics(),
+                                          itemCount: group.channels.length,
+                                          onReorder: _reorderChannels,
+                                          itemBuilder: (context, channelIndex) {
+                                            final channel =
+                                                group.channels[channelIndex];
+                                            final health = widget.controller
+                                                .healthForUrl(channel.url);
+                                            return Container(
+                                              key: ValueKey(channel.id),
+                                              margin: const EdgeInsets.only(
+                                                  bottom: 8),
+                                              decoration: BoxDecoration(
+                                                color: _appSurfaceAlt,
+                                                borderRadius:
+                                                    BorderRadius.circular(16),
+                                                border: Border.all(
+                                                  color: Colors.white10,
+                                                ),
+                                              ),
+                                              child: Padding(
+                                                padding:
+                                                    const EdgeInsets.all(12),
+                                                child: Row(
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment.start,
+                                                  children: <Widget>[
+                                                    ReorderableDelayedDragStartListener(
+                                                      index: channelIndex,
+                                                      child: const Padding(
+                                                        padding:
+                                                            EdgeInsets.only(
+                                                          right: 8,
+                                                          top: 6,
+                                                        ),
+                                                        child: Icon(Icons
+                                                            .drag_indicator),
+                                                      ),
+                                                    ),
+                                                    _ChannelLogo(
+                                                      url: channel.tvgLogo,
+                                                      size: 36,
+                                                    ),
+                                                    const SizedBox(width: 10),
+                                                    Expanded(
+                                                      child: Column(
+                                                        crossAxisAlignment:
+                                                            CrossAxisAlignment
+                                                                .start,
+                                                        children: <Widget>[
+                                                          Row(
+                                                            children: <Widget>[
+                                                              Expanded(
+                                                                child: Text(
+                                                                  channel.name,
+                                                                  style: Theme.of(
+                                                                          context)
+                                                                      .textTheme
+                                                                      .titleSmall,
+                                                                ),
+                                                              ),
+                                                              Container(
+                                                                width: 10,
+                                                                height: 10,
+                                                                decoration:
+                                                                    BoxDecoration(
+                                                                  color:
+                                                                      _healthStatusColor(
+                                                                    health
+                                                                        ?.status,
+                                                                  ),
+                                                                  shape: BoxShape
+                                                                      .circle,
+                                                                ),
+                                                              ),
+                                                            ],
+                                                          ),
+                                                          const SizedBox(
+                                                              height: 4),
+                                                          Text(
+                                                            channel.url,
+                                                            style: Theme.of(
+                                                                    context)
+                                                                .textTheme
+                                                                .bodySmall
+                                                                ?.copyWith(
+                                                                  color:
+                                                                      _appTextMuted,
+                                                                ),
+                                                            maxLines: 2,
+                                                            overflow:
+                                                                TextOverflow
+                                                                    .ellipsis,
+                                                          ),
+                                                          if (channel.sourcePlaylistName !=
+                                                                  null &&
+                                                              channel
+                                                                  .sourcePlaylistName!
+                                                                  .isNotEmpty) ...<Widget>[
+                                                            const SizedBox(
+                                                                height: 4),
+                                                            Text(
+                                                              channel
+                                                                  .sourcePlaylistName!,
+                                                              style: Theme.of(
+                                                                      context)
+                                                                  .textTheme
+                                                                  .bodySmall
+                                                                  ?.copyWith(
+                                                                    color:
+                                                                        _appTextMuted,
+                                                                  ),
+                                                            ),
+                                                          ],
+                                                        ],
+                                                      ),
+                                                    ),
+                                                    const SizedBox(width: 8),
+                                                    Column(
+                                                      children: <Widget>[
+                                                        Switch.adaptive(
+                                                          value:
+                                                              channel.enabled,
+                                                          onChanged: (value) =>
+                                                              _toggleChannelEnabled(
+                                                            channel.id,
+                                                            value,
+                                                          ),
+                                                        ),
+                                                        Row(
+                                                          mainAxisSize:
+                                                              MainAxisSize.min,
+                                                          children: <Widget>[
+                                                            IconButton(
+                                                              tooltip: channel
+                                                                      .custom
+                                                                  ? 'Edit custom channel'
+                                                                  : 'Only custom channels can be edited',
+                                                              onPressed: channel
+                                                                      .custom
+                                                                  ? () =>
+                                                                      _showChannelDialog(
+                                                                        existing:
+                                                                            channel,
+                                                                      )
+                                                                  : null,
+                                                              icon: const Icon(Icons
+                                                                  .edit_outlined),
+                                                            ),
+                                                            IconButton(
+                                                              tooltip: channel
+                                                                      .custom
+                                                                  ? 'Delete custom channel'
+                                                                  : 'Source channels cannot be deleted',
+                                                              onPressed: channel
+                                                                      .custom
+                                                                  ? () =>
+                                                                      _deleteCustomChannel(
+                                                                          channel)
+                                                                  : null,
+                                                              icon: const Icon(
+                                                                Icons
+                                                                    .delete_outline,
+                                                              ),
+                                                            ),
+                                                          ],
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            );
+                                          },
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
         ),
       ),
     );
@@ -2758,6 +3824,84 @@ class _ClipEditorDialogState extends State<_ClipEditorDialog> {
         ),
       ],
     );
+  }
+}
+
+String _randomEditorId(String prefix) {
+  return '${prefix}_${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}';
+}
+
+Future<void> _showEditPlaylistDialog(
+  BuildContext context,
+  AppController controller,
+  Playlist playlist,
+) async {
+  final nameController = TextEditingController(text: playlist.name);
+  final urlController = TextEditingController(text: playlist.url ?? '');
+
+  try {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Edit playlist'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                TextField(
+                  controller: nameController,
+                  decoration: const InputDecoration(
+                    labelText: 'Name',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: urlController,
+                  decoration: const InputDecoration(
+                    labelText: 'Playlist URL',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Save'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (result != true || !context.mounted) {
+      return;
+    }
+
+    await controller.editPlaylist(
+      playlist.id,
+      name: nameController.text.trim(),
+      url: urlController.text.trim().isEmpty ? null : urlController.text.trim(),
+    );
+    if (!context.mounted) {
+      return;
+    }
+    _showMessage(context, 'Playlist updated.');
+  } on ApiException catch (error) {
+    if (!context.mounted) {
+      return;
+    }
+    _showMessage(context, error.message, error: true);
+  } finally {
+    nameController.dispose();
+    urlController.dispose();
   }
 }
 

@@ -6,6 +6,7 @@ import 'package:flutter/widgets.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'api_client.dart';
+import 'background_execution_bridge.dart';
 import 'local_server_bridge.dart';
 import 'mobile_ffmpeg.dart';
 import 'models.dart';
@@ -13,13 +14,17 @@ import 'models.dart';
 class AppController extends ChangeNotifier {
   AppController({
     ApiClient? apiClient,
+    BackgroundExecutionBridge? backgroundExecution,
     LocalServerBridge? localServerBridge,
     MobileFfmpeg? mobileFfmpeg,
   })  : api = apiClient ?? ApiClient(),
+        backgroundExecution =
+            backgroundExecution ?? BackgroundExecutionBridge.instance,
         localServer = localServerBridge ?? LocalServerBridge.instance,
         mobileFfmpeg = mobileFfmpeg ?? MobileFfmpeg();
 
   final ApiClient api;
+  final BackgroundExecutionBridge backgroundExecution;
   final LocalServerBridge localServer;
   final MobileFfmpeg mobileFfmpeg;
   final ValueNotifier<String?> suggestedUrl = ValueNotifier<String?>(null);
@@ -39,6 +44,8 @@ class AppController extends ChangeNotifier {
   bool _localServerRunning = false;
   bool _shouldKeepLocalServerRunning = true;
   bool _startupHealthCheckRequested = false;
+  bool _appInBackground = false;
+  bool _backgroundKeepAliveEnabled = false;
   bool? _authRequired;
 
   String? _localServerError;
@@ -46,6 +53,7 @@ class AppController extends ChangeNotifier {
   String? _serverAuthPassword;
   ParsedStreamInfo? _parsedInfo;
   List<Playlist> _playlists = const [];
+  MergedPlaylistConfig? _mergedPlaylistConfig;
   HealthCheckSnapshot? _healthSnapshot;
   int? _preferredLocalServerPort;
 
@@ -61,6 +69,7 @@ class AppController extends ChangeNotifier {
   String? get localDownloadsDir => _localDownloadsDir;
   ParsedStreamInfo? get parsedInfo => _parsedInfo;
   List<Playlist> get playlists => _playlists;
+  MergedPlaylistConfig? get mergedPlaylistConfig => _mergedPlaylistConfig;
   HealthCheckState get healthState =>
       _healthSnapshot?.state ?? HealthCheckState.empty;
   Map<String, HealthCheckEntry> get healthCache =>
@@ -68,6 +77,7 @@ class AppController extends ChangeNotifier {
   Map<String, String> get mediaRequestHeaders => api.mediaHeaders();
   bool isAutoFinalizingTask(String taskId) =>
       _autoFinalizingTasks.contains(taskId);
+  bool get hasActiveTasks => _tasksById.values.any((task) => !task.isTerminal);
 
   List<DownloadTask> get tasks {
     final values = _tasksById.values.toList();
@@ -150,6 +160,7 @@ class AppController extends ChangeNotifier {
 
   Future<void> stopLocalServer() async {
     return _runBusy(() async {
+      await _setBackgroundKeepAlive(false);
       try {
         localServer.stop();
       } on LocalServerBridgeException catch (error) {
@@ -164,6 +175,7 @@ class AppController extends ChangeNotifier {
       _authRequired = false;
       _parsedInfo = null;
       _playlists = const [];
+      _mergedPlaylistConfig = null;
       _healthSnapshot = null;
       _tasksById.clear();
       _stopTaskSync();
@@ -193,6 +205,7 @@ class AppController extends ChangeNotifier {
       _playlists = const [];
       _healthSnapshot = null;
       _parsedInfo = null;
+      _mergedPlaylistConfig = null;
       _startupHealthCheckRequested = false;
       notifyListeners();
     });
@@ -201,6 +214,7 @@ class AppController extends ChangeNotifier {
   Future<void> refreshData({bool runHealthCheckAfterRefresh = false}) async {
     await Future.wait(<Future<void>>[
       refreshPlaylists(),
+      refreshMergedPlaylists(),
       refreshTasks(),
       refreshHealthCheck(),
     ]);
@@ -249,6 +263,7 @@ class AppController extends ChangeNotifier {
       unawaited(_refreshTasksQuietly());
       unawaited(_ensureTaskSocket(taskId));
       _startTaskSync();
+      unawaited(_syncBackgroundExecution());
       return taskId;
     });
   }
@@ -271,6 +286,7 @@ class AppController extends ChangeNotifier {
       }
       notifyListeners();
       unawaited(_refreshTasksQuietly());
+      unawaited(_syncBackgroundExecution());
       return status;
     });
   }
@@ -280,6 +296,7 @@ class AppController extends ChangeNotifier {
       await api.resumeTask(taskId);
       unawaited(_refreshTasksQuietly());
       _startTaskSync();
+      unawaited(_syncBackgroundExecution());
     });
   }
 
@@ -289,6 +306,7 @@ class AppController extends ChangeNotifier {
       await api.restartTask(taskId);
       unawaited(_refreshTasksQuietly());
       _startTaskSync();
+      unawaited(_syncBackgroundExecution());
     });
   }
 
@@ -300,6 +318,7 @@ class AppController extends ChangeNotifier {
       final newTaskId = await api.restartRecording(taskId);
       unawaited(_refreshTasksQuietly());
       _startTaskSync();
+      unawaited(_syncBackgroundExecution());
       return newTaskId;
     });
   }
@@ -311,6 +330,7 @@ class AppController extends ChangeNotifier {
       final newTaskId = await api.forkRecording(taskId);
       unawaited(_refreshTasksQuietly());
       _startTaskSync();
+      unawaited(_syncBackgroundExecution());
       return newTaskId;
     });
   }
@@ -374,6 +394,19 @@ class AppController extends ChangeNotifier {
     }
   }
 
+  Future<void> refreshMergedPlaylists() async {
+    if (!readyForApi) {
+      return;
+    }
+    try {
+      _mergedPlaylistConfig = await api.fetchMergedPlaylists();
+      notifyListeners();
+    } on ApiException catch (error) {
+      _handleAuthFailure(error);
+      rethrow;
+    }
+  }
+
   Future<void> refreshHealthCheck() async {
     if (!readyForApi) {
       return;
@@ -405,6 +438,20 @@ class AppController extends ChangeNotifier {
     return _runBusy(() async {
       await api.addPlaylist(name: name, url: url, raw: raw);
       await refreshPlaylists();
+      await refreshMergedPlaylists();
+      await _refreshHealthAfterPlaylistMutation();
+    });
+  }
+
+  Future<void> editPlaylist(
+    String playlistId, {
+    required String name,
+    String? url,
+  }) async {
+    return _runBusy(() async {
+      await api.editPlaylist(playlistId, name: name, url: url);
+      await refreshPlaylists();
+      await refreshMergedPlaylists();
       await _refreshHealthAfterPlaylistMutation();
     });
   }
@@ -412,9 +459,9 @@ class AppController extends ChangeNotifier {
   Future<void> deletePlaylist(String playlistId) async {
     return _runBusy(() async {
       await api.deletePlaylist(playlistId);
-      _playlists =
-          _playlists.where((playlist) => playlist.id != playlistId).toList();
-      notifyListeners();
+      await refreshPlaylists();
+      await refreshMergedPlaylists();
+      await _refreshHealthAfterPlaylistMutation();
     });
   }
 
@@ -422,9 +469,29 @@ class AppController extends ChangeNotifier {
     return _runBusy(() async {
       await api.refreshPlaylist(playlistId);
       await refreshPlaylists();
+      await refreshMergedPlaylists();
       await _refreshHealthAfterPlaylistMutation();
     });
   }
+
+  Future<void> refreshAllPlaylists() async {
+    return _runBusy(() async {
+      await api.refreshAllPlaylists();
+      await refreshPlaylists();
+      await refreshMergedPlaylists();
+      await _refreshHealthAfterPlaylistMutation();
+    });
+  }
+
+  Future<void> saveMergedPlaylists(MergedPlaylistConfig config) async {
+    return _runBusy(() async {
+      await api.saveMergedPlaylists(config);
+      await refreshMergedPlaylists();
+      await _refreshHealthAfterPlaylistMutation();
+    });
+  }
+
+  Future<String> fetchMergedExport() => api.fetchMergedExport();
 
   void suggestDownloadUrl(String url) {
     suggestedUrl.value = url;
@@ -436,6 +503,8 @@ class AppController extends ChangeNotifier {
 
   Uri watchProxyUri(String streamUrl) => api.watchProxyUri(streamUrl);
 
+  Uri mergedExportUri() => api.mergedExportUri();
+
   HealthCheckEntry? healthForUrl(String url) => healthCache[url];
 
   Future<void> handleAppLifecycleState(AppLifecycleState state) async {
@@ -444,13 +513,19 @@ class AppController extends ChangeNotifier {
     }
     switch (state) {
       case AppLifecycleState.resumed:
+        _appInBackground = false;
+        await _syncBackgroundExecution();
         await _recoverLocalServerAfterResume();
         return;
       case AppLifecycleState.inactive:
+        _appInBackground = true;
+        await _syncBackgroundExecution();
         return;
       case AppLifecycleState.hidden:
       case AppLifecycleState.paused:
       case AppLifecycleState.detached:
+        _appInBackground = true;
+        await _syncBackgroundExecution();
         _stopTaskSync();
         _stopHealthSync();
         _closeAllSockets();
@@ -480,6 +555,7 @@ class AppController extends ChangeNotifier {
     _stopTaskSync();
     _stopHealthSync();
     _closeAllSockets();
+    unawaited(_setBackgroundKeepAlive(false));
     super.dispose();
   }
 
@@ -508,6 +584,8 @@ class AppController extends ChangeNotifier {
     _closeAllSockets();
     _tasksById.clear();
     _playlists = const [];
+    _mergedPlaylistConfig = null;
+    unawaited(_setBackgroundKeepAlive(false));
     if (!_disposed) {
       notifyListeners();
     }
@@ -632,6 +710,7 @@ class AppController extends ChangeNotifier {
       ..addEntries(latest.map((task) => MapEntry(task.id, task)));
     await _syncTaskSockets();
     _reconcileTaskFlags();
+    await _syncBackgroundExecution();
     if (!_disposed) {
       notifyListeners();
     }
@@ -737,14 +816,17 @@ class AppController extends ChangeNotifier {
     if (readyForApi) {
       await refreshData();
       _startTaskSync();
+      await _syncBackgroundExecution();
       return;
     }
 
     _tasksById.clear();
     _playlists = const [];
+    _mergedPlaylistConfig = null;
     _stopTaskSync();
     _stopHealthSync();
     _closeAllSockets();
+    await _syncBackgroundExecution();
   }
 
   Future<void> _ensureStartupHealthCheck() async {
@@ -929,5 +1011,22 @@ class AppController extends ChangeNotifier {
 
   bool _shouldUseLocalFfmpeg(ApiException error) {
     return indicatesMissingFfmpeg(error.message);
+  }
+
+  Future<void> _syncBackgroundExecution() async {
+    final shouldEnable = _appInBackground && hasActiveTasks;
+    await _setBackgroundKeepAlive(shouldEnable);
+  }
+
+  Future<void> _setBackgroundKeepAlive(bool enabled) async {
+    if (_backgroundKeepAliveEnabled == enabled) {
+      return;
+    }
+    try {
+      await backgroundExecution.setKeepAlive(enabled);
+      _backgroundKeepAliveEnabled = enabled;
+    } on BackgroundExecutionBridgeException catch (error) {
+      debugPrint('Background execution update failed: ${error.message}');
+    }
   }
 }

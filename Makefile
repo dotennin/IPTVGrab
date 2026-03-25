@@ -1,4 +1,4 @@
-.PHONY: all server ios-targets ios-lib ios-xcframework android-targets flutter-check pod-check flutter-bootstrap flutter-rust-android flutter-rust-ios flutter-prepare flutter-run flutter-apk flutter-ipa flutter-ipa-debug flutter-clean apk ipa ipa-debug clean
+.PHONY: all server ios-targets ios-lib ios-xcframework macos-targets macos-lib android-targets flutter-check pod-check flutter-bootstrap flutter-rust-android flutter-rust-ios flutter-rust-macos flutter-prepare flutter-run flutter-run-macos flutter-apk flutter-ipa flutter-ipa-debug flutter-clean apk ipa ipa-debug clean
 
 PATH := $(HOME)/.cargo/bin:$(PATH)
 RUSTUP_TOOLCHAIN ?= stable
@@ -54,10 +54,27 @@ flutter-rust-ios: flutter-bootstrap ios-xcframework
 	cp -R $(IOS_XCFRAMEWORK) $(FLUTTER_APP)/ios/Frameworks/MobileFfi.xcframework
 	@echo "✅ Copied MobileFfi.xcframework into the Flutter iOS project."
 
-flutter-prepare: flutter-rust-android flutter-rust-ios
+macos-targets:
+	rustup target add --toolchain $(RUSTUP_TOOLCHAIN) aarch64-apple-darwin
 
-flutter-run: flutter-bootstrap
-	cd $(FLUTTER_APP) && $(FLUTTER) run
+macos-lib: macos-targets
+	$(CARGO) build --lib --release --target aarch64-apple-darwin -p mobile-ffi
+
+flutter-rust-macos: flutter-bootstrap macos-lib
+	@mkdir -p /usr/local/lib
+	cp target/aarch64-apple-darwin/release/libmobile_ffi.dylib /usr/local/lib/libmobile_ffi.dylib
+	install_name_tool -id /usr/local/lib/libmobile_ffi.dylib /usr/local/lib/libmobile_ffi.dylib
+	@echo "✅ Copied and installed libmobile_ffi.dylib for macOS."
+
+flutter-prepare: flutter-rust-android flutter-rust-ios flutter-rust-macos
+
+flutter-run-macos: flutter-rust-macos
+	@mkdir -p $(FLUTTER_APP)/build/macos/Build/Products/Debug/iptvgrab.app/Contents/Frameworks
+	@cp target/aarch64-apple-darwin/release/libmobile_ffi.dylib $(FLUTTER_APP)/build/macos/Build/Products/Debug/iptvgrab.app/Contents/Frameworks/libmobile_ffi.dylib 2>/dev/null || true
+	cd $(FLUTTER_APP) && DYLD_LIBRARY_PATH=/usr/local/lib:$$DYLD_LIBRARY_PATH $(FLUTTER) run -d macos
+
+flutter-run-web: flutter-bootstrap
+	cd $(FLUTTER_APP) && $(FLUTTER) run -d chrome
 
 flutter-apk: flutter-rust-android
 	cd $(FLUTTER_APP) && $(FLUTTER) build apk
@@ -79,6 +96,15 @@ ipa-debug: flutter-ipa-debug
 
 flutter-clean: flutter-check
 	cd $(FLUTTER_APP) && $(FLUTTER) clean
+	rm -rf $(FLUTTER_APP)/.dart_tool
+	rm -rf $(FLUTTER_APP)/build
+	rm -rf $(FLUTTER_APP)/.ios
+	rm -rf $(FLUTTER_APP)/.android
+	rm -rf $(FLUTTER_APP)/pubspec.lock
+	rm -rf $(FLUTTER_APP)/ios/Pods
+	rm -rf $(FLUTTER_APP)/ios/Podfile.lock
+	rm -rf $(FLUTTER_APP)/.symlinks
+	rm -rf $(FLUTTER_APP)/.generated_plugins_env
 	rm -rf $(FLUTTER_APP)/android/app/src/main/jniLibs
 	rm -rf $(FLUTTER_APP)/ios/Frameworks/MobileFfi.xcframework
 
@@ -134,8 +160,7 @@ setup:
 		aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android
 	@echo "✅ Setup complete. uniffi-bindgen is invoked from source (no install needed)."
 
-clean:
+clean: flutter-clean
 	$(CARGO) clean
 	rm -rf $(IOS_XCFRAMEWORK)
 	rm -rf target/libmobile_ffi_sim.a
-	rm -rf mobile/flutter/build

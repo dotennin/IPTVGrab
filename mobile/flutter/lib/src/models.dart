@@ -217,6 +217,170 @@ class Playlist {
   }
 }
 
+class MergedPlaylistConfig {
+  MergedPlaylistConfig({required this.groups});
+
+  final List<MergedGroup> groups;
+
+  factory MergedPlaylistConfig.fromJson(Map<String, dynamic> json) {
+    final groupsJson = json['groups'];
+    return MergedPlaylistConfig(
+      groups: groupsJson is List
+          ? groupsJson
+              .whereType<Map>()
+              .map((item) => MergedGroup.fromJson(item.cast<String, dynamic>()))
+              .toList()
+          : const [],
+    );
+  }
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        'groups': groups.map((group) => group.toJson()).toList(),
+      };
+
+  MergedPlaylistConfig copy() => MergedPlaylistConfig(
+      groups: groups.map((group) => group.copy()).toList());
+}
+
+class MergedGroup {
+  MergedGroup({
+    required this.id,
+    required this.name,
+    required this.enabled,
+    required this.custom,
+    required this.channels,
+  });
+
+  final String id;
+  final String name;
+  final bool enabled;
+  final bool custom;
+  final List<MergedChannel> channels;
+
+  factory MergedGroup.fromJson(Map<String, dynamic> json) {
+    final channelsJson = json['channels'];
+    return MergedGroup(
+      id: _asString(json['id']),
+      name: _asString(json['name']),
+      enabled: json['enabled'] == null ? true : _asBool(json['enabled']),
+      custom: _asBool(json['custom']),
+      channels: channelsJson is List
+          ? channelsJson
+              .whereType<Map>()
+              .map(
+                (item) => MergedChannel.fromJson(item.cast<String, dynamic>()),
+              )
+              .toList()
+          : const [],
+    );
+  }
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        'id': id,
+        'name': name,
+        'enabled': enabled,
+        'custom': custom,
+        'channels': channels.map((channel) => channel.toJson()).toList(),
+      };
+
+  MergedGroup copyWith({
+    String? id,
+    String? name,
+    bool? enabled,
+    bool? custom,
+    List<MergedChannel>? channels,
+  }) {
+    return MergedGroup(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      enabled: enabled ?? this.enabled,
+      custom: custom ?? this.custom,
+      channels:
+          channels ?? this.channels.map((channel) => channel.copy()).toList(),
+    );
+  }
+
+  MergedGroup copy() => copyWith();
+}
+
+class MergedChannel {
+  MergedChannel({
+    required this.id,
+    required this.name,
+    required this.url,
+    required this.enabled,
+    required this.custom,
+    required this.group,
+    required this.tvgLogo,
+    this.sourcePlaylistId,
+    this.sourcePlaylistName,
+  });
+
+  final String id;
+  final String name;
+  final String url;
+  final bool enabled;
+  final bool custom;
+  final String group;
+  final String tvgLogo;
+  final String? sourcePlaylistId;
+  final String? sourcePlaylistName;
+
+  factory MergedChannel.fromJson(Map<String, dynamic> json) {
+    return MergedChannel(
+      id: _asString(json['id']),
+      name: _asString(json['name']),
+      url: _asString(json['url']),
+      enabled: json['enabled'] == null ? true : _asBool(json['enabled']),
+      custom: _asBool(json['custom']),
+      group: _asString(json['group']),
+      tvgLogo: _nullableString(json['tvg_logo']) ??
+          _nullableString(json['logo']) ??
+          '',
+      sourcePlaylistId: _nullableString(json['source_playlist_id']),
+      sourcePlaylistName: _nullableString(json['source_playlist_name']),
+    );
+  }
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        'id': id,
+        'name': name,
+        'url': url,
+        'enabled': enabled,
+        'custom': custom,
+        'group': group,
+        'tvg_logo': tvgLogo,
+        'source_playlist_id': sourcePlaylistId,
+        'source_playlist_name': sourcePlaylistName,
+      };
+
+  MergedChannel copyWith({
+    String? id,
+    String? name,
+    String? url,
+    bool? enabled,
+    bool? custom,
+    String? group,
+    String? tvgLogo,
+    String? sourcePlaylistId,
+    String? sourcePlaylistName,
+  }) {
+    return MergedChannel(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      url: url ?? this.url,
+      enabled: enabled ?? this.enabled,
+      custom: custom ?? this.custom,
+      group: group ?? this.group,
+      tvgLogo: tvgLogo ?? this.tvgLogo,
+      sourcePlaylistId: sourcePlaylistId ?? this.sourcePlaylistId,
+      sourcePlaylistName: sourcePlaylistName ?? this.sourcePlaylistName,
+    );
+  }
+
+  MergedChannel copy() => copyWith();
+}
+
 class DownloadTask {
   DownloadTask({
     required this.id,

@@ -208,8 +208,38 @@ class ApiClient {
     await _requestJson('DELETE', '/api/playlists/$playlistId');
   }
 
+  Future<void> editPlaylist(
+    String playlistId, {
+    required String name,
+    String? url,
+  }) async {
+    final body = <String, dynamic>{'name': name.trim()};
+    if (url != null && url.trim().isNotEmpty) {
+      body['url'] = url.trim();
+    }
+    await _requestJson('PATCH', '/api/playlists/$playlistId', body: body);
+  }
+
   Future<void> refreshPlaylist(String playlistId) async {
     await _requestJson('POST', '/api/playlists/$playlistId/refresh');
+  }
+
+  Future<MergedPlaylistConfig> fetchMergedPlaylists() async {
+    final json =
+        await _requestJson('GET', '/api/all-playlists') as Map<String, dynamic>;
+    return MergedPlaylistConfig.fromJson(json);
+  }
+
+  Future<void> saveMergedPlaylists(MergedPlaylistConfig config) async {
+    await _requestJson('PUT', '/api/all-playlists', body: config.toJson());
+  }
+
+  Future<void> refreshAllPlaylists() async {
+    await _requestJson('POST', '/api/all-playlists/refresh');
+  }
+
+  Future<String> fetchMergedExport() async {
+    return _requestText('GET', '/api/all-playlists/export.m3u');
   }
 
   Future<bool> probeBaseUrl(String baseUrl) async {
@@ -261,6 +291,8 @@ class ApiClient {
         queryParameters: {'url': streamUrl},
       );
 
+  Uri mergedExportUri() => _buildUri('/api/all-playlists/export.m3u');
+
   Future<dynamic> _requestJson(
     String method,
     String path, {
@@ -290,6 +322,29 @@ class ApiClient {
           statusCode: response.statusCode);
     }
     return payload;
+  }
+
+  Future<String> _requestText(
+    String method,
+    String path, {
+    Map<String, String>? queryParameters,
+  }) async {
+    _ensureBaseUrl();
+    final uri = _buildUri(path, queryParameters: queryParameters);
+    final request = await _httpClient.openUrl(method, uri);
+    request.headers.set(HttpHeaders.acceptHeader, 'text/plain');
+    if (hasSession) {
+      request.headers.set(HttpHeaders.cookieHeader, _sessionCookie!);
+    }
+
+    final response = await request.close();
+    _captureSessionCookie(response);
+    final text = await response.transform(utf8.decoder).join();
+    if (response.statusCode >= 400) {
+      throw ApiException(text.isEmpty ? 'Request failed' : text,
+          statusCode: response.statusCode);
+    }
+    return text;
   }
 
   Uri _buildUri(
