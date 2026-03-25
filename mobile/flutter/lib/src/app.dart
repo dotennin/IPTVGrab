@@ -157,36 +157,25 @@ class _M3u8FlutterClientAppState extends State<M3u8FlutterClientApp>
                   Text('IPTVGrab', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                 ],
               ),
-              actions: <Widget>[
-                Padding(
-                  padding: const EdgeInsets.only(right: 12),
-                  child:
-                      Center(child: _ConnectionBadge(controller: _controller)),
-                ),
-              ],
+              actions: <Widget>[],
             ),
             body: IndexedStack(
               index: _index,
               children: <Widget>[
-                _ConnectionTab(controller: _controller),
                 _DownloadTab(
                   controller: _controller,
-                  onOpenTasks: () => setState(() => _index = 2),
+                  onOpenTasks: () => setState(() => _index = 1),
                 ),
                 _TasksTab(controller: _controller),
                 _PlaylistsTab(
                   controller: _controller,
-                  onUseChannel: () => setState(() => _index = 1),
+                  onUseChannel: () => setState(() => _index = 0),
                 ),
               ],
             ),
             bottomNavigationBar: NavigationBar(
               selectedIndex: _index,
               destinations: const <NavigationDestination>[
-                NavigationDestination(
-                  icon: Icon(Icons.developer_board),
-                  label: 'Server',
-                ),
                 NavigationDestination(
                   icon: Icon(Icons.download),
                   label: 'Grab',
@@ -205,284 +194,6 @@ class _M3u8FlutterClientAppState extends State<M3u8FlutterClientApp>
           );
         },
       ),
-    );
-  }
-}
-
-class _ConnectionBadge extends StatelessWidget {
-  const _ConnectionBadge({required this.controller});
-
-  final AppController controller;
-
-  @override
-  Widget build(BuildContext context) {
-    final (label, color) = switch ((
-      controller.localServerRunning,
-      controller.readyForApi,
-      controller.needsLogin
-    )) {
-      (false, _, _) => ('offline', Colors.grey),
-      (true, false, true) => ('Login required', Colors.orange),
-      (true, true, _) => ('ready', Colors.green),
-      _ => ('Starting', Colors.blueGrey),
-    };
-
-    return Chip(
-      avatar: Icon(Icons.circle, size: 12, color: color),
-      label: Text(label),
-    );
-  }
-}
-
-class _ConnectionTab extends StatefulWidget {
-  const _ConnectionTab({required this.controller});
-
-  final AppController controller;
-
-  @override
-  State<_ConnectionTab> createState() => _ConnectionTabState();
-}
-
-class _ConnectionTabState extends State<_ConnectionTab> {
-  late final TextEditingController _passwordController;
-
-  @override
-  void initState() {
-    super.initState();
-    _passwordController = TextEditingController();
-  }
-
-  @override
-  void dispose() {
-    _passwordController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _startOrRestart({required bool restart}) async {
-    try {
-      await widget.controller.startLocalServer(
-        authPassword: _passwordController.text.trim().isEmpty
-            ? null
-            : _passwordController.text.trim(),
-        forceRestart: restart,
-      );
-      if (!mounted) {
-        return;
-      }
-      _showMessage(
-          context,
-          restart
-              ? 'On-device server restarted.'
-              : 'On-device server started.');
-    } on ApiException catch (error) {
-      if (!mounted) {
-        return;
-      }
-      _showMessage(context, error.message, error: true);
-    }
-  }
-
-  Future<void> _login() async {
-    try {
-      await widget.controller.login(_passwordController.text);
-      if (!mounted) {
-        return;
-      }
-      _passwordController.clear();
-      _showMessage(context, 'Logged in.');
-    } on ApiException catch (error) {
-      if (!mounted) {
-        return;
-      }
-      _showMessage(context, error.message, error: true);
-    }
-  }
-
-  Future<void> _logout() async {
-    try {
-      await widget.controller.logout();
-      if (!mounted) {
-        return;
-      }
-      _showMessage(context, 'Logged out.');
-    } on ApiException catch (error) {
-      if (!mounted) {
-        return;
-      }
-      _showMessage(context, error.message, error: true);
-    }
-  }
-
-  Future<void> _stopServer() async {
-    try {
-      await widget.controller.stopLocalServer();
-      if (!mounted) {
-        return;
-      }
-      _showMessage(context, 'On-device server stopped.');
-    } on ApiException catch (error) {
-      if (!mounted) {
-        return;
-      }
-      _showMessage(context, error.message, error: true);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final controller = widget.controller;
-    final statusText = controller.localServerRunning
-        ? (controller.authRequired
-            ? 'The on-device Rust server is running and local auth is enabled.'
-            : 'The on-device Rust server is running with local auth disabled.')
-        : 'This app runs the Rust server inside the device and talks to it over localhost.';
-
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: <Widget>[
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text('On-device Rust server',
-                    style: Theme.of(context).textTheme.titleLarge),
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 12,
-                  runSpacing: 12,
-                  children: <Widget>[
-                    FilledButton.icon(
-                      onPressed: controller.isBusy
-                          ? null
-                          : () => _startOrRestart(restart: false),
-                      icon: const Icon(Icons.play_circle_outline),
-                      label: const Text('Start local server'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed:
-                          controller.isBusy || !controller.localServerRunning
-                              ? null
-                              : () => _startOrRestart(restart: true),
-                      icon: const Icon(Icons.refresh),
-                      label: const Text('Restart server'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed:
-                          controller.isBusy || !controller.localServerRunning
-                              ? null
-                              : _stopServer,
-                      icon: const Icon(Icons.stop_circle_outlined),
-                      label: const Text('Stop server'),
-                    ),
-                    if (controller.hasSession)
-                      OutlinedButton.icon(
-                        onPressed: controller.isBusy ? null : _logout,
-                        icon: const Icon(Icons.logout),
-                        label: const Text('Logout'),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                Text(statusText),
-                if (controller.localServerError != null &&
-                    controller.localServerError!.isNotEmpty) ...<Widget>[
-                  const SizedBox(height: 8),
-                  Text(
-                    controller.localServerError!,
-                    style:
-                        TextStyle(color: Theme.of(context).colorScheme.error),
-                  ),
-                ],
-                if (controller.localServerRunning) ...<Widget>[
-                  const SizedBox(height: 8),
-                  Text('Localhost API: ${controller.baseUrl}'),
-                ],
-                if (controller.localDownloadsDir != null) ...<Widget>[
-                  const SizedBox(height: 8),
-                  SelectableText(
-                      'Downloads dir: ${controller.localDownloadsDir!}'),
-                ],
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 12),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text('Optional local auth',
-                    style: Theme.of(context).textTheme.titleLarge),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _passwordController,
-                  decoration: const InputDecoration(
-                    labelText: 'Password (optional)',
-                    helperText:
-                        'If filled, Start / Restart will launch the embedded server with auth enabled and auto-login.',
-                    border: OutlineInputBorder(),
-                  ),
-                  obscureText: true,
-                ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 12),
-        if (controller.needsLogin)
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Text('Authentication',
-                      style: Theme.of(context).textTheme.titleLarge),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _passwordController,
-                    decoration: const InputDecoration(
-                      labelText: 'Password',
-                      border: OutlineInputBorder(),
-                    ),
-                    obscureText: true,
-                  ),
-                  const SizedBox(height: 12),
-                  FilledButton.icon(
-                    onPressed: controller.isBusy ? null : _login,
-                    icon: const Icon(Icons.lock_open),
-                    label: const Text('Login'),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        const SizedBox(height: 12),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text('Architecture',
-                    style: Theme.of(context).textTheme.titleLarge),
-                const SizedBox(height: 12),
-                const Text(
-                  'Flutter is only the UI layer. The full Rust HTTP / WebSocket server runs inside the same mobile app process and is accessed through 127.0.0.1, so no remote desktop connection is required.',
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  'This keeps one codepath for download, playlists, preview, clip, and task streaming while still letting you ship a single Flutter app as APK / IPA.',
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
     );
   }
 }
