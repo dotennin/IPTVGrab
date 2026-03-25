@@ -1814,34 +1814,17 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
 
     return Row(
       children: [
-        // Filter chip for toggling "Active Only"
-        FilterChip(
-          selected: isActiveOnly,
-          onSelected: (value) => setState(() => _showUnavailableChannels = value),
-          avatar: Icon(
-            isActiveOnly
-                ? Icons.visibility_outlined
-                : Icons.visibility_off_outlined,
-            size: 18,
-          ),
-          label: const Text('Active Only'),
-          backgroundColor: theme.chipTheme.backgroundColor,
-          selectedColor: theme.colorScheme.primary.withOpacity(0.15),
-          labelStyle: theme.textTheme.bodyMedium?.copyWith(
-            color: isActiveOnly
-                ? theme.colorScheme.primary
-                : _appTextMuted,
-          ),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-            side: BorderSide(
-              color: isActiveOnly
-                  ? theme.colorScheme.primary
-                  : theme.dividerColor,
-            ),
-          ),
+        // Checkbox for toggling "Active Only"
+        Checkbox(
+          value: isActiveOnly,
+          onChanged: (value) => setState(() => _showUnavailableChannels = value ?? false),
         ),
-        const SizedBox(width: 12),
+        // Label text
+        Text(
+          'Active Only',
+          style: theme.textTheme.bodyMedium,
+        ),
+        const SizedBox(width: 16),
         // Statistics text
         Expanded(
           child: Text(
