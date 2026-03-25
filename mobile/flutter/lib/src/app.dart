@@ -154,12 +154,7 @@ class _M3u8FlutterClientAppState extends State<M3u8FlutterClientApp>
               title: const Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  Text('IPTVGrab'),
-                  SizedBox(height: 2),
-                  Text(
-                    'Local downloader, live preview, clip & playlists',
-                    style: TextStyle(fontSize: 12, color: _appTextMuted),
-                  ),
+                  Text('IPTVGrab', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                 ],
               ),
               actions: <Widget>[
@@ -226,9 +221,9 @@ class _ConnectionBadge extends StatelessWidget {
       controller.readyForApi,
       controller.needsLogin
     )) {
-      (false, _, _) => ('Local server offline', Colors.grey),
+      (false, _, _) => ('offline', Colors.grey),
       (true, false, true) => ('Login required', Colors.orange),
-      (true, true, _) => ('Local server ready', Colors.green),
+      (true, true, _) => ('ready', Colors.green),
       _ => ('Starting', Colors.blueGrey),
     };
 
@@ -1603,37 +1598,12 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
                       ],
                     ),
                     const SizedBox(height: 12),
-                    Row(
-                      children: <Widget>[
-                        FilterChip(
-                          selected: _showUnavailableChannels,
-                          onSelected: (value) =>
-                              setState(() => _showUnavailableChannels = value),
-                          avatar: Icon(
-                            _showUnavailableChannels
-                                ? Icons.visibility_outlined
-                                : Icons.visibility_off_outlined,
-                            size: 18,
-                          ),
-                          label: const Text('Unavailable'),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Text(
-                            waitingForInitialHealthResults
-                                ? 'Channel health scan is still running.'
-                                : _showUnavailableChannels
-                                    ? 'Showing ${visibleItems.length}/${playlistScoped.length} matching channels.'
-                                    : 'Healthy ${visibleItems.length}/${playlistScoped.length} · Hidden $hiddenUnavailableCount',
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodySmall
-                                ?.copyWith(color: _appTextMuted),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
+                    _buildChannelFilterRow(
+                      context,
+                      visibleItems: visibleItems,
+                      playlistScoped: playlistScoped,
+                      hiddenUnavailableCount: hiddenUnavailableCount,
+                      waitingForInitialHealthResults: waitingForInitialHealthResults,
                     ),
                     if (controller.healthState.running) ...<Widget>[
                       const SizedBox(height: 12),
@@ -1829,6 +1799,85 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
         ),
       ],
     );
+  }
+
+  /// Builds the channel filter row with toggle and statistics.
+  Widget _buildChannelFilterRow(
+    BuildContext context, {
+    required List visibleItems,
+    required List playlistScoped,
+    required int hiddenUnavailableCount,
+    required bool waitingForInitialHealthResults,
+  }) {
+    final theme = Theme.of(context);
+    final isActiveOnly = _showUnavailableChannels;
+
+    return Row(
+      children: [
+        // Filter chip for toggling "Active Only"
+        FilterChip(
+          selected: isActiveOnly,
+          onSelected: (value) => setState(() => _showUnavailableChannels = value),
+          avatar: Icon(
+            isActiveOnly
+                ? Icons.visibility_outlined
+                : Icons.visibility_off_outlined,
+            size: 18,
+          ),
+          label: const Text('Active Only'),
+          backgroundColor: theme.chipTheme.backgroundColor,
+          selectedColor: theme.colorScheme.primary.withOpacity(0.15),
+          labelStyle: theme.textTheme.bodyMedium?.copyWith(
+            color: isActiveOnly
+                ? theme.colorScheme.primary
+                : _appTextMuted,
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+            side: BorderSide(
+              color: isActiveOnly
+                  ? theme.colorScheme.primary
+                  : theme.dividerColor,
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        // Statistics text
+        Expanded(
+          child: Text(
+            _buildChannelStatsText(
+              waitingForHealthResults: waitingForInitialHealthResults,
+              isActiveOnly: isActiveOnly,
+              visibleCount: visibleItems.length,
+              totalCount: playlistScoped.length,
+              hiddenCount: hiddenUnavailableCount,
+            ),
+            style: theme.textTheme.bodySmall?.copyWith(color: _appTextMuted),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Builds the statistics text for channel count display.
+  String _buildChannelStatsText({
+    required bool waitingForHealthResults,
+    required bool isActiveOnly,
+    required int visibleCount,
+    required int totalCount,
+    required int hiddenCount,
+  }) {
+    if (waitingForHealthResults) {
+      return 'Channel health scan is still running.';
+    }
+
+    if (isActiveOnly) {
+      return 'Showing $visibleCount/$totalCount matching channels.';
+    }
+
+    return 'Healthy $visibleCount/$totalCount · Hidden $hiddenCount';
   }
 }
 
