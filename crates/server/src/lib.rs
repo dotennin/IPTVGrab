@@ -15,7 +15,7 @@ use axum::{
     Router,
 };
 use m3u8_core::{
-    parse_curl_command, parser::resolve, DownloadConfig, DownloadError, Downloader, ProgressEvent,
+    parser::resolve, DownloadConfig, DownloadError, Downloader, ProgressEvent,
     Quality,
 };
 use serde::{Deserialize, Serialize};
@@ -194,12 +194,9 @@ struct WatchProxyQuery {
 
 #[derive(Deserialize)]
 struct ParseRequest {
-    #[serde(default)]
     url: String,
     #[serde(default)]
     headers: HashMap<String, String>,
-    #[serde(default)]
-    curl_command: String,
 }
 
 #[derive(Deserialize)]
@@ -394,18 +391,8 @@ async fn auth_status(State(state): State<AppState>) -> impl IntoResponse {
 
 async fn parse_stream(
     State(_state): State<AppState>,
-    Json(mut body): Json<ParseRequest>,
+    Json(body): Json<ParseRequest>,
 ) -> impl IntoResponse {
-    if !body.curl_command.trim().is_empty() {
-        let (u, h): (Option<String>, std::collections::HashMap<String, String>) =
-            parse_curl_command(&body.curl_command);
-        if let Some(url) = u {
-            body.url = url;
-        }
-        if !h.is_empty() {
-            body.headers = h;
-        }
-    }
     if body.url.is_empty() {
         return (
             StatusCode::BAD_REQUEST,

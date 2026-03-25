@@ -204,22 +204,6 @@ impl DownloadEngine {
 
 // ── Free functions ────────────────────────────────────────────────────────────
 
-/// Parse a curl command into (url, headers).
-#[uniffi::export]
-pub fn ffi_parse_curl(command: String) -> FfiCurlResult {
-    let (url, headers) = m3u8_core::parse_curl_command(&command);
-    FfiCurlResult {
-        url: url.unwrap_or_default(),
-        headers,
-    }
-}
-
-#[derive(uniffi::Record)]
-pub struct FfiCurlResult {
-    pub url: String,
-    pub headers: HashMap<String, String>,
-}
-
 #[uniffi::export]
 pub fn start_local_server(
     port: u16,

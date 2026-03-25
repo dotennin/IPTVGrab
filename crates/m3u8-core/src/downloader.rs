@@ -932,43 +932,6 @@ mod tests {
     }
 }
 
-// ── Free function: parse_curl_command ──────────────────────────────────────────
-
-/// Parse a `curl` command string into (url, headers).
-pub fn parse_curl_command(
-    cmd: &str,
-) -> (Option<String>, std::collections::HashMap<String, String>) {
-    let normalized = cmd.replace("\\\n", " ").replace("\\\r\n", " ");
-    let mut url: Option<String> = None;
-    let mut headers = std::collections::HashMap::new();
-
-    let header_re = regex_lite::Regex::new(r#"-H\s+(?:'([^']*)'|"([^"]*)")"#).unwrap();
-    for caps in header_re.captures_iter(&normalized) {
-        let val = caps
-            .get(1)
-            .or_else(|| caps.get(2))
-            .map(|m| m.as_str())
-            .unwrap_or("");
-        if let Some((k, v)) = val.split_once(':') {
-            let k = k.trim().to_lowercase();
-            let v = v.trim().to_string();
-            if !k.is_empty() {
-                headers.insert(k, v);
-            }
-        }
-    }
-
-    let url_re = regex_lite::Regex::new(
-        r#"curl\s+(?:-[^\s]+\s+(?:'[^']*'|"[^"]*"|\S+)\s+)*['"]?(https?://[^\s'"]+)['"]?"#,
-    )
-    .unwrap();
-    if let Some(caps) = url_re.captures(&normalized) {
-        url = Some(caps[1].to_string());
-    }
-
-    (url, headers)
-}
-
 // ── Atomic write helper ────────────────────────────────────────────────────────
 
 async fn write_atomic(path: &Path, data: &[u8]) -> Result<(), DownloadError> {

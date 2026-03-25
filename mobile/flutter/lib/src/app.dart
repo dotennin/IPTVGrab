@@ -213,7 +213,6 @@ class _DownloadTab extends StatefulWidget {
 
 class _DownloadTabState extends State<_DownloadTab> {
   late final TextEditingController _urlController;
-  late final TextEditingController _curlController;
   late final TextEditingController _headersController;
   late final TextEditingController _outputNameController;
   late final TextEditingController _concurrencyController;
@@ -224,7 +223,6 @@ class _DownloadTabState extends State<_DownloadTab> {
   void initState() {
     super.initState();
     _urlController = TextEditingController();
-    _curlController = TextEditingController();
     _headersController = TextEditingController();
     _outputNameController = TextEditingController();
     _concurrencyController = TextEditingController(text: '8');
@@ -235,7 +233,6 @@ class _DownloadTabState extends State<_DownloadTab> {
   void dispose() {
     widget.controller.suggestedUrl.removeListener(_applySuggestedUrl);
     _urlController.dispose();
-    _curlController.dispose();
     _headersController.dispose();
     _outputNameController.dispose();
     _concurrencyController.dispose();
@@ -248,22 +245,22 @@ class _DownloadTabState extends State<_DownloadTab> {
       return;
     }
     _urlController.text = url;
-    _curlController.clear();
     if (mounted) {
       _showMessage(context, 'Filled the download URL from playlists.');
     }
   }
 
   Future<void> _parse() async {
-    final resolved = _resolveDownloadInputs(
-      urlText: _urlController.text,
-      curlText: _curlController.text,
-      headerText: _headersController.text,
-    );
+    final url = _urlController.text.trim();
+    if (url.isEmpty) {
+      _showMessage(context, 'Please enter a URL.', error: true);
+      return;
+    }
+    final headers = _parseHeadersText(_headersController.text);
     try {
       await widget.controller.parseInput(
-        url: resolved.url,
-        headers: resolved.headers,
+        url: url,
+        headers: headers,
       );
       if (!mounted) {
         return;
@@ -279,15 +276,16 @@ class _DownloadTabState extends State<_DownloadTab> {
   }
 
   Future<void> _startDownload() async {
+    final url = _urlController.text.trim();
+    if (url.isEmpty) {
+      _showMessage(context, 'Please enter a URL.', error: true);
+      return;
+    }
+    final headers = _parseHeadersText(_headersController.text);
     try {
-      final resolved = _resolveDownloadInputs(
-        urlText: _urlController.text,
-        curlText: _curlController.text,
-        headerText: _headersController.text,
-      );
       await widget.controller.startDownload(
-        url: resolved.url,
-        headers: resolved.headers,
+        url: url,
+        headers: headers,
         quality: _selectedQuality,
         concurrency: int.tryParse(_concurrencyController.text.trim()) ?? 8,
         outputName: _outputNameController.text.trim().isEmpty
@@ -347,18 +345,6 @@ class _DownloadTabState extends State<_DownloadTab> {
               children: <Widget>[
                 Text('Create a download',
                     style: Theme.of(context).textTheme.titleLarge),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _curlController,
-                  minLines: 3,
-                  maxLines: 8,
-                  decoration: const InputDecoration(
-                    labelText: 'curl command (optional)',
-                    helperText:
-                        'Paste a full curl command here when you need headers or tokens extracted automatically.',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
                 const SizedBox(height: 12),
                 TextField(
                   controller: _urlController,
@@ -3952,89 +3938,6 @@ Map<String, String> _parseHeadersText(String text) {
     headers[name] = value;
   }
   return headers;
-}
-
-_ResolvedDownloadRequest _resolveDownloadInputs({
-  required String urlText,
-  required String curlText,
-  required String headerText,
-}) {
-  final manualHeaders = _parseHeadersText(headerText);
-  final trimmedCurl = curlText.trim();
-  if (trimmedCurl.isEmpty) {
-    final trimmedUrl = urlText.trim();
-    if (trimmedUrl.isEmpty) {
-      throw ApiException('Please enter either a URL or a curl command.');
-    }
-    return _ResolvedDownloadRequest(url: trimmedUrl, headers: manualHeaders);
-  }
-
-  final parsedCurl = _parseCurlCommand(trimmedCurl);
-  final resolvedUrl =
-      parsedCurl.url.isNotEmpty ? parsedCurl.url : urlText.trim();
-  if (resolvedUrl.isEmpty) {
-    throw ApiException('Could not extract a URL from the curl command.');
-  }
-
-  return _ResolvedDownloadRequest(
-    url: resolvedUrl,
-    headers: <String, String>{
-      ...parsedCurl.headers,
-      ...manualHeaders,
-    },
-  );
-}
-
-_ParsedCurlCommand _parseCurlCommand(String command) {
-  final flattened =
-      command.replaceAll('\\\n', ' ').replaceAll('\n', ' ').trim();
-  final headerPattern =
-      RegExp(r'''(?:-H|--header)\s+(?:"([^"]+)"|'([^']+)')''');
-  final headers = <String, String>{};
-  for (final match in headerPattern.allMatches(flattened)) {
-    final rawHeader = match.group(1) ?? match.group(2);
-    if (rawHeader == null || rawHeader.isEmpty) {
-      continue;
-    }
-    final separatorIndex = rawHeader.indexOf(':');
-    if (separatorIndex <= 0) {
-      continue;
-    }
-    final name = rawHeader.substring(0, separatorIndex).trim();
-    final value = rawHeader.substring(separatorIndex + 1).trim();
-    if (name.isEmpty || value.isEmpty) {
-      continue;
-    }
-    headers[name] = value;
-  }
-
-  final quotedUrlPattern = RegExp(r'''(?:"|')(https?://[^"']+)(?:"|')''');
-  final bareUrlPattern = RegExp(r'''https?://\S+''');
-  final quotedUrlMatch = quotedUrlPattern.firstMatch(flattened);
-  final bareUrlMatch = bareUrlPattern.firstMatch(flattened);
-  final url = quotedUrlMatch?.group(1) ?? bareUrlMatch?.group(0) ?? '';
-
-  return _ParsedCurlCommand(url: url, headers: headers);
-}
-
-class _ResolvedDownloadRequest {
-  const _ResolvedDownloadRequest({
-    required this.url,
-    required this.headers,
-  });
-
-  final String url;
-  final Map<String, String> headers;
-}
-
-class _ParsedCurlCommand {
-  const _ParsedCurlCommand({
-    required this.url,
-    required this.headers,
-  });
-
-  final String url;
-  final Map<String, String> headers;
 }
 
 Color _statusColor(String status) {

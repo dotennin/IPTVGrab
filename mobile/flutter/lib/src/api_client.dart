@@ -59,17 +59,12 @@ class ApiClient {
   }
 
   Future<ParsedStreamInfo> parse({
-    String? url,
-    String? curlCommand,
+    required String url,
     Map<String, String>? headers,
   }) async {
-    final body = <String, dynamic>{};
-    if (url != null && url.trim().isNotEmpty) {
-      body['url'] = url.trim();
-    }
-    if (curlCommand != null && curlCommand.trim().isNotEmpty) {
-      body['curl_command'] = curlCommand.trim();
-    }
+    final body = <String, dynamic>{
+      'url': url.trim(),
+    };
     if (headers != null && headers.isNotEmpty) {
       body['headers'] = headers;
     }

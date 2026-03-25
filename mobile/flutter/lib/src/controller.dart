@@ -226,14 +226,12 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> parseInput({
-    String? url,
-    String? curlCommand,
+    required String url,
     Map<String, String>? headers,
   }) async {
     return _runBusy(() async {
       _parsedInfo = await api.parse(
         url: url,
-        curlCommand: curlCommand,
         headers: headers,
       );
       notifyListeners();
