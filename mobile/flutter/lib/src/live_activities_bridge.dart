@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 
 /// Drives iOS Live Activities (lock screen + Dynamic Island) for active
-/// downloads. No-op on Android and when running below iOS 16.1.
+/// downloads. No-op on Android and when running below iOS 16.2.
 class LiveActivitiesBridge {
   LiveActivitiesBridge._();
 
@@ -26,10 +26,13 @@ class LiveActivitiesBridge {
         'isRecording': isRecording,
       });
     } on PlatformException catch (e) {
-      // iOS < 16.1 or ActivityKit unavailable — silently ignore.
       if (e.code != 'unsupported') {
         _log('startActivity $taskId: ${e.message}');
       }
+    } on MissingPluginException {
+      // Channel not yet registered (app still launching) — silently ignore.
+    } catch (e) {
+      _log('startActivity $taskId unexpected: $e');
     }
   }
 
@@ -57,6 +60,10 @@ class LiveActivitiesBridge {
       if (e.code != 'unsupported') {
         _log('updateActivity $taskId: ${e.message}');
       }
+    } on MissingPluginException {
+      // Channel not yet registered — silently ignore.
+    } catch (e) {
+      _log('updateActivity $taskId unexpected: $e');
     }
   }
 
@@ -70,6 +77,10 @@ class LiveActivitiesBridge {
       if (e.code != 'unsupported') {
         _log('endActivity $taskId: ${e.message}');
       }
+    } on MissingPluginException {
+      // Channel not yet registered — silently ignore.
+    } catch (e) {
+      _log('endActivity $taskId unexpected: $e');
     }
   }
 

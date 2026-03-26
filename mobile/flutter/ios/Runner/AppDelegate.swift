@@ -46,6 +46,13 @@ import UIKit
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
     installBackgroundChannel()
     installLiveActivitiesChannel()
+    // Fallback: register directly via engine registrar messenger in case
+    // window?.rootViewController is not yet a FlutterViewController.
+    if liveActivitiesChannel == nil,
+      let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "LiveActivitiesPlugin")
+    {
+      installLiveActivitiesChannelWith(messenger: registrar.messenger())
+    }
   }
 
   private func configureAudioSession() {
@@ -150,12 +157,16 @@ import UIKit
 
   private func installLiveActivitiesChannel() {
     guard liveActivitiesChannel == nil,
-      let controller = window?.rootViewController as? FlutterViewController
+      let controller = window?.rootViewController.flatMap({ Self.findFlutterVC(in: $0) })
     else { return }
+    installLiveActivitiesChannelWith(messenger: controller.binaryMessenger)
+  }
 
+  private func installLiveActivitiesChannelWith(messenger: FlutterBinaryMessenger) {
+    guard liveActivitiesChannel == nil else { return }
     let channel = FlutterMethodChannel(
       name: "iptvgrab/live-activities",
-      binaryMessenger: controller.binaryMessenger
+      binaryMessenger: messenger
     )
     channel.setMethodCallHandler { [weak self] call, result in
       guard let self else { result(FlutterMethodNotImplemented); return }
@@ -205,6 +216,20 @@ import UIKit
       }
     }
     liveActivitiesChannel = channel
+    NSLog("[LiveActivity] Method channel registered")
+  }
+
+  // Walk the VC hierarchy to find a FlutterViewController (handles cases
+  // where it's embedded in a navigation or presentation container).
+  private static func findFlutterVC(in vc: UIViewController) -> FlutterViewController? {
+    if let fvc = vc as? FlutterViewController { return fvc }
+    for child in vc.children {
+      if let found = findFlutterVC(in: child) { return found }
+    }
+    if let presented = vc.presentedViewController {
+      return findFlutterVC(in: presented)
+    }
+    return nil
   }
 
   private func scheduleBGProcessingTask() {    let request = BGProcessingTaskRequest(identifier: AppDelegate.bgTaskIdentifier)
