@@ -19,6 +19,12 @@
 		A1B2C3D41E00000100ABCDEF /* MobileFfiForceLink.m in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D61E00000100ABCDEF /* MobileFfiForceLink.m */; };
 		A1B2C3D51E00000100ABCDEF /* MobileFfi.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A1B2C3D71E00000100ABCDEF /* MobileFfi.xcframework */; };
 		AF050646121FC8F07583B188 /* Pods_Runner.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5AB4109A9EBE8344337D8064 /* Pods_Runner.framework */; };
+		DB00000000000000000001A0 /* DownloadActivityAttributes.swift in Sources (DownloadWidget) */ = {isa = PBXBuildFile; fileRef = DA00000000000000000003A0 /* DownloadActivityAttributes.swift */; };
+		DB00000000000000000002A0 /* DownloadLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA00000000000000000004A0 /* DownloadLiveActivity.swift */; };
+		DB00000000000000000003A0 /* DownloadWidgetBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA00000000000000000005A0 /* DownloadWidgetBundle.swift */; };
+		DB00000000000000000004A0 /* Assets.xcassets in Resources (DownloadWidget) */ = {isa = PBXBuildFile; fileRef = DA00000000000000000006A0 /* Assets.xcassets (DownloadWidget) */; };
+		DB00000000000000000005A0 /* DownloadWidget.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = DA00000000000000000002A0 /* DownloadWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		DB00000000000000000006A0 /* DownloadActivityAttributes.swift in Sources (Runner) */ = {isa = PBXBuildFile; fileRef = DA00000000000000000003A0 /* DownloadActivityAttributes.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -28,6 +34,13 @@
 			proxyType = 1;
 			remoteGlobalIDString = 97C146ED1CF9000F007C117D;
 			remoteInfo = Runner;
+		};
+		DF00000000000000000001A0 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 97C146E61CF9000F007C117D /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = DD00000000000000000001A0;
+			remoteInfo = DownloadWidget;
 		};
 /* End PBXContainerItemProxy section */
 
@@ -40,6 +53,17 @@
 			files = (
 			);
 			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DC00000000000000000004A0 /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				DB00000000000000000005A0 /* DownloadWidget.appex in Embed App Extensions */,
+			);
+			name = "Embed App Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXCopyFilesBuildPhase section */
@@ -72,6 +96,12 @@
 		A1B2C3D71E00000100ABCDEF /* MobileFfi.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = Frameworks/MobileFfi.xcframework; sourceTree = "<group>"; };
 		AEF1DAC6D0001E9D5BF006D6 /* Pods-RunnerTests.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-RunnerTests.debug.xcconfig"; path = "Target Support Files/Pods-RunnerTests/Pods-RunnerTests.debug.xcconfig"; sourceTree = "<group>"; };
 		E1ACAD2E80F6FE4250A22E56 /* Pods_RunnerTests.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_RunnerTests.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		DA00000000000000000002A0 /* DownloadWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = DownloadWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		DA00000000000000000003A0 /* DownloadActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadActivityAttributes.swift; sourceTree = "<group>"; };
+		DA00000000000000000004A0 /* DownloadLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadLiveActivity.swift; sourceTree = "<group>"; };
+		DA00000000000000000005A0 /* DownloadWidgetBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadWidgetBundle.swift; sourceTree = "<group>"; };
+		DA00000000000000000006A0 /* Assets.xcassets (DownloadWidget) */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		DA00000000000000000007A0 /* Info.plist (DownloadWidget) */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -142,6 +172,7 @@
 			children = (
 				9740EEB11CF90186004384FC /* Flutter */,
 				97C146F01CF9000F007C117D /* Runner */,
+				DA00000000000000000001A0 /* DownloadWidget */,
 				97C146EF1CF9000F007C117D /* Products */,
 				331C8082294A63A400263BE5 /* RunnerTests */,
 				A1B2C3D71E00000100ABCDEF /* MobileFfi.xcframework */,
@@ -155,8 +186,21 @@
 			children = (
 				97C146EE1CF9000F007C117D /* Runner.app */,
 				331C8081294A63A400263BE5 /* RunnerTests.xctest */,
+				DA00000000000000000002A0 /* DownloadWidget.appex */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		DA00000000000000000001A0 /* DownloadWidget */ = {
+			isa = PBXGroup;
+			children = (
+				DA00000000000000000003A0 /* DownloadActivityAttributes.swift */,
+				DA00000000000000000004A0 /* DownloadLiveActivity.swift */,
+				DA00000000000000000005A0 /* DownloadWidgetBundle.swift */,
+				DA00000000000000000006A0 /* Assets.xcassets (DownloadWidget) */,
+				DA00000000000000000007A0 /* Info.plist (DownloadWidget) */,
+			);
+			path = DownloadWidget;
 			sourceTree = "<group>";
 		};
 		97C146F01CF9000F007C117D /* Runner */ = {
@@ -208,17 +252,36 @@
 				97C146EB1CF9000F007C117D /* Frameworks */,
 				97C146EC1CF9000F007C117D /* Resources */,
 				9705A1C41CF9048500538489 /* Embed Frameworks */,
+				DC00000000000000000004A0 /* Embed App Extensions */,
 				3B06AD1E1E4923F5004D2608 /* Thin Binary */,
 				88E3DB01559DC0C28C14BBAB /* [CP] Embed Pods Frameworks */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				DF00000000000000000002A0 /* PBXTargetDependency */,
 			);
 			name = Runner;
 			productName = Runner;
 			productReference = 97C146EE1CF9000F007C117D /* Runner.app */;
 			productType = "com.apple.product-type.application";
+		};
+		DD00000000000000000001A0 /* DownloadWidget */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = DE00000000000000000004A0 /* Build configuration list for PBXNativeTarget "DownloadWidget" */;
+			buildPhases = (
+				DC00000000000000000001A0 /* Sources */,
+				DC00000000000000000002A0 /* Resources */,
+				DC00000000000000000003A0 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = DownloadWidget;
+			productName = DownloadWidget;
+			productReference = DA00000000000000000002A0 /* DownloadWidget.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -238,6 +301,9 @@
 						CreatedOnToolsVersion = 7.3.1;
 						LastSwiftMigration = 1100;
 					};
+					DD00000000000000000001A0 = {
+						CreatedOnToolsVersion = 15.0;
+					};
 				};
 			};
 			buildConfigurationList = 97C146E91CF9000F007C117D /* Build configuration list for PBXProject "Runner" */;
@@ -255,6 +321,7 @@
 			targets = (
 				97C146ED1CF9000F007C117D /* Runner */,
 				331C8080294A63A400263BE5 /* RunnerTests */,
+				DD00000000000000000001A0 /* DownloadWidget */,
 			);
 		};
 /* End PBXProject section */
@@ -264,6 +331,14 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DC00000000000000000002A0 /* Resources (DownloadWidget) */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DB00000000000000000004A0 /* Assets.xcassets in Resources (DownloadWidget) */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -384,6 +459,16 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		DC00000000000000000001A0 /* Sources (DownloadWidget) */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DB00000000000000000001A0 /* DownloadActivityAttributes.swift in Sources (DownloadWidget) */,
+				DB00000000000000000002A0 /* DownloadLiveActivity.swift in Sources */,
+				DB00000000000000000003A0 /* DownloadWidgetBundle.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		97C146EA1CF9000F007C117D /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -392,16 +477,32 @@
 				1498D2341E8E89220040F4C2 /* GeneratedPluginRegistrant.m in Sources */,
 				A1B2C3D41E00000100ABCDEF /* MobileFfiForceLink.m in Sources */,
 				7884E8682EC3CC0700C636F2 /* SceneDelegate.swift in Sources */,
+				DB00000000000000000006A0 /* DownloadActivityAttributes.swift in Sources (Runner) */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXFrameworksBuildPhase (DownloadWidget) section */
+		DC00000000000000000003A0 /* Frameworks (DownloadWidget) */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase (DownloadWidget) section */
 
 /* Begin PBXTargetDependency section */
 		331C8086294A63A400263BE5 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 97C146ED1CF9000F007C117D /* Runner */;
 			targetProxy = 331C8085294A63A400263BE5 /* PBXContainerItemProxy */;
+		};
+		DF00000000000000000002A0 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = DD00000000000000000001A0 /* DownloadWidget */;
+			targetProxy = DF00000000000000000001A0 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -715,6 +816,76 @@
 			};
 			name = Release;
 		};
+		DE00000000000000000001A0 /* Debug (DownloadWidget) */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
+				DEVELOPMENT_TEAM = US23WU4744;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = DownloadWidget/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.2;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.iptvgrab.app.DownloadWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		DE00000000000000000002A0 /* Release (DownloadWidget) */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
+				DEVELOPMENT_TEAM = US23WU4744;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = DownloadWidget/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.2;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.iptvgrab.app.DownloadWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		DE00000000000000000003A0 /* Profile (DownloadWidget) */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
+				DEVELOPMENT_TEAM = US23WU4744;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = DownloadWidget/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.2;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.iptvgrab.app.DownloadWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Profile;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -744,6 +915,16 @@
 				97C147061CF9000F007C117D /* Debug */,
 				97C147071CF9000F007C117D /* Release */,
 				249021D4217E4FDB00AE95B9 /* Profile */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		DE00000000000000000004A0 /* Build configuration list for PBXNativeTarget "DownloadWidget" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				DE00000000000000000001A0 /* Debug (DownloadWidget) */,
+				DE00000000000000000002A0 /* Release (DownloadWidget) */,
+				DE00000000000000000003A0 /* Profile (DownloadWidget) */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

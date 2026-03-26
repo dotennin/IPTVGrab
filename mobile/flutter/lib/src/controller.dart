@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'api_client.dart';
 import 'background_execution_bridge.dart';
+import 'live_activities_bridge.dart';
 import 'local_server_bridge.dart';
 import 'mobile_ffmpeg.dart';
 import 'models.dart';
@@ -17,16 +18,19 @@ class AppController extends ChangeNotifier {
     BackgroundExecutionBridge? backgroundExecution,
     LocalServerBridge? localServerBridge,
     MobileFfmpeg? mobileFfmpeg,
+    LiveActivitiesBridge? liveActivities,
   })  : api = apiClient ?? ApiClient(),
         backgroundExecution =
             backgroundExecution ?? BackgroundExecutionBridge.instance,
         localServer = localServerBridge ?? LocalServerBridge.instance,
-        mobileFfmpeg = mobileFfmpeg ?? MobileFfmpeg();
+        mobileFfmpeg = mobileFfmpeg ?? MobileFfmpeg(),
+        liveActivities = liveActivities ?? LiveActivitiesBridge.instance;
 
   final ApiClient api;
   final BackgroundExecutionBridge backgroundExecution;
   final LocalServerBridge localServer;
   final MobileFfmpeg mobileFfmpeg;
+  final LiveActivitiesBridge liveActivities;
   final ValueNotifier<String?> suggestedUrl = ValueNotifier<String?>(null);
 
   final Map<String, DownloadTask> _tasksById = <String, DownloadTask>{};
@@ -34,6 +38,10 @@ class AppController extends ChangeNotifier {
   final Set<String> _userRequestedStops = <String>{};
   final Set<String> _autoFinalizeRequested = <String>{};
   final Set<String> _autoFinalizingTasks = <String>{};
+  // Task IDs that were actively downloading/recording when the app went to
+  // the background. Used to auto-resume them if the server restarted them
+  // as "interrupted" after we return to the foreground.
+  final Set<String> _activeTaskIdsBeforeBackground = <String>{};
 
   Timer? _tasksRefreshTimer;
   Timer? _healthRefreshTimer;
@@ -523,6 +531,13 @@ class AppController extends ChangeNotifier {
       case AppLifecycleState.paused:
       case AppLifecycleState.detached:
         _appInBackground = true;
+        _activeTaskIdsBeforeBackground
+          ..clear()
+          ..addAll(
+            _tasksById.values
+                .where((t) => !t.isTerminal)
+                .map((t) => t.id),
+          );
         await _syncBackgroundExecution();
         _stopTaskSync();
         _stopHealthSync();
@@ -703,17 +718,66 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> _storeTasks(List<DownloadTask> latest) async {
+    final previousById = Map<String, DownloadTask>.from(_tasksById);
     _tasksById
       ..clear()
       ..addEntries(latest.map((task) => MapEntry(task.id, task)));
     await _syncTaskSockets();
     _reconcileTaskFlags();
     await _syncBackgroundExecution();
+    unawaited(_syncLiveActivities(previousById));
     if (!_disposed) {
       notifyListeners();
     }
     for (final task in _tasksById.values) {
       unawaited(_maybeAutoFinalizeTask(task));
+    }
+  }
+
+  Future<void> _syncLiveActivities(
+    Map<String, DownloadTask> previousById,
+  ) async {
+    for (final task in _tasksById.values) {
+      final wasActive = previousById[task.id]?.isActive ?? false;
+      if (task.isActive) {
+        if (!wasActive) {
+          // Newly started or resumed — open a Live Activity.
+          await liveActivities.startActivity(
+            taskId: task.id,
+            taskName: task.outputName ?? _shortTaskName(task.url),
+            isRecording: task.isRecording,
+          );
+        }
+        // Push progress update.
+        await liveActivities.updateActivity(
+          taskId: task.id,
+          progress: (task.progress / 100.0).clamp(0.0, 1.0),
+          speedMbps: task.speedMbps,
+          done: task.isRecording ? task.recordedSegments : task.downloaded,
+          total: task.total,
+          status: task.status,
+          elapsedSec: task.elapsedSec,
+        );
+      } else if (wasActive && task.isTerminal) {
+        // Task just finished — close the Live Activity.
+        await liveActivities.endActivity(task.id);
+      }
+    }
+    // End activities for tasks that were removed entirely.
+    for (final taskId in previousById.keys) {
+      if (!_tasksById.containsKey(taskId)) {
+        await liveActivities.endActivity(taskId);
+      }
+    }
+  }
+
+  static String _shortTaskName(String url) {
+    try {
+      final uri = Uri.parse(url);
+      final segments = uri.pathSegments.where((s) => s.isNotEmpty).toList();
+      return segments.isNotEmpty ? segments.last : uri.host;
+    } catch (_) {
+      return 'Download';
     }
   }
 
@@ -886,6 +950,7 @@ class AppController extends ChangeNotifier {
         authPassword: _serverAuthPassword,
         allowAutoLogin: true,
       );
+      await _autoResumeInterruptedTasks();
     } on ApiException catch (error) {
       _localServerError = error.message;
     } finally {
@@ -893,6 +958,37 @@ class AppController extends ChangeNotifier {
       if (!_disposed) {
         notifyListeners();
       }
+    }
+  }
+
+  // Auto-resume tasks that were actively downloading/recording when the app
+  // went to the background and are now "interrupted" (server restarted).
+  // Skips tasks that the user had explicitly stopped.
+  Future<void> _autoResumeInterruptedTasks() async {
+    if (_activeTaskIdsBeforeBackground.isEmpty || !readyForApi) {
+      return;
+    }
+    final toResume = _activeTaskIdsBeforeBackground
+        .where(
+          (id) =>
+              _tasksById[id]?.status == 'interrupted' &&
+              !_userRequestedStops.contains(id),
+        )
+        .toList();
+    _activeTaskIdsBeforeBackground.clear();
+
+    for (final taskId in toResume) {
+      try {
+        await api.resumeTask(taskId);
+      } on ApiException catch (e) {
+        debugPrint('Auto-resume $taskId failed: ${e.message}');
+      }
+    }
+
+    if (toResume.isNotEmpty) {
+      unawaited(_refreshTasksQuietly());
+      _startTaskSync();
+      unawaited(_syncBackgroundExecution());
     }
   }
 
