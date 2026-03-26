@@ -1,0 +1,5 @@
+// Widget Extension xcconfig — includes only version variables from Flutter's
+// Generated.xcconfig. Do NOT include Debug/Release.xcconfig here: those pull
+// in Pods-Runner xcconfigs which add Flutter.framework linker flags that are
+// unavailable to App Extensions.
+#include "Generated.xcconfig"
