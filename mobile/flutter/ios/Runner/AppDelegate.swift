@@ -352,15 +352,19 @@ private final class BackgroundKeepAliveController {
   }
 }
 
-// Uses AVPlayerViewController (the officially recommended PiP API) rather than
-// the raw AVPlayerLayer trick, which has become increasingly restricted in
-// newer iOS versions. The view controller is embedded as a tiny invisible child
-// of the Flutter view controller — required to be in the window hierarchy for
-// PiP to work.
-private final class NativePictureInPictureController: NSObject, AVPlayerViewControllerDelegate {
+// Uses AVPlayerLayer + AVPictureInPictureController (iOS 9+ API) so that
+// startPictureInPicture() / stopPictureInPicture() are always available.
+// AVPlayerViewController.startPictureInPicture() was removed in iOS 26.
+// The player layer is embedded in a tiny invisible view that is added to
+// the host view controller's hierarchy — PiP requires the layer to be
+// in a window.
+private final class NativePictureInPictureController: NSObject, AVPictureInPictureControllerDelegate {
   private var player: AVPlayer?
-  private var playerViewController: AVPlayerViewController?
+  private var playerLayer: AVPlayerLayer?
+  private var containerView: UIView?
+  private var pipController: AVPictureInPictureController?
   private var itemStatusObservation: NSKeyValueObservation?
+  private var pipPossibleObservation: NSKeyValueObservation?
   private var pendingResult: FlutterResult?
 
   func start(
@@ -403,40 +407,39 @@ private final class NativePictureInPictureController: NSObject, AVPlayerViewCont
       player.seek(to: seekTime, toleranceBefore: .zero, toleranceAfter: .zero)
     }
 
-    let playerVC = AVPlayerViewController()
-    playerVC.player = player
-    playerVC.allowsPictureInPicturePlayback = true
-    playerVC.showsPlaybackControls = false
-    playerVC.delegate = self
+    // Embed a 2×2 invisible container view in the host window hierarchy.
+    // AVPictureInPictureController requires the player layer to be in a window.
+    let container = UIView(frame: CGRect(x: 0, y: 0, width: 2, height: 2))
+    container.alpha = 0.01
+    hostViewController.view.addSubview(container)
+
+    let layer = AVPlayerLayer(player: player)
+    layer.frame = container.bounds
+    container.layer.addSublayer(layer)
+
+    let pip = AVPictureInPictureController(playerLayer: layer)
+    pip?.delegate = self
     if #available(iOS 14.2, *) {
-      playerVC.canStartPictureInPictureAutomaticallyFromInline = true
+      pip?.canStartPictureInPictureAutomaticallyFromInline = true
     }
 
-    // Embed as a 2×2 invisible child — the view must be in the window
-    // hierarchy or startPictureInPicture() will be ignored by the system.
-    hostViewController.addChild(playerVC)
-    playerVC.view.frame = CGRect(x: 0, y: 0, width: 2, height: 2)
-    playerVC.view.alpha = 0.01
-    hostViewController.view.addSubview(playerVC.view)
-    playerVC.didMove(toParent: hostViewController)
-
     self.player = player
-    self.playerViewController = playerVC
+    self.playerLayer = layer
+    self.containerView = container
+    self.pipController = pip
     self.pendingResult = result
 
     player.play()
 
     // Wait for the player item to become ready before triggering PiP.
-    // Calling startPictureInPicture() on an AVPlayerViewController whose
-    // item hasn't loaded yet is silently ignored on iOS 15+.
     itemStatusObservation = item.observe(\.status, options: [.new, .initial]) { [weak self] item, _ in
       guard let self else { return }
       switch item.status {
       case .readyToPlay:
         self.itemStatusObservation?.invalidate()
         self.itemStatusObservation = nil
-        NSLog("[PiP] AVPlayerItem readyToPlay — calling startPictureInPicture()")
-        DispatchQueue.main.async { self.launchPiP() }
+        NSLog("[PiP] AVPlayerItem readyToPlay — waiting for isPictureInPicturePossible")
+        DispatchQueue.main.async { self.waitForPiPPossibleThenLaunch() }
       case .failed:
         self.itemStatusObservation?.invalidate()
         self.itemStatusObservation = nil
@@ -461,39 +464,58 @@ private final class NativePictureInPictureController: NSObject, AVPlayerViewCont
     }
   }
 
-  private func launchPiP() {
-    guard let playerVC = playerViewController else {
-      finishWithResult(false)
+  private func waitForPiPPossibleThenLaunch() {
+    guard let pip = pipController else { finishWithResult(false); return }
+    if pip.isPictureInPicturePossible {
+      launchPiP()
       return
     }
-
-    if #available(iOS 15.0, *) {
-      playerVC.startPictureInPicture()
-      // Result is delivered via AVPlayerViewControllerDelegate below.
-      // Add a safety timeout in case the delegate never fires.
-      DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
-        guard let self, self.pendingResult != nil else { return }
-        NSLog("[PiP] startPictureInPicture() delegate timeout")
-        self.finishWithResult(false)
-        self.cleanup()
-      }
-    } else {
-      // iOS 14: startPictureInPicture() isn't available on AVPlayerViewController.
-      NSLog("[PiP] iOS < 15: AVPlayerViewController.startPictureInPicture() unavailable")
-      finishWithResult(false)
-      cleanup()
+    // Observe until it becomes possible (or timeout).
+    pipPossibleObservation = pip.observe(\.isPictureInPicturePossible, options: [.new]) { [weak self] pip, _ in
+      guard let self, pip.isPictureInPicturePossible else { return }
+      self.pipPossibleObservation?.invalidate()
+      self.pipPossibleObservation = nil
+      DispatchQueue.main.async { self.launchPiP() }
+    }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+      guard let self, self.pipPossibleObservation != nil else { return }
+      self.pipPossibleObservation?.invalidate()
+      self.pipPossibleObservation = nil
+      NSLog("[PiP] isPictureInPicturePossible timeout — attempting anyway")
+      self.launchPiP()
     }
   }
 
-  // MARK: - AVPlayerViewControllerDelegate
+  private func launchPiP() {
+    guard let pip = pipController else {
+      finishWithResult(false)
+      return
+    }
+    #if !targetEnvironment(simulator)
+    pip.startPictureInPicture()
+    // Safety timeout in case the delegate never fires.
+    DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
+      guard let self, self.pendingResult != nil else { return }
+      NSLog("[PiP] startPictureInPicture() delegate timeout")
+      self.finishWithResult(false)
+      self.cleanup()
+    }
+    #else
+    NSLog("[PiP] startPictureInPicture() not available on simulator")
+    finishWithResult(false)
+    cleanup()
+    #endif
+  }
 
-  func playerViewControllerWillStartPictureInPicture(_ playerViewController: AVPlayerViewController) {
+  // MARK: - AVPictureInPictureControllerDelegate
+
+  func pictureInPictureControllerWillStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
     NSLog("[PiP] willStartPictureInPicture")
     finishWithResult(true)
   }
 
-  func playerViewController(
-    _ playerViewController: AVPlayerViewController,
+  func pictureInPictureController(
+    _ pictureInPictureController: AVPictureInPictureController,
     failedToStartPictureInPictureWithError error: Error
   ) {
     NSLog("[PiP] failedToStartPictureInPictureWithError: \(error)")
@@ -501,15 +523,15 @@ private final class NativePictureInPictureController: NSObject, AVPlayerViewCont
     cleanup()
   }
 
-  func playerViewControllerDidStopPictureInPicture(
-    _ playerViewController: AVPlayerViewController
+  func pictureInPictureControllerDidStopPictureInPicture(
+    _ pictureInPictureController: AVPictureInPictureController
   ) {
     NSLog("[PiP] didStopPictureInPicture")
     cleanup()
   }
 
-  func playerViewController(
-    _ playerViewController: AVPlayerViewController,
+  func pictureInPictureController(
+    _ pictureInPictureController: AVPictureInPictureController,
     restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler: @escaping (Bool) -> Void
   ) {
     completionHandler(true)
@@ -525,6 +547,8 @@ private final class NativePictureInPictureController: NSObject, AVPlayerViewCont
   private func stopCurrentSession() {
     itemStatusObservation?.invalidate()
     itemStatusObservation = nil
+    pipPossibleObservation?.invalidate()
+    pipPossibleObservation = nil
     pendingResult = nil
     cleanup()
   }
@@ -532,20 +556,21 @@ private final class NativePictureInPictureController: NSObject, AVPlayerViewCont
   private func cleanup() {
     itemStatusObservation?.invalidate()
     itemStatusObservation = nil
+    pipPossibleObservation?.invalidate()
+    pipPossibleObservation = nil
     player?.pause()
     player = nil
-    if let playerVC = playerViewController {
-      // Nil delegate FIRST to prevent re-entrant cleanup via
-      // playerViewControllerDidStopPictureInPicture callback.
-      playerVC.delegate = nil
-      if #available(iOS 15.0, *) {
-        playerVC.stopPictureInPicture()
-      }
-      playerVC.willMove(toParent: nil)
-      playerVC.view.removeFromSuperview()
-      playerVC.removeFromParent()
+    if let pip = pipController {
+      pip.delegate = nil
+      #if !targetEnvironment(simulator)
+      pip.stopPictureInPicture()
+      #endif
     }
-    playerViewController = nil
+    pipController = nil
+    playerLayer?.removeFromSuperlayer()
+    playerLayer = nil
+    containerView?.removeFromSuperview()
+    containerView = nil
   }
 }
 
