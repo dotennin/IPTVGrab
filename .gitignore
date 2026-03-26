@@ -1,59 +1,69 @@
+# ─────────────────────────────────────────────
 # Rust
+# ─────────────────────────────────────────────
 /target/
-Cargo.lock
+# Note: Cargo.lock is intentionally tracked — this workspace contains a binary crate (server).
 **/*.rs.bk
 *.pdb
 
+# ─────────────────────────────────────────────
 # IDE & Editor
+# ─────────────────────────────────────────────
 .vscode/
 .idea/
-*.swp
-*.swo
-*~
+*.sublime-workspace
+*.sublime-project
+
+# ─────────────────────────────────────────────
+# macOS
+# ─────────────────────────────────────────────
 .DS_Store
 .AppleDouble
 .LSOverride
-*.sublime-workspace
-*.sublime-project
-.env.local
-.env.*.local
 
-# Build artifacts
-/dist/
-/build/
-*.o
-*.a
-*.so
+# ─────────────────────────────────────────────
+# Temporary & swap files
+# ─────────────────────────────────────────────
+*.swp
+*.swo
+*~
+.~*
+*.tmp
+*.bak
 
-# Dependencies
-/node_modules/
-/.dart_tool/
-/build/
-/ios/Pods/
-/ios/Podfile.lock
-pubspec.lock
-
-# Generated files
-/crates/mobile-ffi/src/mobile_ffi.uniffi.rs
-/crates/mobile-ffi/src/mobile_ffiFFI.kt
-/crates/mobile-ffi/src/mobile_ffi.swift
-
-# Logs
+# ─────────────────────────────────────────────
+# Logs & runtime data
+# ─────────────────────────────────────────────
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-
-# Runtime data
-pids
 *.pid
 *.seed
 
-# Downloaded content
+# ─────────────────────────────────────────────
+# Environment / secrets
+# ─────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+
+# ─────────────────────────────────────────────
+# Server runtime output
+# ─────────────────────────────────────────────
 /downloads/
 /downloads_backup/
 
-# Flutter
+# ─────────────────────────────────────────────
+# UniFFI generated bindings
+# ─────────────────────────────────────────────
+/crates/mobile-ffi/src/mobile_ffi.uniffi.rs
+/crates/mobile-ffi/src/mobile_ffiFFI.kt
+/crates/mobile-ffi/src/mobile_ffi.swift
+
+# ─────────────────────────────────────────────
+# Flutter (project root)
+# ─────────────────────────────────────────────
 /mobile/flutter/.dart_tool/
 /mobile/flutter/build/
 /mobile/flutter/.packages
@@ -61,10 +71,14 @@ pids
 /mobile/flutter/.flutter-plugins-dependencies
 /mobile/flutter/coverage/
 /mobile/flutter/pubspec.lock
-/mobile/flutter/.vscode/
-/mobile/flutter/.idea/
 
-# iOS build files
+# Dart code generation
+/mobile/flutter/lib/**/*.g.dart
+/mobile/flutter/lib/**/*.freezed.dart
+
+# ─────────────────────────────────────────────
+# Flutter – iOS
+# ─────────────────────────────────────────────
 /mobile/flutter/ios/Pods/
 /mobile/flutter/ios/Podfile.lock
 /mobile/flutter/ios/.symlinks/
@@ -72,42 +86,18 @@ pids
 /mobile/flutter/ios/Flutter/Flutter.podspec
 /mobile/flutter/ios/Flutter/FlutterPluginRegistrant.*
 /mobile/flutter/ios/Runner.xcworkspace/
-/mobile/flutter/ios/Xcodeproj.local/
-/mobile/flutter/.ios/
 /mobile/flutter/ios/Frameworks/
 
-# Android build files
+# ─────────────────────────────────────────────
+# Flutter – Android
+# ─────────────────────────────────────────────
 /mobile/flutter/android/.gradle/
 /mobile/flutter/android/captures/
-/mobile/flutter/android/gradlew
-/mobile/flutter/android/gradlew.bat
 /mobile/flutter/android/local.properties
 /mobile/flutter/android/.idea/
-/mobile/flutter/.android/
 /mobile/flutter/android/build/
 /mobile/flutter/android/.classpath
 /mobile/flutter/android/.project
-
-# macOS
-.DS_Store
-.AppleDouble
-.LSOverride
-*.swp
-
-# Temporary files
-*.tmp
-*.bak
-*.swp
-*.swo
-*~
-.~*
-
-# Environment
-.env
-.env.local
-.env.*.local
-
-# FFI generated files
-*FFI.kt
-*.swift
-*.uniffi.rs
+/mobile/flutter/android/key.properties
+/mobile/flutter/android/**/*.keystore
+/mobile/flutter/android/**/*.jks
