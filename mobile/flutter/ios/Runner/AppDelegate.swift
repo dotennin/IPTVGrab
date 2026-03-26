@@ -583,6 +583,10 @@ private final class LiveActivitiesController {
 
   func start(taskId: String, taskName: String, isRecording: Bool) {
     guard activities[taskId] == nil else { return }
+    guard ActivityAuthorizationInfo().areActivitiesEnabled else {
+      NSLog("[LiveActivity] Activities not enabled (user may have disabled in Settings)")
+      return
+    }
     let attrs = DownloadActivityAttributes(
       taskId: taskId, taskName: taskName, isRecording: isRecording)
     let initialState = DownloadActivityAttributes.DownloadState(
