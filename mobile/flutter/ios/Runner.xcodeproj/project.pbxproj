@@ -17,14 +17,14 @@
 		97C146FE1CF9000F007C117D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FD1CF9000F007C117D /* Assets.xcassets */; };
 		97C147011CF9000F007C117D /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FF1CF9000F007C117D /* LaunchScreen.storyboard */; };
 		A1B2C3D41E00000100ABCDEF /* MobileFfiForceLink.m in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D61E00000100ABCDEF /* MobileFfiForceLink.m */; };
-		A1B2C3D51E00000100ABCDEF /* MobileFfi.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A1B2C3D71E00000100ABCDEF /* MobileFfi.xcframework */; };
+		A1B2C3D51E00000100ABCDEF /* Frameworks/MobileFfi.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A1B2C3D71E00000100ABCDEF /* Frameworks/MobileFfi.xcframework */; };
 		AF050646121FC8F07583B188 /* Pods_Runner.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5AB4109A9EBE8344337D8064 /* Pods_Runner.framework */; };
-		DB00000000000000000001A0 /* DownloadActivityAttributes.swift in Sources (DownloadWidget) */ = {isa = PBXBuildFile; fileRef = DA00000000000000000003A0 /* DownloadActivityAttributes.swift */; };
+		DB00000000000000000001A0 /* DownloadActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA00000000000000000003A0 /* DownloadActivityAttributes.swift */; };
 		DB00000000000000000002A0 /* DownloadLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA00000000000000000004A0 /* DownloadLiveActivity.swift */; };
 		DB00000000000000000003A0 /* DownloadWidgetBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA00000000000000000005A0 /* DownloadWidgetBundle.swift */; };
-		DB00000000000000000004A0 /* Assets.xcassets in Resources (DownloadWidget) */ = {isa = PBXBuildFile; fileRef = DA00000000000000000006A0 /* Assets.xcassets (DownloadWidget) */; };
+		DB00000000000000000004A0 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = DA00000000000000000006A0 /* Assets.xcassets */; };
 		DB00000000000000000005A0 /* DownloadWidget.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = DA00000000000000000002A0 /* DownloadWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
-		DB00000000000000000006A0 /* DownloadActivityAttributes.swift in Sources (Runner) */ = {isa = PBXBuildFile; fileRef = DA00000000000000000003A0 /* DownloadActivityAttributes.swift */; };
+		DB00000000000000000006A0 /* DownloadActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA00000000000000000003A0 /* DownloadActivityAttributes.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -94,15 +94,15 @@
 		97C147021CF9000F007C117D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		9F05CAE238CFABC3C89C666C /* Pods-Runner.profile.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.profile.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.profile.xcconfig"; sourceTree = "<group>"; };
 		A1B2C3D61E00000100ABCDEF /* MobileFfiForceLink.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = MobileFfiForceLink.m; sourceTree = "<group>"; };
-		A1B2C3D71E00000100ABCDEF /* MobileFfi.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = Frameworks/MobileFfi.xcframework; sourceTree = "<group>"; };
+		A1B2C3D71E00000100ABCDEF /* Frameworks/MobileFfi.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = Frameworks/MobileFfi.xcframework; sourceTree = "<group>"; };
 		AEF1DAC6D0001E9D5BF006D6 /* Pods-RunnerTests.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-RunnerTests.debug.xcconfig"; path = "Target Support Files/Pods-RunnerTests/Pods-RunnerTests.debug.xcconfig"; sourceTree = "<group>"; };
-		E1ACAD2E80F6FE4250A22E56 /* Pods_RunnerTests.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_RunnerTests.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		DA00000000000000000002A0 /* DownloadWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = DownloadWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		DA00000000000000000003A0 /* DownloadActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadActivityAttributes.swift; sourceTree = "<group>"; };
 		DA00000000000000000004A0 /* DownloadLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadLiveActivity.swift; sourceTree = "<group>"; };
 		DA00000000000000000005A0 /* DownloadWidgetBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadWidgetBundle.swift; sourceTree = "<group>"; };
-		DA00000000000000000006A0 /* Assets.xcassets (DownloadWidget) */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		DA00000000000000000007A0 /* Info.plist (DownloadWidget) */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		DA00000000000000000006A0 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		DA00000000000000000007A0 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		E1ACAD2E80F6FE4250A22E56 /* Pods_RunnerTests.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_RunnerTests.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -110,7 +110,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A1B2C3D51E00000100ABCDEF /* MobileFfi.xcframework in Frameworks */,
+				A1B2C3D51E00000100ABCDEF /* Frameworks/MobileFfi.xcframework in Frameworks */,
 				AF050646121FC8F07583B188 /* Pods_Runner.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -120,6 +120,13 @@
 			buildActionMask = 2147483647;
 			files = (
 				8CB2B1CD96B6A1A6AFF57BC9 /* Pods_RunnerTests.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DC00000000000000000003A0 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -145,6 +152,14 @@
 				331C807B294A618700263BE5 /* RunnerTests.swift */,
 			);
 			path = RunnerTests;
+			sourceTree = "<group>";
+		};
+		3E0D9D3E2F77BF250000AA50 /* Recovered References */ = {
+			isa = PBXGroup;
+			children = (
+				7CFA3C8E1D35360C0083082E /* WidgetExtension.xcconfig */,
+			);
+			name = "Recovered References";
 			sourceTree = "<group>";
 		};
 		6E3DA7162E4BD8496A19A8A4 /* Frameworks */ = {
@@ -176,9 +191,10 @@
 				DA00000000000000000001A0 /* DownloadWidget */,
 				97C146EF1CF9000F007C117D /* Products */,
 				331C8082294A63A400263BE5 /* RunnerTests */,
-				A1B2C3D71E00000100ABCDEF /* MobileFfi.xcframework */,
+				A1B2C3D71E00000100ABCDEF /* Frameworks/MobileFfi.xcframework */,
 				2C1546AC26A9B2EF4E42C22C /* Pods */,
 				6E3DA7162E4BD8496A19A8A4 /* Frameworks */,
+				3E0D9D3E2F77BF250000AA50 /* Recovered References */,
 			);
 			sourceTree = "<group>";
 		};
@@ -190,18 +206,6 @@
 				DA00000000000000000002A0 /* DownloadWidget.appex */,
 			);
 			name = Products;
-			sourceTree = "<group>";
-		};
-		DA00000000000000000001A0 /* DownloadWidget */ = {
-			isa = PBXGroup;
-			children = (
-				DA00000000000000000003A0 /* DownloadActivityAttributes.swift */,
-				DA00000000000000000004A0 /* DownloadLiveActivity.swift */,
-				DA00000000000000000005A0 /* DownloadWidgetBundle.swift */,
-				DA00000000000000000006A0 /* Assets.xcassets (DownloadWidget) */,
-				DA00000000000000000007A0 /* Info.plist (DownloadWidget) */,
-			);
-			path = DownloadWidget;
 			sourceTree = "<group>";
 		};
 		97C146F01CF9000F007C117D /* Runner */ = {
@@ -219,6 +223,18 @@
 				74858FAD1ED2DC5600515810 /* Runner-Bridging-Header.h */,
 			);
 			path = Runner;
+			sourceTree = "<group>";
+		};
+		DA00000000000000000001A0 /* DownloadWidget */ = {
+			isa = PBXGroup;
+			children = (
+				DA00000000000000000003A0 /* DownloadActivityAttributes.swift */,
+				DA00000000000000000004A0 /* DownloadLiveActivity.swift */,
+				DA00000000000000000005A0 /* DownloadWidgetBundle.swift */,
+				DA00000000000000000006A0 /* Assets.xcassets */,
+				DA00000000000000000007A0 /* Info.plist */,
+			);
+			path = DownloadWidget;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -335,14 +351,6 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		DC00000000000000000002A0 /* Resources (DownloadWidget) */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				DB00000000000000000004A0 /* Assets.xcassets in Resources (DownloadWidget) */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 		97C146EC1CF9000F007C117D /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -351,6 +359,14 @@
 				3B3967161E833CAA004F5970 /* AppFrameworkInfo.plist in Resources */,
 				97C146FE1CF9000F007C117D /* Assets.xcassets in Resources */,
 				97C146FC1CF9000F007C117D /* Main.storyboard in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DC00000000000000000002A0 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DB00000000000000000004A0 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -381,9 +397,13 @@
 			inputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-Runner/Pods-Runner-frameworks-${CONFIGURATION}-input-files.xcfilelist",
 			);
+			inputPaths = (
+			);
 			name = "[CP] Embed Pods Frameworks";
 			outputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-Runner/Pods-Runner-frameworks-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -460,16 +480,6 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		DC00000000000000000001A0 /* Sources (DownloadWidget) */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				DB00000000000000000001A0 /* DownloadActivityAttributes.swift in Sources (DownloadWidget) */,
-				DB00000000000000000002A0 /* DownloadLiveActivity.swift in Sources */,
-				DB00000000000000000003A0 /* DownloadWidgetBundle.swift in Sources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 		97C146EA1CF9000F007C117D /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -478,21 +488,21 @@
 				1498D2341E8E89220040F4C2 /* GeneratedPluginRegistrant.m in Sources */,
 				A1B2C3D41E00000100ABCDEF /* MobileFfiForceLink.m in Sources */,
 				7884E8682EC3CC0700C636F2 /* SceneDelegate.swift in Sources */,
-				DB00000000000000000006A0 /* DownloadActivityAttributes.swift in Sources (Runner) */,
+				DB00000000000000000006A0 /* DownloadActivityAttributes.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DC00000000000000000001A0 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DB00000000000000000001A0 /* DownloadActivityAttributes.swift in Sources */,
+				DB00000000000000000002A0 /* DownloadLiveActivity.swift in Sources */,
+				DB00000000000000000003A0 /* DownloadWidgetBundle.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
-
-/* Begin PBXFrameworksBuildPhase (DownloadWidget) section */
-		DC00000000000000000003A0 /* Frameworks (DownloadWidget) */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-/* End PBXFrameworksBuildPhase (DownloadWidget) section */
 
 /* Begin PBXTargetDependency section */
 		331C8086294A63A400263BE5 /* PBXTargetDependency */ = {
@@ -590,6 +600,8 @@
 				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
 				DEVELOPMENT_TEAM = US23WU4744;
 				ENABLE_BITCODE = NO;
+				"EXCLUDED_ARCHS[sdk=iphoneos*]" = "";
+				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = "";
 				INFOPLIST_FILE = Runner/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -779,6 +791,8 @@
 				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
 				DEVELOPMENT_TEAM = US23WU4744;
 				ENABLE_BITCODE = NO;
+				"EXCLUDED_ARCHS[sdk=iphoneos*]" = "";
+				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = "";
 				INFOPLIST_FILE = Runner/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -802,6 +816,8 @@
 				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
 				DEVELOPMENT_TEAM = US23WU4744;
 				ENABLE_BITCODE = NO;
+				"EXCLUDED_ARCHS[sdk=iphoneos*]" = "";
+				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = "";
 				INFOPLIST_FILE = Runner/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -817,7 +833,7 @@
 			};
 			name = Release;
 		};
-		DE00000000000000000001A0 /* Debug (DownloadWidget) */ = {
+		DE00000000000000000001A0 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 7CFA3C8E1D35360C0083082E /* WidgetExtension.xcconfig */;
 			buildSettings = {
@@ -842,7 +858,7 @@
 			};
 			name = Debug;
 		};
-		DE00000000000000000002A0 /* Release (DownloadWidget) */ = {
+		DE00000000000000000002A0 /* Release */ = {
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 7CFA3C8E1D35360C0083082E /* WidgetExtension.xcconfig */;
 			buildSettings = {
@@ -867,7 +883,7 @@
 			};
 			name = Release;
 		};
-		DE00000000000000000003A0 /* Profile (DownloadWidget) */ = {
+		DE00000000000000000003A0 /* Profile */ = {
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 7CFA3C8E1D35360C0083082E /* WidgetExtension.xcconfig */;
 			buildSettings = {
@@ -926,9 +942,9 @@
 		DE00000000000000000004A0 /* Build configuration list for PBXNativeTarget "DownloadWidget" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				DE00000000000000000001A0 /* Debug (DownloadWidget) */,
-				DE00000000000000000002A0 /* Release (DownloadWidget) */,
-				DE00000000000000000003A0 /* Profile (DownloadWidget) */,
+				DE00000000000000000001A0 /* Debug */,
+				DE00000000000000000002A0 /* Release */,
+				DE00000000000000000003A0 /* Profile */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

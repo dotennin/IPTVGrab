@@ -12,6 +12,7 @@ import 'api_client.dart';
 import 'background_execution_bridge.dart';
 import 'controller.dart';
 import 'models.dart';
+import 'native_ios_player.dart';
 
 const Color _appBackground = Color(0xFF0B1220);
 const Color _appSurface = Color(0xFF111827);
@@ -154,7 +155,9 @@ class _M3u8FlutterClientAppState extends State<M3u8FlutterClientApp>
               title: const Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  Text('IPTVGrab', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  Text('IPTVGrab',
+                      style:
+                          TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                 ],
               ),
               actions: <Widget>[],
@@ -1300,7 +1303,8 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
                       visibleItems: visibleItems,
                       playlistScoped: playlistScoped,
                       hiddenUnavailableCount: hiddenUnavailableCount,
-                      waitingForInitialHealthResults: waitingForInitialHealthResults,
+                      waitingForInitialHealthResults:
+                          waitingForInitialHealthResults,
                     ),
                     if (controller.healthState.running) ...<Widget>[
                       const SizedBox(height: 12),
@@ -1514,7 +1518,8 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
         // Checkbox for toggling "Active Only"
         Checkbox(
           value: isActiveOnly,
-          onChanged: (value) => setState(() => _showUnavailableChannels = value ?? false),
+          onChanged: (value) =>
+              setState(() => _showUnavailableChannels = value ?? false),
         ),
         // Label text
         Text(
@@ -1719,32 +1724,105 @@ class _MediaPlayerPage extends StatefulWidget {
 }
 
 class _MediaPlayerPageState extends State<_MediaPlayerPage> {
-  late final VideoPlayerController _controller;
+  VideoPlayerController? _controller;
+  NativeIosPlayerController? _iosController;
   String? _error;
   bool _initialized = false;
   bool _isFullscreen = false;
   bool _showControls = true;
   bool _muted = false;
   bool _enteringPictureInPicture = false;
+  String? _pictureInPictureFailure;
+  List<String> _pictureInPictureReasons = const <String>[];
   Timer? _controlsTimer;
+
+  bool get _usesNativeIosPlayer => Platform.isIOS;
+
+  bool get _playerInitialized => _usesNativeIosPlayer
+      ? (_iosController?.initialized ?? false)
+      : _initialized;
+
+  bool get _playerIsPlaying => _usesNativeIosPlayer
+      ? (_iosController?.isPlaying ?? false)
+      : _controller!.value.isPlaying;
+
+  Duration get _playerPosition => _usesNativeIosPlayer
+      ? (_iosController?.position ?? Duration.zero)
+      : _controller!.value.position;
+
+  Duration get _playerDuration => _usesNativeIosPlayer
+      ? (_iosController?.duration ?? Duration.zero)
+      : _controller!.value.duration;
+
+  double get _playerAspectRatio {
+    if (_usesNativeIosPlayer) {
+      final aspectRatio = _iosController?.aspectRatio ?? 16 / 9;
+      return aspectRatio > 0 ? aspectRatio : 16 / 9;
+    }
+    final controller = _controller!;
+    return controller.value.isInitialized && controller.value.aspectRatio > 0
+        ? controller.value.aspectRatio
+        : 16 / 9;
+  }
+
+  String? get _playerError =>
+      _usesNativeIosPlayer ? (_iosController?.error ?? _error) : _error;
+
+  List<String> get _pictureInPictureDiagnostics {
+    final reasons = <String>[
+      ...(_iosController?.diagnostics ?? const <String>[]),
+      ..._pictureInPictureReasons,
+    ];
+    if (_usesNativeIosPlayer &&
+        !(_iosController?.isPictureInPictureSupported ?? false)) {
+      reasons.add(
+        'This iPhone or iOS build reports that Picture in Picture is not supported.',
+      );
+    }
+    if (_usesNativeIosPlayer &&
+        _playerInitialized &&
+        !(_iosController?.isPictureInPicturePossible ?? false)) {
+      reasons.add(
+        'The native AVPictureInPictureController still reports that Picture in Picture is not currently possible for this stream.',
+      );
+    }
+    if (_usesNativeIosPlayer && !_playerInitialized) {
+      reasons.add(
+        'The native player is still initializing, so Picture in Picture is not ready yet.',
+      );
+    }
+    if (_playerError != null) {
+      reasons.add('Playback error: $_playerError');
+    }
+    return _dedupeMessages(reasons);
+  }
 
   @override
   void initState() {
     super.initState();
-    _controller = VideoPlayerController.networkUrl(
-      widget.uri,
-      httpHeaders: widget.httpHeaders,
-    );
-    _controller.addListener(_handleControllerUpdate);
-    unawaited(_initialize());
+    if (_usesNativeIosPlayer) {
+      _iosController = NativeIosPlayerController(
+        uri: widget.uri,
+        httpHeaders: widget.httpHeaders,
+        isLive: widget.isLive,
+      )..addListener(_handleControllerUpdate);
+    } else {
+      _controller = VideoPlayerController.networkUrl(
+        widget.uri,
+        httpHeaders: widget.httpHeaders,
+      );
+      _controller!.addListener(_handleControllerUpdate);
+      unawaited(_initialize());
+    }
   }
 
   Future<void> _initialize() async {
     try {
-      await _controller.initialize();
-      await _controller.setLooping(!widget.isLive);
-      await _controller.setVolume(_muted ? 0 : 1);
-      await _controller.play();
+      final controller = _controller!;
+      await controller.initialize();
+      await controller.setLooping(!widget.isLive);
+      await controller.setVolume(_muted ? 0 : 1);
+      await controller.play();
       if (!mounted) {
         return;
       }
@@ -1766,29 +1844,49 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
   }
 
   Future<void> _togglePlayback() async {
-    if (_controller.value.isPlaying) {
-      await _controller.pause();
+    if (_playerIsPlaying) {
+      if (_usesNativeIosPlayer) {
+        await _iosController!.pause();
+      } else {
+        await _controller!.pause();
+      }
       _controlsTimer?.cancel();
       setState(() => _showControls = true);
       return;
     }
-    await _controller.play();
+    if (_usesNativeIosPlayer) {
+      await _iosController!.play();
+    } else {
+      await _controller!.play();
+    }
     _scheduleControlsHide();
   }
 
   Future<void> _seekRelative(int seconds) async {
-    final position = await _controller.position ?? Duration.zero;
-    final duration = _controller.value.duration;
+    final position = _playerPosition;
+    final duration = _playerDuration;
     final target = position + Duration(seconds: seconds);
     final clamped = target < Duration.zero
         ? Duration.zero
         : (duration > Duration.zero && target > duration ? duration : target);
-    await _controller.seekTo(clamped);
+    await _seekTo(clamped);
     _scheduleControlsHide();
   }
 
+  Future<void> _seekTo(Duration position) async {
+    if (_usesNativeIosPlayer) {
+      await _iosController!.seekTo(position);
+    } else {
+      await _controller!.seekTo(position);
+    }
+  }
+
   Future<void> _setMuted(bool value) async {
-    await _controller.setVolume(value ? 0 : 1);
+    if (_usesNativeIosPlayer) {
+      await _iosController!.setMuted(value);
+    } else {
+      await _controller!.setVolume(value ? 0 : 1);
+    }
     if (!mounted) {
       return;
     }
@@ -1836,11 +1934,11 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
 
   void _scheduleControlsHide() {
     _controlsTimer?.cancel();
-    if (!_isFullscreen || !_controller.value.isPlaying) {
+    if (!_isFullscreen || !_playerIsPlaying) {
       return;
     }
     _controlsTimer = Timer(const Duration(seconds: 2), () {
-      if (!mounted || !_controller.value.isPlaying) {
+      if (!mounted || !_playerIsPlaying) {
         return;
       }
       setState(() => _showControls = false);
@@ -1862,25 +1960,32 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
     }
     setState(() => _enteringPictureInPicture = true);
     try {
-      final entered =
-          await BackgroundExecutionBridge.instance.enterPictureInPicture(
-        uri: widget.uri,
-        headers: widget.httpHeaders,
-        position: widget.isLive ? null : await _controller.position,
-      );
+      final entered = _usesNativeIosPlayer
+          ? await _iosController!.enterPictureInPicture()
+          : await BackgroundExecutionBridge.instance.enterPictureInPicture(
+              uri: widget.uri,
+              headers: widget.httpHeaders,
+              position: widget.isLive ? null : await _controller!.position,
+            );
       if (!mounted) {
         return;
       }
-      if (entered && Platform.isIOS) {
-        await _controller.pause();
-      }
-      if (!entered) {
-        _showMessage(
-          context,
-          'Picture-in-picture is unavailable on this device.',
-          error: true,
+      if (entered) {
+        setState(() {
+          _pictureInPictureFailure = null;
+          _pictureInPictureReasons = const <String>[];
+        });
+      } else {
+        _recordPictureInPictureFailure(
+          'Picture in Picture is unavailable right now.',
+          _pictureInPictureDiagnostics,
         );
       }
+    } on NativeIosPlayerException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _recordPictureInPictureFailure(error.message, error.details);
     } on BackgroundExecutionBridgeException catch (error) {
       if (!mounted) {
         return;
@@ -1897,20 +2002,19 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
   void dispose() {
     _controlsTimer?.cancel();
     _restoreSystemUi();
-    _controller.removeListener(_handleControllerUpdate);
-    _controller.dispose();
+    _iosController?.removeListener(_handleControllerUpdate);
+    _controller?.removeListener(_handleControllerUpdate);
+    _controller?.dispose();
+    _iosController?.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final aspectRatio =
-        _controller.value.isInitialized && _controller.value.aspectRatio > 0
-            ? _controller.value.aspectRatio
-            : 16 / 9;
+    final aspectRatio = _playerAspectRatio;
 
     final player = GestureDetector(
-      onTap: _initialized ? _toggleControls : null,
+      onTap: _playerInitialized ? _toggleControls : null,
       child: Stack(
         children: <Widget>[
           Positioned.fill(
@@ -1921,21 +2025,7 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
               ),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(_isFullscreen ? 0 : 20),
-                child: _error != null
-                    ? Center(
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Text(
-                            _error!,
-                            style: TextStyle(
-                              color: Theme.of(context).colorScheme.error,
-                            ),
-                          ),
-                        ),
-                      )
-                    : !_initialized
-                        ? const Center(child: CircularProgressIndicator())
-                        : Center(child: VideoPlayer(_controller)),
+                child: _buildPlayerSurface(context),
               ),
             ),
           ),
@@ -2059,6 +2149,14 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
                               ),
                           ],
                         ),
+                      if (_usesNativeIosPlayer &&
+                          _canUsePictureInPicture &&
+                          (_pictureInPictureFailure != null ||
+                              _pictureInPictureDiagnostics.isNotEmpty))
+                        Padding(
+                          padding: const EdgeInsets.only(top: 12),
+                          child: _buildPictureInPictureCard(context),
+                        ),
                       if (widget.onGrabRequested != null ||
                           _canUsePictureInPicture)
                         const SizedBox(height: 12),
@@ -2078,9 +2176,10 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
   }
 
   Widget _buildControls(BuildContext context) {
-    final current = _controller.value.position;
-    final total = _controller.value.duration;
-    final hasTimeline = _initialized && !widget.isLive && total > Duration.zero;
+    final current = _playerPosition;
+    final total = _playerDuration;
+    final hasTimeline =
+        _playerInitialized && !widget.isLive && total > Duration.zero;
     return AnimatedOpacity(
       duration: const Duration(milliseconds: 180),
       opacity: !_isFullscreen || _showControls ? 1 : 0,
@@ -2124,18 +2223,14 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
                   ),
                 ),
               const Spacer(),
-              if (_initialized && _isFullscreen)
+              if (_playerInitialized && _isFullscreen)
                 IconButton.filled(
                   style: IconButton.styleFrom(
                     backgroundColor: Colors.black.withValues(alpha: 0.55),
                     foregroundColor: Colors.white,
                   ),
                   onPressed: _togglePlayback,
-                  icon: Icon(
-                    _controller.value.isPlaying
-                        ? Icons.pause
-                        : Icons.play_arrow,
-                  ),
+                  icon: Icon(_playerIsPlaying ? Icons.pause : Icons.play_arrow),
                 ),
               const Spacer(),
               Container(
@@ -2144,37 +2239,28 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: <Widget>[
-                    if (hasTimeline)
-                      VideoProgressIndicator(
-                        _controller,
-                        allowScrubbing: true,
-                        padding: const EdgeInsets.symmetric(vertical: 10),
-                        colors: const VideoProgressColors(
-                          playedColor: _appPrimary,
-                          bufferedColor: Color(0xFF475569),
-                          backgroundColor: Color(0xFF1E293B),
-                        ),
-                      ),
+                    if (hasTimeline) _buildTimeline(context, current, total),
                     Row(
                       children: <Widget>[
                         if (hasTimeline)
                           IconButton(
-                            onPressed:
-                                _initialized ? () => _seekRelative(-10) : null,
+                            onPressed: _playerInitialized
+                                ? () => _seekRelative(-10)
+                                : null,
                             icon: const Icon(Icons.replay_10),
                           ),
                         IconButton(
-                          onPressed: _initialized ? _togglePlayback : null,
+                          onPressed:
+                              _playerInitialized ? _togglePlayback : null,
                           icon: Icon(
-                            _controller.value.isPlaying
-                                ? Icons.pause
-                                : Icons.play_arrow,
+                            _playerIsPlaying ? Icons.pause : Icons.play_arrow,
                           ),
                         ),
                         if (hasTimeline)
                           IconButton(
-                            onPressed:
-                                _initialized ? () => _seekRelative(10) : null,
+                            onPressed: _playerInitialized
+                                ? () => _seekRelative(10)
+                                : null,
                             icon: const Icon(Icons.forward_10),
                           ),
                         if (widget.isLive)
@@ -2201,14 +2287,15 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
                           style: const TextStyle(color: Colors.white70),
                         ),
                         IconButton(
-                          onPressed:
-                              _initialized ? () => _setMuted(!_muted) : null,
+                          onPressed: _playerInitialized
+                              ? () => _setMuted(!_muted)
+                              : null,
                           icon: Icon(
                             _muted ? Icons.volume_off : Icons.volume_up,
                           ),
                         ),
                         IconButton(
-                          onPressed: _initialized
+                          onPressed: _playerInitialized
                               ? () => _setFullscreen(!_isFullscreen)
                               : null,
                           icon: Icon(
@@ -2224,6 +2311,191 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPlayerSurface(BuildContext context) {
+    final overlay = _playerError != null
+        ? Center(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text(
+                _playerError!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ),
+          )
+        : !_playerInitialized
+            ? const Center(child: CircularProgressIndicator())
+            : null;
+
+    if (_usesNativeIosPlayer) {
+      return Stack(
+        children: <Widget>[
+          Positioned.fill(
+              child: NativeIosPlayerView(controller: _iosController!)),
+          if (overlay != null) Positioned.fill(child: overlay),
+        ],
+      );
+    }
+
+    if (overlay != null) {
+      return overlay;
+    }
+    return Center(child: VideoPlayer(_controller!));
+  }
+
+  Widget _buildTimeline(
+    BuildContext context,
+    Duration current,
+    Duration total,
+  ) {
+    if (!_usesNativeIosPlayer) {
+      return VideoProgressIndicator(
+        _controller!,
+        allowScrubbing: true,
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        colors: const VideoProgressColors(
+          playedColor: _appPrimary,
+          bufferedColor: Color(0xFF475569),
+          backgroundColor: Color(0xFF1E293B),
+        ),
+      );
+    }
+
+    final totalMs = math.max(total.inMilliseconds, 1);
+    final currentMs = current.inMilliseconds.clamp(0, totalMs).toDouble();
+    return SliderTheme(
+      data: SliderTheme.of(context).copyWith(
+        activeTrackColor: _appPrimary,
+        inactiveTrackColor: const Color(0xFF1E293B),
+        thumbColor: _appPrimary,
+        overlayColor: _appPrimary.withValues(alpha: 0.16),
+        trackHeight: 3,
+      ),
+      child: Slider(
+        value: currentMs,
+        min: 0,
+        max: totalMs.toDouble(),
+        onChanged: _playerInitialized
+            ? (value) =>
+                unawaited(_seekTo(Duration(milliseconds: value.round())))
+            : null,
+      ),
+    );
+  }
+
+  Widget _buildPictureInPictureCard(BuildContext context) {
+    final reasons = _pictureInPictureDiagnostics;
+    final summary = _pictureInPictureFailure ??
+        ((_iosController?.isPictureInPicturePossible ?? false)
+            ? 'Picture in Picture is ready for the current stream.'
+            : 'Picture in Picture is not ready yet for the current stream.');
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: _appSurfaceAlt,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: _pictureInPictureFailure != null ? _appDanger : _appPrimary,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Icon(
+                _pictureInPictureFailure != null
+                    ? Icons.picture_in_picture_alt_outlined
+                    : Icons.check_circle_outline,
+                size: 18,
+                color:
+                    _pictureInPictureFailure != null ? _appDanger : _appPrimary,
+              ),
+              const SizedBox(width: 8),
+              const Text(
+                'PiP diagnostics',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(summary),
+          if (reasons.isNotEmpty) ...<Widget>[
+            const SizedBox(height: 8),
+            for (final reason in reasons)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text(
+                  '• $reason',
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(color: _appTextMuted),
+                ),
+              ),
+          ],
+          const SizedBox(height: 8),
+          Text(
+            'iOS now uses a native AVPlayer-backed surface here so PiP and playback come from the same player instance.',
+            style: Theme.of(context)
+                .textTheme
+                .bodySmall
+                ?.copyWith(color: _appTextMuted),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _recordPictureInPictureFailure(
+    String message,
+    List<String> reasons,
+  ) {
+    final mergedReasons = _dedupeMessages(<String>[
+      ...reasons,
+      ...(_iosController?.diagnostics ?? const <String>[]),
+    ]);
+    setState(() {
+      _pictureInPictureFailure = message;
+      _pictureInPictureReasons = mergedReasons;
+    });
+    _showMessage(context, message, error: true);
+    unawaited(
+      showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Picture in Picture failed'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Text(message),
+                  if (mergedReasons.isNotEmpty) ...<Widget>[
+                    const SizedBox(height: 12),
+                    for (final reason in mergedReasons)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Text('• $reason'),
+                      ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Close'),
+            ),
+          ],
         ),
       ),
     );
@@ -4080,6 +4352,19 @@ String _shortId(String value) {
     return value;
   }
   return value.substring(0, 8);
+}
+
+List<String> _dedupeMessages(Iterable<String> messages) {
+  final seen = <String>{};
+  final deduped = <String>[];
+  for (final message in messages) {
+    final normalized = message.trim();
+    if (normalized.isEmpty || !seen.add(normalized)) {
+      continue;
+    }
+    deduped.add(normalized);
+  }
+  return deduped;
 }
 
 void _showMessage(

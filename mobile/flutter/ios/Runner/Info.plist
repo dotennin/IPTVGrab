@@ -2,11 +2,11 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.iptvgrab.app.downloads</string>
+	</array>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
-	<true/>
-	<key>NSSupportsLiveActivities</key>
-	<true/>
-	<key>NSSupportsLiveActivitiesFrequentUpdates</key>
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
@@ -34,6 +34,10 @@
 	<string>Allow IPTVGrab to export saved MP4 videos into your Photos library.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Allow IPTVGrab to access your photo library when exporting saved MP4 videos.</string>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
+	<key>NSSupportsLiveActivitiesFrequentUpdates</key>
+	<true/>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
@@ -55,18 +59,14 @@
 			</array>
 		</dict>
 	</dict>
+	<key>UIApplicationSupportsIndirectInputEvents</key>
+	<true/>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
 		<string>fetch</string>
 		<string>processing</string>
 	</array>
-	<key>BGTaskSchedulerPermittedIdentifiers</key>
-	<array>
-		<string>com.iptvgrab.app.downloads</string>
-	</array>
-	<key>UIApplicationSupportsIndirectInputEvents</key>
-	<true/>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>

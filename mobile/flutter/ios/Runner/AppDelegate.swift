@@ -11,6 +11,7 @@ import UIKit
   private let pictureInPicture = NativePictureInPictureController()
   private var backgroundChannel: FlutterMethodChannel?
   private var liveActivitiesChannel: FlutterMethodChannel?
+  private var nativeInlinePlayerRegistered = false
   // Stored as Any? so we can guard availability at runtime without the
   // "stored property cannot be marked @available" compiler error.
   private var _liveActivities: Any?
@@ -33,6 +34,7 @@ import UIKit
     configureAudioSession()
     registerBGTasks()
     let launched = super.application(application, didFinishLaunchingWithOptions: launchOptions)
+    registerNativeInlinePlayer(with: self)
     installBackgroundChannel()
     installLiveActivitiesChannel()
     DispatchQueue.main.async { [weak self] in
@@ -44,6 +46,7 @@ import UIKit
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+    registerNativeInlinePlayer(with: engineBridge.pluginRegistry)
     installBackgroundChannel()
     installLiveActivitiesChannel()
     // Fallback: register directly via engine registrar messenger in case
@@ -53,6 +56,17 @@ import UIKit
     {
       installLiveActivitiesChannelWith(messenger: registrar.messenger())
     }
+  }
+
+  private func registerNativeInlinePlayer(with registry: FlutterPluginRegistry) {
+    guard !nativeInlinePlayerRegistered,
+      let registrar = registry.registrar(forPlugin: "NativeInlinePlayer")
+    else { return }
+    registrar.register(
+      NativeInlinePlayerFactory(messenger: registrar.messenger()),
+      withId: "iptvgrab/native-inline-player"
+    )
+    nativeInlinePlayerRegistered = true
   }
 
   private func configureAudioSession() {
@@ -596,6 +610,508 @@ private final class NativePictureInPictureController: NSObject, AVPictureInPictu
     playerLayer = nil
     containerView?.removeFromSuperview()
     containerView = nil
+  }
+}
+
+private final class NativePlayerHostView: UIView {
+  override class var layerClass: AnyClass { AVPlayerLayer.self }
+
+  var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+}
+
+private final class NativeInlinePlayerFactory: NSObject, FlutterPlatformViewFactory {
+  init(messenger: FlutterBinaryMessenger) {
+    self.messenger = messenger
+    super.init()
+  }
+
+  private let messenger: FlutterBinaryMessenger
+
+  func createArgsCodec() -> FlutterMessageCodec & NSObjectProtocol {
+    FlutterStandardMessageCodec.sharedInstance()
+  }
+
+  func create(
+    withFrame frame: CGRect,
+    viewIdentifier viewId: Int64,
+    arguments args: Any?
+  ) -> FlutterPlatformView {
+    NativeInlinePlayerPlatformView(
+      frame: frame,
+      viewIdentifier: viewId,
+      arguments: args as? [String: Any] ?? [:],
+      messenger: messenger
+    )
+  }
+}
+
+private final class NativeInlinePlayerPlatformView: NSObject, FlutterPlatformView, FlutterStreamHandler,
+  AVPictureInPictureControllerDelegate
+{
+  private let hostView: NativePlayerHostView
+  private let methodChannel: FlutterMethodChannel
+  private let eventChannel: FlutterEventChannel
+
+  private var eventSink: FlutterEventSink?
+  private var player: AVPlayer?
+  private var playerItem: AVPlayerItem?
+  private var pipController: AVPictureInPictureController?
+  private var playerItemStatusObservation: NSKeyValueObservation?
+  private var playerTimeControlObservation: NSKeyValueObservation?
+  private var pipPossibleObservation: NSKeyValueObservation?
+  private var pipActiveObservation: NSKeyValueObservation?
+  private var periodicTimeObserver: Any?
+  private var itemDidPlayToEndObserver: NSObjectProtocol?
+  private var pendingPiPResult: FlutterResult?
+  private var pendingPiPWorkItem: DispatchWorkItem?
+  private var initialized = false
+  private var lastError: String?
+  private var isLive = false
+  private var diagnostics: [String] = []
+
+  init(
+    frame: CGRect,
+    viewIdentifier: Int64,
+    arguments: [String: Any],
+    messenger: FlutterBinaryMessenger
+  ) {
+    hostView = NativePlayerHostView(frame: frame)
+    hostView.backgroundColor = .black
+    hostView.playerLayer.videoGravity = .resizeAspect
+    methodChannel = FlutterMethodChannel(
+      name: "iptvgrab/native-player/\(viewIdentifier)/method",
+      binaryMessenger: messenger
+    )
+    eventChannel = FlutterEventChannel(
+      name: "iptvgrab/native-player/\(viewIdentifier)/events",
+      binaryMessenger: messenger
+    )
+    super.init()
+    eventChannel.setStreamHandler(self)
+    methodChannel.setMethodCallHandler { [weak self] call, result in
+      self?.handle(call: call, result: result)
+    }
+    configure(arguments: arguments)
+  }
+
+  deinit {
+    cleanup()
+  }
+
+  func view() -> UIView {
+    hostView
+  }
+
+  func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
+    eventSink = events
+    emitState()
+    return nil
+  }
+
+  func onCancel(withArguments arguments: Any?) -> FlutterError? {
+    eventSink = nil
+    return nil
+  }
+
+  private func handle(call: FlutterMethodCall, result: @escaping FlutterResult) {
+    switch call.method {
+    case "play":
+      player?.play()
+      emitState()
+      result(nil)
+    case "pause":
+      player?.pause()
+      emitState()
+      result(nil)
+    case "seekToMillis":
+      let positionMillis = (call.arguments as? [String: Any])?["positionMillis"] as? Int ?? 0
+      let target = CMTime(value: CMTimeValue(positionMillis), timescale: 1_000)
+      player?.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero)
+      emitState()
+      result(nil)
+    case "setMuted":
+      let muted = (call.arguments as? [String: Any])?["muted"] as? Bool ?? false
+      player?.isMuted = muted
+      emitState()
+      result(nil)
+    case "enterPictureInPicture":
+      enterPictureInPicture(result: result)
+    case "dispose":
+      cleanup()
+      result(nil)
+    default:
+      result(FlutterMethodNotImplemented)
+    }
+  }
+
+  private func configure(arguments: [String: Any]) {
+    isLive = arguments["isLive"] as? Bool ?? false
+    let muted = arguments["muted"] as? Bool ?? false
+    let headers = arguments["headers"] as? [String: String] ?? [:]
+    let urlString = arguments["url"] as? String ?? ""
+    guard let url = URL(string: urlString) else {
+      lastError = "Invalid media URL: \(urlString)"
+      appendDiagnostic(lastError!)
+      emitState()
+      return
+    }
+
+    var assetOptions: [String: Any] = [:]
+    if !headers.isEmpty {
+      assetOptions["AVURLAssetHTTPHeaderFieldsKey"] = headers
+    }
+    let asset = AVURLAsset(url: url, options: assetOptions.isEmpty ? nil : assetOptions)
+    let item = AVPlayerItem(asset: asset)
+    let player = AVPlayer(playerItem: item)
+    player.isMuted = muted
+    player.automaticallyWaitsToMinimizeStalling = true
+    player.actionAtItemEnd = isLive ? .pause : .none
+
+    hostView.playerLayer.player = player
+    self.player = player
+    playerItem = item
+
+    let pip = AVPictureInPictureController(playerLayer: hostView.playerLayer)
+    pip?.delegate = self
+    if #available(iOS 14.2, *) {
+      pip?.canStartPictureInPictureAutomaticallyFromInline = true
+    }
+    pipController = pip
+    if pip == nil {
+      appendDiagnostic("AVPictureInPictureController could not be created for this player layer.")
+    }
+
+    playerItemStatusObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
+      guard let self else { return }
+      switch item.status {
+      case .readyToPlay:
+        self.initialized = true
+        self.lastError = nil
+        self.appendDiagnostic("The native AVPlayer item is ready to play.")
+      case .failed:
+        self.initialized = false
+        self.lastError = self.describe(error: item.error) ?? "The native AVPlayer item failed."
+        if let lastError = self.lastError {
+          self.appendDiagnostic(lastError)
+        }
+        if let errorLog = item.errorLog()?.events.last {
+          self.appendDiagnostic(
+            "AVPlayerItemErrorLog: domain=\(errorLog.errorDomain) status=\(errorLog.errorStatusCode) comment=\(errorLog.errorComment ?? "n/a") uri=\(errorLog.uri ?? "n/a")"
+          )
+        }
+      case .unknown:
+        self.appendDiagnostic("The native AVPlayer item is still in the unknown state.")
+      @unknown default:
+        self.appendDiagnostic("The native AVPlayer item reported an unknown status value.")
+      }
+      self.emitState()
+    }
+
+    playerTimeControlObservation = player.observe(\.timeControlStatus, options: [.initial, .new]) { [weak self] player, _ in
+      guard let self else { return }
+      if player.timeControlStatus == .waitingToPlayAtSpecifiedRate,
+        let reason = player.reasonForWaitingToPlay?.rawValue
+      {
+        self.appendDiagnostic("The native AVPlayer is waiting to play: \(reason)")
+      }
+      self.emitState()
+    }
+
+    if let pip {
+      pipPossibleObservation = pip.observe(\.isPictureInPicturePossible, options: [.initial, .new]) { [weak self] pip, _ in
+        guard let self else { return }
+        if !pip.isPictureInPicturePossible {
+          self.appendDiagnostic(
+            "AVPictureInPictureController reports isPictureInPicturePossible = false for the current player state."
+          )
+        }
+        self.emitState()
+      }
+      pipActiveObservation = pip.observe(\.isPictureInPictureActive, options: [.initial, .new]) { [weak self] _, _ in
+        self?.emitState()
+      }
+    }
+
+    periodicTimeObserver = player.addPeriodicTimeObserver(
+      forInterval: CMTime(seconds: 0.5, preferredTimescale: 600),
+      queue: .main
+    ) { [weak self] _ in
+      self?.emitState()
+    }
+
+    if !isLive {
+      itemDidPlayToEndObserver = NotificationCenter.default.addObserver(
+        forName: .AVPlayerItemDidPlayToEndTime,
+        object: item,
+        queue: .main
+      ) { [weak self] _ in
+        guard let self, let player = self.player else { return }
+        player.seek(to: .zero)
+        player.play()
+      }
+    }
+
+    player.play()
+    emitState()
+  }
+
+  private func emitState() {
+    guard let eventSink else { return }
+    var payload: [String: Any] = [
+      "type": "state",
+      "initialized": initialized,
+      "isPlaying": player?.timeControlStatus == .playing,
+      "isBuffering": player?.timeControlStatus == .waitingToPlayAtSpecifiedRate,
+      "isPictureInPictureSupported": AVPictureInPictureController.isPictureInPictureSupported(),
+      "isPictureInPicturePossible": pipController?.isPictureInPicturePossible ?? false,
+      "isPictureInPictureActive": pipController?.isPictureInPictureActive ?? false,
+      "positionMillis": currentPositionMillis(),
+      "durationMillis": currentDurationMillis(),
+      "aspectRatio": currentAspectRatio(),
+      "diagnostics": diagnostics,
+    ]
+    if let lastError {
+      payload["error"] = lastError
+    }
+    eventSink(payload)
+  }
+
+  private func currentPositionMillis() -> Int {
+    guard let time = player?.currentTime(), time.isNumeric else { return 0 }
+    return Int((CMTimeGetSeconds(time) * 1000).rounded())
+  }
+
+  private func currentDurationMillis() -> Int {
+    guard let duration = playerItem?.duration, duration.isNumeric else { return 0 }
+    return Int((CMTimeGetSeconds(duration) * 1000).rounded())
+  }
+
+  private func currentAspectRatio() -> Double {
+    guard let size = playerItem?.presentationSize, size.width > 0, size.height > 0 else {
+      return 16.0 / 9.0
+    }
+    return Double(size.width / size.height)
+  }
+
+  private func enterPictureInPicture(result: @escaping FlutterResult) {
+    guard pendingPiPResult == nil else {
+      result(
+        FlutterError(
+          code: "pip_busy",
+          message: "A Picture in Picture request is already in progress.",
+          details: buildPiPFailureDetails()
+        )
+      )
+      return
+    }
+    guard AVPictureInPictureController.isPictureInPictureSupported() else {
+      result(
+        FlutterError(
+          code: "pip_not_supported",
+          message: "Picture in Picture is not supported on this device or iOS version.",
+          details: buildPiPFailureDetails()
+        )
+      )
+      return
+    }
+    guard let pip = pipController else {
+      result(
+        FlutterError(
+          code: "pip_controller_missing",
+          message: "The native Picture in Picture controller could not be created.",
+          details: buildPiPFailureDetails()
+        )
+      )
+      return
+    }
+    guard hostView.window != nil else {
+      result(
+        FlutterError(
+          code: "pip_view_not_visible",
+          message: "The native player view is not attached to a visible iOS window yet.",
+          details: buildPiPFailureDetails()
+        )
+      )
+      return
+    }
+
+    pendingPiPResult = result
+    if pip.isPictureInPictureActive {
+      finishPendingPiP(with: true)
+      return
+    }
+    if pip.isPictureInPicturePossible {
+      startPictureInPicture()
+      return
+    }
+
+    appendDiagnostic("Delaying Picture in Picture start because isPictureInPicturePossible is still false.")
+    let workItem = DispatchWorkItem { [weak self] in
+      guard let self, self.pendingPiPResult != nil else { return }
+      if pip.isPictureInPicturePossible {
+        self.startPictureInPicture()
+        return
+      }
+      self.failPendingPiP(
+        code: "pip_not_possible",
+        message: "iOS reported that Picture in Picture is not possible for the current stream state."
+      )
+    }
+    pendingPiPWorkItem = workItem
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: workItem)
+  }
+
+  private func startPictureInPicture() {
+    guard let pip = pipController else {
+      failPendingPiP(
+        code: "pip_controller_missing",
+        message: "The native Picture in Picture controller is no longer available."
+      )
+      return
+    }
+    pendingPiPWorkItem?.cancel()
+    let timeout = DispatchWorkItem { [weak self] in
+      self?.failPendingPiP(
+        code: "pip_start_timeout",
+        message: "Timed out while waiting for iOS to confirm Picture in Picture startup."
+      )
+    }
+    pendingPiPWorkItem = timeout
+    DispatchQueue.main.asyncAfter(deadline: .now() + 5.0, execute: timeout)
+    pip.startPictureInPicture()
+  }
+
+  func pictureInPictureControllerDidStartPictureInPicture(
+    _ pictureInPictureController: AVPictureInPictureController
+  ) {
+    appendDiagnostic("iOS confirmed that Picture in Picture started successfully.")
+    finishPendingPiP(with: true)
+    emitState()
+  }
+
+  func pictureInPictureController(
+    _ pictureInPictureController: AVPictureInPictureController,
+    failedToStartPictureInPictureWithError error: Error
+  ) {
+    appendDiagnostic(
+      "Picture in Picture failed to start: \(describe(error: error) ?? String(describing: error))"
+    )
+    failPendingPiP(
+      code: "pip_start_failed",
+      message: describe(error: error) ?? "Picture in Picture failed to start."
+    )
+  }
+
+  func pictureInPictureControllerDidStopPictureInPicture(
+    _ pictureInPictureController: AVPictureInPictureController
+  ) {
+    appendDiagnostic("iOS reported that Picture in Picture stopped.")
+    emitState()
+  }
+
+  func pictureInPictureController(
+    _ pictureInPictureController: AVPictureInPictureController,
+    restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler: @escaping (Bool) -> Void
+  ) {
+    completionHandler(true)
+  }
+
+  private func finishPendingPiP(with value: Any?) {
+    pendingPiPWorkItem?.cancel()
+    pendingPiPWorkItem = nil
+    pendingPiPResult?(value)
+    pendingPiPResult = nil
+  }
+
+  private func failPendingPiP(code: String, message: String) {
+    finishPendingPiP(
+      with: FlutterError(
+        code: code,
+        message: message,
+        details: buildPiPFailureDetails()
+      )
+    )
+  }
+
+  private func buildPiPFailureDetails() -> [String] {
+    var reasons = diagnostics
+    if hostView.window == nil {
+      reasons.append("The player layer is not attached to a visible UIView window.")
+    }
+    if player == nil || playerItem == nil {
+      reasons.append("The native AVPlayer instance has not been created.")
+    }
+    if !initialized {
+      reasons.append("The native AVPlayer item is not ready to play yet.")
+    }
+    if let playerItem, playerItem.presentationSize.width <= 0 || playerItem.presentationSize.height <= 0 {
+      reasons.append("No video presentation size is available yet, so iOS may reject Picture in Picture.")
+    }
+    if let pipController, !pipController.isPictureInPicturePossible {
+      reasons.append("AVPictureInPictureController still reports isPictureInPicturePossible = false.")
+    }
+    if let error = describe(error: playerItem?.error) {
+      reasons.append("AVPlayerItem error: \(error)")
+    }
+    return dedupe(reasons)
+  }
+
+  private func describe(error: Error?) -> String? {
+    guard let error else { return nil }
+    let nsError = error as NSError
+    return "\(nsError.domain) (\(nsError.code)): \(nsError.localizedDescription)"
+  }
+
+  private func appendDiagnostic(_ message: String) {
+    let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !normalized.isEmpty else { return }
+    if diagnostics.last != normalized {
+      diagnostics.append(normalized)
+    }
+    if diagnostics.count > 20 {
+      diagnostics.removeFirst(diagnostics.count - 20)
+    }
+  }
+
+  private func dedupe(_ messages: [String]) -> [String] {
+    var seen = Set<String>()
+    var deduped: [String] = []
+    for message in messages {
+      let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !normalized.isEmpty, !seen.contains(normalized) else { continue }
+      seen.insert(normalized)
+      deduped.append(normalized)
+    }
+    return deduped
+  }
+
+  private func cleanup() {
+    pendingPiPWorkItem?.cancel()
+    pendingPiPWorkItem = nil
+    pendingPiPResult = nil
+    playerItemStatusObservation?.invalidate()
+    playerItemStatusObservation = nil
+    playerTimeControlObservation?.invalidate()
+    playerTimeControlObservation = nil
+    pipPossibleObservation?.invalidate()
+    pipPossibleObservation = nil
+    pipActiveObservation?.invalidate()
+    pipActiveObservation = nil
+    if let periodicTimeObserver, let player {
+      player.removeTimeObserver(periodicTimeObserver)
+    }
+    periodicTimeObserver = nil
+    if let itemDidPlayToEndObserver {
+      NotificationCenter.default.removeObserver(itemDidPlayToEndObserver)
+      self.itemDidPlayToEndObserver = nil
+    }
+    pipController?.delegate = nil
+    pipController?.stopPictureInPicture()
+    pipController = nil
+    player?.pause()
+    player = nil
+    playerItem = nil
+    hostView.playerLayer.player = nil
   }
 }
 
