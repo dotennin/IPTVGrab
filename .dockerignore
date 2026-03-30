@@ -1,0 +1,27 @@
+# Rust build output
+/target/
+
+# Mobile / iOS / Android artifacts
+/mobile/
+crates/mobile-ffi/
+
+# Runtime output
+/downloads/
+/downloads_backup/
+
+# macOS noise
+.DS_Store
+.AppleDouble
+
+# IDE
+.vscode/
+.idea/
+
+# Secrets / environment overrides
+.env
+.env.local
+.env.*.local
+
+# Tests and docs
+/tests/
+README.md

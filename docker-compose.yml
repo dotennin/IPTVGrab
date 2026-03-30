@@ -1,0 +1,26 @@
+services:
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: iptvgrab:latest
+    container_name: iptvgrab
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8765}:${PORT:-8765}"
+    volumes:
+      # Persist downloaded files and server state (tasks, playlists, health cache)
+      - ./downloads:/app/downloads
+    environment:
+      HOST: 0.0.0.0
+      PORT: ${PORT:-8765}
+      DOWNLOADS_DIR: /app/downloads
+      STATIC_DIR: /app/static
+      AUTH_PASSWORD: ${AUTH_PASSWORD:-}
+      RUST_LOG: ${RUST_LOG:-info}
+    # Optional: uncomment to limit resource usage
+    # deploy:
+    #   resources:
+    #     limits:
+    #       memory: 2g
+    #       cpus: "2.0"

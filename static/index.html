@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>IPTVGrab</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            'gh-bg':         '#0d1117',
+            'gh-surface':    '#161b22',
+            'gh-surface2':   '#21262d',
+            'gh-border':     '#30363d',
+            'gh-text':       '#e6edf3',
+            'gh-muted':      '#8b949e',
+            'gh-blue':       '#388bfd',
+            'gh-blue-light': '#58a6ff',
+            'gh-green':      '#3fb950',
+            'gh-red':        '#f85149',
+            'gh-yellow':     '#e3b341',
+          }
+        }
+      }
+    }
+  </script>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet" />
+  <link href="/compat.css" rel="stylesheet" />
+  <link href="/styles.css?v=31" rel="stylesheet" />
+</head>
+<body class="bg-gh-bg text-gh-text min-h-screen">
+
+  <!-- Navbar -->
+  <nav class="flex items-center justify-between px-4 py-2 bg-gh-surface border-b border-gh-border" id="navbar">
+    <span class="text-lg font-semibold">
+      <i class="fas fa-satellite-dish mr-2 text-gh-blue-light"></i>IPTVGrab
+    </span>
+    <div class="flex items-center gap-3">
+      <button class="d-none inline-flex items-center px-2 py-1 border border-[#444c56] text-gh-muted hover:bg-gh-surface2 hover:text-gh-text rounded text-sm transition-colors" id="logoutBtn" type="button" title="Sign out">
+        <i class="fas fa-sign-out-alt mr-1"></i>Sign out
+      </button>
+    </div>
+  </nav>
+
+  <div class="w-full py-2 px-2">
+    <!-- Top panels grid -->
+    <div class="grid gap-2 xl:grid-cols-12">
+
+      <!-- Left panel: Input -->
+      <div class="xl:col-span-4">
+        <div class="rounded-lg border border-gh-border bg-gh-surface h-full flex flex-col max-h-[600px]">
+          <!-- Tab nav -->
+          <div class="tab-nav px-2 pt-1">
+            <button class="tab-btn tab-active" id="playlist-tab" data-bs-toggle="tab" data-bs-target="#playlistPane" type="button">
+              <i class="fas fa-tv mr-1"></i>Playlist
+            </button>
+            <button class="tab-btn" id="url-tab" data-bs-toggle="tab" data-bs-target="#urlPane" type="button">
+              <i class="fas fa-link mr-1"></i>URL
+            </button>
+            <button class="tab-btn" id="curl-tab" data-bs-toggle="tab" data-bs-target="#curlPane" type="button">
+              <i class="fas fa-terminal mr-1"></i>cURL
+            </button>
+          </div>
+          <!-- Card body -->
+          <div class="p-3 flex-1 flex flex-col min-h-0">
+            <!-- Playlist tab pane -->
+            <div class="tab-pane tab-pane-active" id="playlistPane">
+              <div class="flex gap-2 items-center flex-nowrap">
+                <select class="form-select form-select-sm flex-1 min-w-0" id="playlistSelect">
+                  <option value="">＋ Add playlist…</option>
+                </select>
+                <div class="flex gap-1 items-center flex-shrink-0">
+                  <button class="inline-flex items-center px-2 py-1 border border-[#444c56] text-gh-muted hover:bg-gh-surface2 hover:text-gh-text rounded text-sm transition-colors" id="refreshPlaylistBtn" title="Refresh from URL" disabled>
+                    <i class="fas fa-sync-alt"></i>
+                  </button>
+                  <button class="inline-flex items-center px-2 py-1 border border-[#444c56] text-gh-muted hover:bg-gh-surface2 hover:text-gh-text rounded text-sm transition-colors" id="editPlaylistBtn" title="Edit playlist" disabled>
+                    <i class="fas fa-pencil-alt"></i>
+                  </button>
+                  <button class="d-none inline-flex items-center px-2 py-1 border border-[#444c56] text-gh-muted hover:bg-gh-surface2 hover:text-gh-text rounded text-sm transition-colors" id="refreshAllPlaylistsBtn" title="Refresh all sources">
+                    <i class="fas fa-sync-alt"></i>
+                  </button>
+                  <button class="d-none inline-flex items-center px-2 py-1 border border-[#444c56] text-gh-muted hover:bg-gh-surface2 hover:text-gh-text rounded text-sm transition-colors" id="editAllPlaylistsBtn" title="Edit All Playlists">
+                    <i class="fas fa-edit"></i>
+                  </button>
+                  <button class="inline-flex items-center px-2 py-1 border border-[#da3633]/60 text-gh-red hover:bg-[#da3633]/10 rounded text-sm transition-colors" id="deletePlaylistBtn" title="Delete playlist" disabled>
+                    <i class="fas fa-trash"></i>
+                  </button>
+                </div>
+              </div>
+              <!-- Filter controls placeholder -->
+              <div class="d-none" id="channelFilterBar"></div>
+            </div>
+            <!-- URL tab pane -->
+            <div class="tab-pane" id="urlPane">
+              <div class="mb-3">
+                <label class="form-label text-gh-muted text-sm">M3U8 URL</label>
+                <input type="url" class="form-control font-mono" id="urlInput" placeholder="https://example.com/stream.m3u8?token=..." spellcheck="false" />
+              </div>
+              <label class="form-label text-gh-muted text-sm">Custom Headers</label>
+              <div id="headersList"></div>
+              <button class="inline-flex items-center px-2 py-1 mb-2 border border-[#444c56] text-gh-muted hover:bg-gh-surface2 hover:text-gh-text rounded text-sm transition-colors mt-2" id="addHeaderBtn" type="button">
+                <i class="fas fa-plus mr-1"></i>Add Header
+              </button>
+            </div>
+            <!-- cURL tab pane -->
+            <div class="tab-pane" id="curlPane">
+              <label class="form-label text-gh-muted text-sm">Paste cURL command copied from browser DevTools</label>
+              <textarea class="form-control font-mono" id="curlInput" rows="9" placeholder="curl 'https://example.com/stream.m3u8' \&#10;  -H 'user-agent: Mozilla/5.0 ...' \&#10;  -H 'referer: https://...' \&#10;  ..." spellcheck="false"></textarea>
+            </div>
+
+
+            <!-- Output settings (hidden when playlist tab active) -->
+            <div class="d-none" id="outputSettingsRow">
+              <div class="grid grid-cols-12 gap-3 items-end">
+                <div class="col-span-7">
+                  <label class="form-label text-gh-muted text-sm">Output filename (optional)</label>
+                  <div class="input-group">
+                    <input type="text" class="form-control" id="outputName" placeholder="video_output" />
+                    <span class="input-group-text">.mp4</span>
+                  </div>
+                </div>
+                <div class="col-span-5">
+                  <label class="form-label text-gh-muted text-sm">Concurrency: <span id="concurrencyVal">8</span></label>
+                  <input type="range" class="form-range" id="concurrency" min="1" max="32" value="8" />
+                </div>
+              </div>
+            </div>
+
+            <div class="mt-3 flex gap-2 d-none" id="parseBtnGroup">
+              <button class="inline-flex items-center px-3 py-1.5 bg-[#1f6feb] hover:bg-gh-blue text-white rounded text-sm font-medium transition-colors" id="parseBtn" type="button">
+                <i class="fas fa-search mr-1"></i>Parse stream
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right panel: Stream info (hidden by default) -->
+      <div class="xl:col-span-8 d-none" id="streamInfoPanel">
+        <div class="rounded-lg border border-gh-border bg-gh-surface h-full flex flex-col max-h-[600px]" id="streamInfoCard">
+          <div class="flex items-center justify-between px-4 py-2 border-b border-gh-border">
+            <span><i class="fas fa-info-circle mr-2"></i>Stream info</span>
+            <span id="streamTypeBadge"></span>
+          </div>
+          <div class="p-4 flex-1" id="streamInfoBody">
+            <div class="text-center text-gh-muted py-16" id="streamPlaceholder">
+              <i class="fas fa-play-circle fa-3x mb-3 d-block opacity-25"></i>
+              <p class="mb-0">Stream info will appear here after parsing</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right panel: Channel grid -->
+      <div class="xl:col-span-8" id="channelGridPanel">
+        <div class="rounded-lg border border-gh-border bg-gh-surface h-full flex flex-col max-h-[600px]">
+          <!-- Header -->
+          <div class="flex items-center gap-2 px-3 py-2 border-b border-gh-border flex-wrap" id="channelGridHeader">
+            <span class="whitespace-nowrap font-medium"><i class="fas fa-tv mr-2"></i>Channels</span>
+            <input type="text" class="form-control form-control-sm d-none flex-1 min-w-0" id="channelSearch" placeholder="Search…" style="max-width:300px" />
+            <div class="flex items-center gap-2 ml-auto whitespace-nowrap">
+              <div class="form-check form-switch d-none mb-0" id="healthOnlyWrap">
+                <input class="form-check-input" type="checkbox" role="switch" id="healthOnlyCheck" />
+                <label class="form-check-label text-sm text-gh-muted" for="healthOnlyCheck">Active</label>
+              </div>
+              <span class="d-none text-sm" id="healthProgressBadge">
+                <i class="fas fa-spinner fa-spin mr-1 text-yellow-400"></i>
+                <span id="healthProgressText" class="text-yellow-400"></span>
+              </span>
+              <span class="badge bg-secondary" id="channelCountBadge">0</span>
+            </div>
+          </div>
+          <!-- Body: sidebar + grid -->
+          <div class="flex channel-grid-body flex-1 min-h-0">
+            <div class="channel-group-sidebar d-none w-[60px] md:w-[150px]" id="channelGroupSidebar">
+              <ul class="channel-group-list" id="groupList">
+                <li class="channel-group-item active md:px-2" data-group="">All</li>
+              </ul>
+            </div>
+            <div class="channel-group-resizer d-none" id="channelGroupResizer"></div>
+            <div class="channel-grid-area flex-1 min-w-0 p-1">
+              <div class="text-center text-gh-muted py-16" id="channelPlaceholder">
+                <i class="fas fa-tv fa-2x mb-2 d-block opacity-25"></i>
+                <p class="mb-0 text-sm">Select a playlist to browse channels</p>
+              </div>
+              <div id="channelGrid" class="channel-grid"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Downloads section -->
+    <div class="mt-2">
+      <div class="rounded-lg border border-gh-border bg-gh-surface">
+        <div class="flex items-center justify-between px-4 py-2 border-b border-gh-border flex-wrap gap-2">
+          <span class="font-medium">
+            <i class="fas fa-download mr-2"></i>Downloads
+            <span class="badge bg-secondary ms-1" id="taskCountBadge">0</span>
+          </span>
+          <div class="flex items-center gap-1">
+            <span class="text-gh-muted text-sm mr-1">Sort:</span>
+            <button class="sort-btn active" data-field="created_at">
+              <i class="fas fa-clock mr-1"></i>Added Time<i class="fas fa-arrow-down sort-dir-icon ms-1"></i>
+            </button>
+            <button class="sort-btn" data-field="filename">
+              <i class="fas fa-file mr-1"></i>File Name<i class="fas fa-arrow-down sort-dir-icon ms-1 d-none"></i>
+            </button>
+            <button class="sort-btn" data-field="size">
+              <i class="fas fa-hdd mr-1"></i>File Size<i class="fas fa-arrow-down sort-dir-icon ms-1 d-none"></i>
+            </button>
+          </div>
+        </div>
+        <div class="downloads-layout">
+          <!-- Category sidebar -->
+          <div class="downloads-sidebar">
+            <div class="dl-cat active" data-cat="all" title="All Tasks">
+              <i class="fas fa-layer-group"></i>
+              <span>All Tasks</span>
+              <span class="badge bg-secondary" id="catCount-all">0</span>
+            </div>
+            <div class="dl-cat" data-cat="active" title="Downloading">
+              <i class="fas fa-arrow-circle-down"></i>
+              <span>Downloading</span>
+              <span class="badge bg-secondary" id="catCount-active">0</span>
+            </div>
+            <div class="dl-cat" data-cat="queued" title="Waiting">
+              <i class="fas fa-clock"></i>
+              <span>Waiting</span>
+              <span class="badge bg-secondary" id="catCount-queued">0</span>
+            </div>
+            <div class="dl-cat" data-cat="finished" title="Finished">
+              <i class="fas fa-check-circle"></i>
+              <span>Finished</span>
+              <span class="badge bg-secondary" id="catCount-finished">0</span>
+            </div>
+            <div class="dl-sidebar-footer">
+              <button class="inline-flex items-center justify-center w-full px-2 py-1 border border-[#da3633]/60 text-gh-red hover:bg-[#da3633]/10 rounded text-sm transition-colors" id="clearCompletedBtn" title="Clear failed" type="button">
+                <i class="fas fa-trash mr-1"></i><span>Clear failed</span>
+              </button>
+            </div>
+          </div>
+          <!-- Task list -->
+          <div class="downloads-content p-3">
+            <div class="text-center text-gh-muted py-8" id="tasksPlaceholder">
+              <i class="fas fa-inbox fa-2x mb-2 d-block opacity-25"></i>
+              <p class="mb-0 text-sm">No tasks yet</p>
+            </div>
+            <div id="downloadsList"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast container -->
+  <div id="toastContainer"></div>
+
+  <!-- Edit Playlist modal -->
+  <div class="tw-modal hidden" id="editPlaylistModal" tabindex="-1">
+    <div class="tw-modal-dialog">
+      <div class="tw-modal-content">
+        <div class="tw-modal-header">
+          <h6 class="tw-modal-title"><i class="fas fa-pencil-alt mr-2 text-gh-blue-light"></i>Edit Playlist</h6>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="tw-modal-body">
+          <div class="mb-3">
+            <label class="form-label text-gh-muted text-sm">Playlist Name</label>
+            <input type="text" class="form-control" id="editPlaylistName" placeholder="My IPTV" />
+          </div>
+          <div class="mb-3">
+            <label class="form-label text-gh-muted text-sm">Playlist URL <span class="text-gh-muted">(optional — used for refresh)</span></label>
+            <input type="url" class="form-control font-mono" id="editPlaylistUrl" placeholder="http://iptv-server.com/playlist.m3u" />
+          </div>
+        </div>
+        <div class="tw-modal-footer">
+          <button type="button" class="inline-flex items-center px-3 py-1 bg-gh-surface2 hover:bg-gh-border text-gh-text border border-gh-border rounded text-sm transition-colors" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="inline-flex items-center px-3 py-1 bg-[#1f6feb] hover:bg-gh-blue text-white rounded text-sm transition-colors" id="saveEditPlaylistBtn">
+            <i class="fas fa-save mr-1"></i>Save
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add Playlist modal -->
+  <div class="tw-modal hidden" id="addPlaylistModal" tabindex="-1">
+    <div class="tw-modal-dialog">
+      <div class="tw-modal-content">
+        <div class="tw-modal-header">
+          <h6 class="tw-modal-title"><i class="fas fa-plus-circle mr-2 text-gh-blue-light"></i>Add Playlist</h6>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="tw-modal-body">
+          <div class="mb-3">
+            <label class="form-label text-gh-muted text-sm">Playlist Name (optional)</label>
+            <input type="text" class="form-control" id="newPlaylistName" placeholder="My IPTV" />
+          </div>
+          <div class="tab-nav mb-3">
+            <button class="tab-btn tab-active" data-bs-toggle="tab" data-bs-target="#addByUrl" type="button">
+              <i class="fas fa-link mr-1"></i>URL
+            </button>
+            <button class="tab-btn" data-bs-toggle="tab" data-bs-target="#addByText" type="button">
+              <i class="fas fa-paste mr-1"></i>Paste
+            </button>
+          </div>
+          <div class="tab-pane tab-pane-active" id="addByUrl">
+            <input type="url" class="form-control font-mono" id="newPlaylistUrl" placeholder="http://iptv-server.com/playlist.m3u" />
+            <div class="form-text">Direct link to an M3U/M3U8 IPTV playlist file</div>
+          </div>
+          <div class="tab-pane" id="addByText">
+            <textarea class="form-control font-mono" id="newPlaylistText" rows="8" placeholder="#EXTM3U&#10;#EXTINF:-1 group-title=&quot;Sports&quot;,Channel 1&#10;http://stream.example.com/ch1.m3u8&#10;#EXTINF:-1 group-title=&quot;News&quot;,Channel 2&#10;http://stream.example.com/ch2.m3u8"></textarea>
+          </div>
+        </div>
+        <div class="tw-modal-footer">
+          <button type="button" class="inline-flex items-center px-3 py-1 bg-gh-surface2 hover:bg-gh-border text-gh-text border border-gh-border rounded text-sm transition-colors" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="inline-flex items-center px-3 py-1 bg-[#1f6feb] hover:bg-gh-blue text-white rounded text-sm transition-colors" id="savePlaylistBtn">
+            <i class="fas fa-save mr-1"></i>Save
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Restart recording confirm modal -->
+  <div class="tw-modal hidden" id="confirmRestartRecordingModal" tabindex="-1">
+    <div class="tw-modal-dialog tw-modal-dialog-sm">
+      <div class="tw-modal-content">
+        <div class="tw-modal-header">
+          <h6 class="tw-modal-title"><i class="fas fa-exclamation-triangle mr-2 text-yellow-400"></i>Restart recording?</h6>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="tw-modal-body text-sm text-gh-muted">
+          All recorded segments will be <strong class="text-gh-red">deleted</strong> and recording will start fresh from now.
+        </div>
+        <div class="tw-modal-footer">
+          <button type="button" class="inline-flex items-center px-3 py-1 bg-gh-surface2 hover:bg-gh-border text-gh-text border border-gh-border rounded text-sm transition-colors" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="inline-flex items-center px-3 py-1 bg-[#9e6a03] hover:bg-yellow-600 text-white rounded text-sm transition-colors" id="confirmRestartRecordingBtn">
+            <i class="fas fa-redo mr-1"></i>Restart
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Preview / Watch modal -->
+  <div class="tw-modal hidden" id="previewModal" tabindex="-1">
+    <div class="tw-modal-dialog tw-modal-dialog-xl">
+      <div class="tw-modal-content">
+        <div class="tw-modal-header">
+          <h6 class="tw-modal-title" id="previewModalTitle"><i class="fas fa-play-circle mr-2 text-gh-blue-light"></i>Preview</h6>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="p-0 bg-black">
+          <div id="previewViewport">
+            <video id="previewVideo" tabindex="0" controls style="width:100%;max-height:72vh;display:block"></video>
+          </div>
+        </div>
+        <div class="tw-modal-footer" id="previewModalFooter" style="flex-wrap:wrap;align-items:flex-start;gap:0;padding:0">
+          <div id="clipToggleBar" class="d-flex justify-content-end w-full p-2" style="width:100%">
+            <button id="toggleClipBtn" class="btn btn-sm btn-outline-warning">
+              <i class="fas fa-cut me-1"></i>Clip
+            </button>
+          </div>
+          <div id="clipToolbar" class="d-none clip-toolbar-full">
+            <div class="d-flex justify-content-between mb-1 small px-1">
+              <span class="text-warning"><i class="fas fa-play me-1" style="font-size:.7em"></i><span id="clipStartLabel">0:00</span></span>
+              <span id="clipDurationLabel" class="text-muted"></span>
+              <span class="text-danger"><i class="fas fa-stop me-1" style="font-size:.7em"></i><span id="clipEndLabel">0:00</span></span>
+            </div>
+            <div class="clip-range-wrap mx-1 mb-2">
+              <div class="clip-track"><div class="clip-selection" id="clipSelection"></div></div>
+              <input type="range" id="clipStart" class="clip-range-input" min="0" max="100" step="0.1" value="0">
+              <input type="range" id="clipEnd"   class="clip-range-input" min="0" max="100" step="0.1" value="100">
+            </div>
+            <div class="d-flex align-items-center gap-2 px-1 pb-2">
+              <button id="clipDownloadBtn" class="btn btn-sm btn-success">
+                <i class="fas fa-cut me-1"></i>Download Clip
+              </button>
+              <button id="clipCancelBtn" class="btn btn-sm btn-outline-secondary">Cancel</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- All Playlists Editor modal (fullscreen) -->
+  <div class="tw-modal tw-modal-fullscreen hidden" id="allPlaylistsEditorModal" tabindex="-1">
+    <div class="tw-modal-dialog">
+      <div class="tw-modal-content" style="background-color:#0d1117">
+        <div class="tw-modal-header">
+          <h6 class="tw-modal-title"><i class="fas fa-edit mr-2 text-gh-blue-light"></i>Edit All Playlists</h6>
+          <div class="flex gap-2 items-center">
+            <button class="inline-flex items-center px-2 py-1 border border-[#388bfd]/60 text-gh-blue-light hover:bg-[#388bfd]/10 rounded text-sm transition-colors" id="editorRefreshAllBtn" title="Refresh all sources">
+              <i class="fas fa-sync-alt mr-1"></i>Refresh All
+            </button>
+            <a class="inline-flex items-center px-2 py-1 border border-[#3fb950]/60 text-gh-green hover:bg-[#3fb950]/10 rounded text-sm transition-colors" id="editorExportBtn" href="/api/all-playlists/export.m3u" target="_blank">
+              <i class="fas fa-file-export mr-1"></i>Export M3U
+            </a>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+        </div>
+        <div class="flex flex-1 min-h-0" style="overflow:hidden">
+          <div class="editor-groups-panel">
+            <div class="flex justify-between items-center p-2 border-b border-gh-border">
+              <span class="text-gh-muted text-sm font-semibold"><i class="fas fa-layer-group mr-1"></i>Groups</span>
+              <button class="btn-xs inline-flex items-center px-2 py-0.5 border border-[#388bfd]/60 text-gh-blue-light hover:bg-[#388bfd]/10 rounded transition-colors" id="editorAddGroupBtn">
+                <i class="fas fa-plus mr-1"></i>Add
+              </button>
+            </div>
+            <div id="editorGroupList" class="editor-sortable-list"></div>
+          </div>
+          <div class="editor-resizer" id="editorResizer"></div>
+          <div class="editor-channels-panel flex-grow-1">
+            <div class="flex justify-between items-center p-2 border-b border-gh-border">
+              <span class="text-gh-muted text-sm font-semibold">
+                <i class="fas fa-tv mr-1"></i>Channels
+                <span class="badge bg-secondary ms-1" id="editorChannelCount">0</span>
+                <span class="text-gh-muted ms-2" id="editorSelectedGroupName"></span>
+              </span>
+              <button class="d-none btn-xs inline-flex items-center px-2 py-0.5 border border-[#388bfd]/60 text-gh-blue-light hover:bg-[#388bfd]/10 rounded transition-colors" id="editorAddChannelBtn">
+                <i class="fas fa-plus mr-1"></i>Add Channel
+              </button>
+            </div>
+            <div class="text-center text-gh-muted py-16" id="editorChannelPlaceholder">
+              <i class="fas fa-arrow-left fa-2x mb-2 d-block opacity-25"></i>
+              <p class="mb-0 text-sm">Select a group to edit channels</p>
+            </div>
+            <div id="editorChannelList" class="editor-sortable-list d-none"></div>
+          </div>
+        </div>
+        <div class="tw-modal-footer">
+          <button type="button" class="inline-flex items-center px-3 py-1 bg-gh-surface2 hover:bg-gh-border text-gh-text border border-gh-border rounded text-sm transition-colors" data-bs-dismiss="modal">Close</button>
+          <button type="button" class="inline-flex items-center px-3 py-1 bg-[#1f6feb] hover:bg-gh-blue text-white rounded text-sm transition-colors" id="editorSaveBtn">
+            <i class="fas fa-save mr-1"></i>Save Changes
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add Group mini-modal -->
+  <div class="tw-modal hidden" id="addGroupModal" tabindex="-1" data-bs-backdrop="static">
+    <div class="tw-modal-dialog tw-modal-dialog-sm">
+      <div class="tw-modal-content">
+        <div class="tw-modal-header">
+          <h6 class="tw-modal-title"><i class="fas fa-plus-circle mr-2 text-gh-blue-light"></i>Add Group</h6>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="tw-modal-body">
+          <input type="text" class="form-control form-control-sm" id="newGroupNameInput" placeholder="Group name" />
+        </div>
+        <div class="tw-modal-footer">
+          <button type="button" class="inline-flex items-center px-3 py-1 bg-gh-surface2 hover:bg-gh-border text-gh-text border border-gh-border rounded text-sm transition-colors" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="inline-flex items-center px-3 py-1 bg-[#1f6feb] hover:bg-gh-blue text-white rounded text-sm transition-colors" id="confirmAddGroupBtn"><i class="fas fa-plus mr-1"></i>Add</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add Channel mini-modal -->
+  <div class="tw-modal hidden" id="addChannelModal" tabindex="-1" data-bs-backdrop="static">
+    <div class="tw-modal-dialog">
+      <div class="tw-modal-content">
+        <div class="tw-modal-header">
+          <h6 class="tw-modal-title"><i class="fas fa-plus-circle mr-2 text-gh-blue-light"></i>Add Channel</h6>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="tw-modal-body">
+          <div class="mb-2">
+            <label class="form-label text-gh-muted text-sm mb-1">Channel Name</label>
+            <input type="text" class="form-control form-control-sm" id="newChannelNameInput" placeholder="My Channel" />
+          </div>
+          <div class="mb-2">
+            <label class="form-label text-gh-muted text-sm mb-1">Stream URL</label>
+            <input type="url" class="form-control form-control-sm font-mono" id="newChannelUrlInput" placeholder="http://example.com/stream.m3u8" />
+          </div>
+          <div>
+            <label class="form-label text-gh-muted text-sm mb-1">Logo URL (optional)</label>
+            <input type="url" class="form-control form-control-sm font-mono" id="newChannelLogoInput" placeholder="http://example.com/logo.png" />
+          </div>
+        </div>
+        <div class="tw-modal-footer">
+          <button type="button" class="inline-flex items-center px-3 py-1 bg-gh-surface2 hover:bg-gh-border text-gh-text border border-gh-border rounded text-sm transition-colors" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="inline-flex items-center px-3 py-1 bg-[#1f6feb] hover:bg-gh-blue text-white rounded text-sm transition-colors" id="confirmAddChannelBtn"><i class="fas fa-plus mr-1"></i>Add</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit Channel mini-modal -->
+  <div class="tw-modal hidden" id="editChannelModal" tabindex="-1" data-bs-backdrop="static">
+    <div class="tw-modal-dialog">
+      <div class="tw-modal-content">
+        <div class="tw-modal-header">
+          <h6 class="tw-modal-title"><i class="fas fa-pencil-alt mr-2 text-gh-blue-light"></i>Edit Channel</h6>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="tw-modal-body">
+          <div class="mb-2">
+            <label class="form-label text-gh-muted text-sm mb-1">Channel Name</label>
+            <input type="text" class="form-control form-control-sm" id="editChannelNameInput" />
+          </div>
+          <div class="mb-2">
+            <label class="form-label text-gh-muted text-sm mb-1">Stream URL</label>
+            <input type="url" class="form-control form-control-sm font-mono" id="editChannelUrlInput" />
+          </div>
+          <div>
+            <label class="form-label text-gh-muted text-sm mb-1">Logo URL</label>
+            <input type="url" class="form-control form-control-sm font-mono" id="editChannelLogoInput" />
+          </div>
+          <input type="hidden" id="editChannelIdInput" />
+        </div>
+        <div class="tw-modal-footer">
+          <button type="button" class="inline-flex items-center px-3 py-1 bg-gh-surface2 hover:bg-gh-border text-gh-text border border-gh-border rounded text-sm transition-colors" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="inline-flex items-center px-3 py-1 bg-[#1f6feb] hover:bg-gh-blue text-white rounded text-sm transition-colors" id="confirmEditChannelBtn"><i class="fas fa-save mr-1"></i>Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.6/Sortable.min.js"></script>
+  <script src="/bootstrap-shim.js"></script>
+  <script src="/app.js?v=31"></script>
+</body>
+</html>
