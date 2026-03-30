@@ -1511,7 +1511,7 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
     required bool waitingForInitialHealthResults,
   }) {
     final theme = Theme.of(context);
-    final isActiveOnly = _showUnavailableChannels;
+    final isActiveOnly = !_showUnavailableChannels;
 
     return Row(
       children: [
@@ -1519,7 +1519,7 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
         Checkbox(
           value: isActiveOnly,
           onChanged: (value) =>
-              setState(() => _showUnavailableChannels = value ?? false),
+              setState(() => _showUnavailableChannels = !(value ?? true)),
         ),
         // Label text
         Text(
