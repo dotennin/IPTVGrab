@@ -1868,6 +1868,8 @@ async fn add_playlist(
     };
     state.playlists.write().await.insert(id.clone(), pl.clone());
     state.save_playlists().await;
+    let urls: Vec<String> = pl.channels.iter().map(|c| c.url.clone()).collect();
+    trigger_health_check(state, urls).await;
     (
         StatusCode::CREATED,
         Json(serde_json::to_value(&pl).unwrap()),
@@ -1983,6 +1985,13 @@ async fn refresh_playlist(
         }
     }
     state.save_playlists().await;
+    let urls: Vec<String> = {
+        let pl = state.playlists.read().await;
+        pl.get(&id)
+            .map(|p| p.channels.iter().map(|c| c.url.clone()).collect())
+            .unwrap_or_default()
+    };
+    trigger_health_check(state, urls).await;
     Json(serde_json::json!({"channel_count": count})).into_response()
 }
 
@@ -2038,6 +2047,13 @@ async fn refresh_all_playlists(State(state): State<AppState>) -> impl IntoRespon
         }
     }
     state.save_playlists().await;
+    let urls: Vec<String> = {
+        let pl = state.playlists.read().await;
+        pl.values()
+            .flat_map(|p| p.channels.iter().map(|c| c.url.clone()))
+            .collect()
+    };
+    trigger_health_check(state, urls).await;
     Json(serde_json::json!({"ok": true, "errors": errors})).into_response()
 }
 
@@ -2323,7 +2339,72 @@ async fn export_m3u(State(state): State<AppState>) -> impl IntoResponse {
 async fn get_health_check(State(state): State<AppState>) -> impl IntoResponse {
     let hs = state.health_state.read().await.clone();
     let cache = state.health_cache.read().await.clone();
-    Json(serde_json::json!({"state": hs, "cache": cache}))
+    Json(serde_json::json!({
+        "running": hs.running,
+        "total": hs.total,
+        "done": hs.done,
+        "started_at": hs.started_at,
+        "cache": cache,
+    }))
+}
+
+/// Deduplicate URLs, mark `running: true` immediately (so the next GET already
+/// reflects the new state), then spawn the actual HTTP checks in the background.
+/// Skips silently if a check is already running.
+async fn trigger_health_check(state: AppState, urls: Vec<String>) {
+    {
+        let hs = state.health_state.read().await;
+        if hs.running {
+            return;
+        }
+    }
+    let mut seen = std::collections::HashSet::new();
+    let deduped: Vec<String> = urls
+        .into_iter()
+        .filter(|u| !u.is_empty() && seen.insert(u.clone()))
+        .collect();
+    if deduped.is_empty() {
+        return;
+    }
+    let total = deduped.len();
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs_f64();
+    // Set running: true BEFORE spawning so the client sees it on the very next poll.
+    *state.health_state.write().await = HealthState {
+        running: true,
+        total,
+        done: 0,
+        started_at: now,
+    };
+    tokio::spawn(async move {
+        let sem = Arc::new(Semaphore::new(50));
+        let mut handles = Vec::new();
+        for url in deduped {
+            let permit = sem.clone().acquire_owned().await.unwrap();
+            let sc = state.clone();
+            let u = url.clone();
+            handles.push(tokio::spawn(async move {
+                let status = check_url(&u).await;
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs_f64();
+                sc.health_cache
+                    .write()
+                    .await
+                    .insert(u, HealthEntry { status, checked_at: now });
+                sc.health_state.write().await.done += 1;
+                drop(permit);
+            }));
+        }
+        for h in handles {
+            let _ = h.await;
+        }
+        state.health_state.write().await.running = false;
+        state.save_health_cache().await;
+    });
 }
 
 async fn post_health_check(State(state): State<AppState>) -> impl IntoResponse {
@@ -2338,60 +2419,18 @@ async fn post_health_check(State(state): State<AppState>) -> impl IntoResponse {
         }
     }
 
-    // Collect all enabled channels from merged view — keyed by URL (matches frontend)
-    let channels: Vec<String> = {
+    let urls: Vec<String> = {
         let playlists = state.playlists.read().await;
-        let existing = state.merged_config.read().await;
-        let groups = build_merged_view(&playlists, &existing);
-        groups
-            .into_iter()
-            .filter(|g| g.enabled)
-            .flat_map(|g| g.channels.into_iter().filter(|c| c.enabled).map(|c| c.url))
+        playlists
+            .values()
+            .flat_map(|p| p.channels.iter().map(|c| c.url.clone()))
             .collect()
     };
-
-    let total = channels.len();
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs_f64();
-    *state.health_state.write().await = HealthState {
-        running: true,
-        total,
-        done: 0,
-        started_at: now,
+    let total = {
+        let mut seen = std::collections::HashSet::new();
+        urls.iter().filter(|u| !u.is_empty() && seen.insert(*u)).count()
     };
-
-    let state_clone = state.clone();
-    tokio::spawn(async move {
-        let sem = Arc::new(Semaphore::new(50));
-        let mut handles = Vec::new();
-        for url in channels {
-            let permit = sem.clone().acquire_owned().await.unwrap();
-            let sc = state_clone.clone();
-            let u = url.clone();
-            handles.push(tokio::spawn(async move {
-                let status = check_url(&u).await;
-                let now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs_f64();
-                let entry = HealthEntry {
-                    status,
-                    checked_at: now,
-                };
-                sc.health_cache.write().await.insert(u, entry);
-                sc.health_state.write().await.done += 1;
-                drop(permit);
-            }));
-        }
-        for h in handles {
-            let _ = h.await;
-        }
-        state_clone.health_state.write().await.running = false;
-        state_clone.save_health_cache().await;
-    });
-
+    trigger_health_check(state, urls).await;
     Json(serde_json::json!({"ok": true, "total": total})).into_response()
 }
 
