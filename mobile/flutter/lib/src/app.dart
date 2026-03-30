@@ -2049,6 +2049,29 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
             : AppBar(
                 title: Text(widget.title),
                 actions: <Widget>[
+                  if (widget.onGrabRequested != null)
+                    IconButton(
+                      tooltip: 'Grab',
+                      onPressed: widget.onGrabRequested,
+                      icon: const Icon(Icons.download_for_offline),
+                    ),
+                  if (_canUsePictureInPicture)
+                    IconButton(
+                      tooltip: 'Picture in picture',
+                      onPressed: _enteringPictureInPicture
+                          ? null
+                          : _enterPictureInPicture,
+                      icon: const Icon(Icons.picture_in_picture_alt_outlined),
+                    ),
+                  IconButton(
+                    tooltip: 'Copy URL',
+                    onPressed: () => _copyToClipboard(
+                      context,
+                      _resolvedCopyUrl,
+                      label: _resolvedCopyLabel,
+                    ),
+                    icon: const Icon(Icons.copy),
+                  ),
                   if (widget.localFilePath != null &&
                       widget.localFileName != null)
                     IconButton(
@@ -2071,23 +2094,6 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
                       ),
                       icon: const Icon(Icons.photo_library_outlined),
                     ),
-                  if (_canUsePictureInPicture)
-                    IconButton(
-                      tooltip: 'Picture in picture',
-                      onPressed: _enteringPictureInPicture
-                          ? null
-                          : _enterPictureInPicture,
-                      icon: const Icon(Icons.picture_in_picture_alt_outlined),
-                    ),
-                  IconButton(
-                    tooltip: 'Copy URL',
-                    onPressed: () => _copyToClipboard(
-                      context,
-                      _resolvedCopyUrl,
-                      label: _resolvedCopyLabel,
-                    ),
-                    icon: const Icon(Icons.copy),
-                  ),
                 ],
               ),
         body: SafeArea(
@@ -2125,41 +2131,21 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
                         ],
                       ),
                       const SizedBox(height: 12),
-                      if (widget.onGrabRequested != null ||
-                          _canUsePictureInPicture)
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: <Widget>[
-                            if (widget.onGrabRequested != null)
-                              OutlinedButton.icon(
-                                onPressed: widget.onGrabRequested,
-                                icon: const Icon(Icons.download_for_offline),
-                                label: const Text('Grab'),
-                              ),
-                            if (_canUsePictureInPicture)
-                              OutlinedButton.icon(
-                                onPressed: _enteringPictureInPicture
-                                    ? null
-                                    : _enterPictureInPicture,
-                                icon: const Icon(
-                                  Icons.picture_in_picture_alt_outlined,
-                                ),
-                                label: const Text('Picture in picture'),
-                              ),
-                          ],
+                      if (_usesNativeIosPlayer &&
+                          _canUsePictureInPicture &&
+                          _pictureInPictureFailure != null)
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton.icon(
+                            onPressed: _showPictureInPictureDiagnosticsDialog,
+                            icon: const Icon(Icons.info_outline),
+                            label: const Text('Show PiP diagnostics'),
+                          ),
                         ),
                       if (_usesNativeIosPlayer &&
                           _canUsePictureInPicture &&
-                          (_pictureInPictureFailure != null ||
-                              _pictureInPictureDiagnostics.isNotEmpty))
-                        Padding(
-                          padding: const EdgeInsets.only(top: 12),
-                          child: _buildPictureInPictureCard(context),
-                        ),
-                      if (widget.onGrabRequested != null ||
-                          _canUsePictureInPicture)
-                        const SizedBox(height: 12),
+                          _pictureInPictureFailure != null)
+                        const SizedBox(height: 8),
                       Align(
                         alignment: Alignment.centerLeft,
                         child: SelectableText(
@@ -2387,65 +2373,41 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
     );
   }
 
-  Widget _buildPictureInPictureCard(BuildContext context) {
-    final reasons = _pictureInPictureDiagnostics;
-    final summary = _pictureInPictureFailure ??
-        ((_iosController?.isPictureInPicturePossible ?? false)
-            ? 'Picture in Picture is ready for the current stream.'
-            : 'Picture in Picture is not ready yet for the current stream.');
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: _appSurfaceAlt,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: _pictureInPictureFailure != null ? _appDanger : _appPrimary,
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Row(
-            children: <Widget>[
-              Icon(
-                _pictureInPictureFailure != null
-                    ? Icons.picture_in_picture_alt_outlined
-                    : Icons.check_circle_outline,
-                size: 18,
-                color:
-                    _pictureInPictureFailure != null ? _appDanger : _appPrimary,
-              ),
-              const SizedBox(width: 8),
-              const Text(
-                'PiP diagnostics',
-                style: TextStyle(fontWeight: FontWeight.w600),
-              ),
-            ],
+  Future<void> _showPictureInPictureDiagnosticsDialog() {
+    final message =
+        _pictureInPictureFailure ?? 'Picture in Picture diagnostics';
+    final mergedReasons = _dedupeMessages(<String>[
+      ..._pictureInPictureDiagnostics,
+      ...(_iosController?.diagnostics ?? const <String>[]),
+    ]);
+    return showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Picture in Picture diagnostics'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Text(message),
+                if (mergedReasons.isNotEmpty) ...<Widget>[
+                  const SizedBox(height: 12),
+                  for (final reason in mergedReasons)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Text('• $reason'),
+                    ),
+                ],
+              ],
+            ),
           ),
-          const SizedBox(height: 8),
-          Text(summary),
-          if (reasons.isNotEmpty) ...<Widget>[
-            const SizedBox(height: 8),
-            for (final reason in reasons)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 4),
-                child: Text(
-                  '• $reason',
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodySmall
-                      ?.copyWith(color: _appTextMuted),
-                ),
-              ),
-          ],
-          const SizedBox(height: 8),
-          Text(
-            'iOS now uses a native AVPlayer-backed surface here so PiP and playback come from the same player instance.',
-            style: Theme.of(context)
-                .textTheme
-                .bodySmall
-                ?.copyWith(color: _appTextMuted),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
           ),
         ],
       ),
@@ -2465,40 +2427,7 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
       _pictureInPictureReasons = mergedReasons;
     });
     _showMessage(context, message, error: true);
-    unawaited(
-      showDialog<void>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Picture in Picture failed'),
-          content: SizedBox(
-            width: double.maxFinite,
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  Text(message),
-                  if (mergedReasons.isNotEmpty) ...<Widget>[
-                    const SizedBox(height: 12),
-                    for (final reason in mergedReasons)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: Text('• $reason'),
-                      ),
-                  ],
-                ],
-              ),
-            ),
-          ),
-          actions: <Widget>[
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Close'),
-            ),
-          ],
-        ),
-      ),
-    );
+    unawaited(_showPictureInPictureDiagnosticsDialog());
   }
 }
 
