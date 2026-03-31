@@ -12,10 +12,10 @@ from typing import Optional
 
 import aiohttp
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from starlette.middleware.base import BaseHTTPMiddleware
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from downloader import M3U8Downloader, parse_curl_command
 
@@ -66,45 +66,87 @@ def _record_failure(ip: str) -> tuple[bool, int]:
     return False, 0
 
 
-class AuthMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        if not AUTH_PASSWORD:
-            return await call_next(request)
+class AuthMiddleware:
+    """Pure ASGI auth middleware — does NOT buffer streaming responses."""
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
 
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] not in ("http", "websocket"):
+            await self.app(scope, receive, send)
+            return
+
+        if scope["type"] == "websocket":
+            path = scope.get("path", "")
+            # WebSocket auth is handled inside the WS handler
+            if not AUTH_PASSWORD or path.startswith("/ws/"):
+                await self.app(scope, receive, send)
+                return
+            # Check session cookie from headers
+            headers = dict(scope.get("headers", []))
+            cookie_header = headers.get(b"cookie", b"").decode()
+            token = None
+            for part in cookie_header.split(";"):
+                k, _, v = part.strip().partition("=")
+                if k == "session":
+                    token = v
+                    break
+            if token and token in sessions:
+                await self.app(scope, receive, send)
+            else:
+                # Reject: close with 403
+                await send({"type": "websocket.close", "code": 4403})
+            return
+
+        request = Request(scope, receive)
         path = request.url.path
 
-        # Always allow login page and login/logout API
+        if not AUTH_PASSWORD:
+            await self.app(scope, receive, send)
+            return
+
+        # Always allow login page, login/logout API, and static assets
         if path in ("/login", "/api/login", "/api/logout"):
-            return await call_next(request)
-
-        # Always allow static assets (needed by login page)
+            await self.app(scope, receive, send)
+            return
         if Path(path).suffix.lower() in _STATIC_EXTS:
-            return await call_next(request)
-
-        # WebSocket upgrade requests: pass through, auth handled inside WS handler
-        if path.startswith("/ws/"):
-            return await call_next(request)
+            await self.app(scope, receive, send)
+            return
 
         token = request.cookies.get("session")
         if token and token in sessions:
-            return await call_next(request)
+            await self.app(scope, receive, send)
+            return
 
         if path.startswith("/api/"):
-            return JSONResponse({"detail": "Unauthorized. Please log in."}, status_code=401)
+            response = JSONResponse({"detail": "Unauthorized. Please log in."}, status_code=401)
+        else:
+            response = RedirectResponse("/login")
+        await response(scope, receive, send)
 
-        return RedirectResponse("/login")
 
 # AuthMiddleware must be added before NoCacheStaticMiddleware
 app.add_middleware(AuthMiddleware)
 
-# Prevent browsers from caching JS/CSS so UI updates are always visible
-class NoCacheStaticMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        response = await call_next(request)
-        path = request.url.path
-        if path.endswith((".js", ".css")):
-            response.headers["Cache-Control"] = "no-store"
-        return response
+
+class NoCacheStaticMiddleware:
+    """Pure ASGI middleware — adds no-store header for JS/CSS without buffering."""
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or not scope.get("path", "").endswith((".js", ".css")):
+            await self.app(scope, receive, send)
+            return
+
+        async def send_with_header(message):
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers", []))
+                headers.append((b"cache-control", b"no-store"))
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, receive, send_with_header)
 
 app.add_middleware(NoCacheStaticMiddleware)
 
@@ -819,9 +861,25 @@ def _fmt_hms(secs: float) -> str:
     return f"{m:02d}m{s:02d}s"
 
 
+async def _pipe_proc(proc: asyncio.subprocess.Process, chunk_size: int = 65536):
+    """Async generator that yields stdout chunks from a subprocess, then awaits it."""
+    try:
+        while True:
+            chunk = await proc.stdout.read(chunk_size)
+            if not chunk:
+                break
+            yield chunk
+    finally:
+        await proc.wait()
+
+
 @app.post("/api/tasks/{task_id}/clip")
 async def clip_task(task_id: str, req: ClipRequest):
-    """Trim a task's video to the given time range and return the clip filename."""
+    """Trim a task's video to the given time range and stream it directly to the client.
+
+    The clip is piped from ffmpeg stdout — no file is written to the downloads
+    folder, and streaming starts immediately so there is no proxy timeout.
+    """
     task = tasks.get(task_id)
     if not task:
         raise HTTPException(404, "Task not found")
@@ -829,7 +887,9 @@ async def clip_task(task_id: str, req: ClipRequest):
         raise HTTPException(400, "Invalid clip range (end must be ≥ start + 0.5 s)")
 
     status = task.get("status")
-    clip_name = None
+
+    # Common ffmpeg output flags for a streamable fragmented MP4 on stdout.
+    _stream_flags = ["-c", "copy", "-movflags", "frag_keyframe+empty_moov", "-f", "mp4", "pipe:1"]
 
     # ── Case 1: completed task — clip the final MP4 ──────────────────────────
     if status == "completed" and task.get("output"):
@@ -838,22 +898,21 @@ async def clip_task(task_id: str, req: ClipRequest):
             raise HTTPException(404, "Output file not found")
         stem = Path(task["output"]).stem
         clip_name = f"{stem}_clip_{_fmt_hms(req.start)}-{_fmt_hms(req.end)}.mp4"
-        clip_path = DOWNLOADS_DIR / clip_name
         cmd = [
             "ffmpeg", "-y",
             "-ss", str(req.start),
             "-i", str(input_path),
             "-t", str(req.end - req.start),
-            "-c", "copy", "-movflags", "+faststart",
-            str(clip_path),
+            *_stream_flags,
         ]
         proc = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
+            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
         )
-        await proc.wait()
-        if proc.returncode != 0:
-            raise HTTPException(500, "ffmpeg clip failed")
-        return {"filename": clip_name}
+        return StreamingResponse(
+            _pipe_proc(proc),
+            media_type="video/mp4",
+            headers={"Content-Disposition": f'attachment; filename="{clip_name}"'},
+        )
 
     # ── Case 2: in-progress task — clip from tmpdir segments ─────────────────
     tmpdir = task.get("tmpdir")
@@ -865,7 +924,6 @@ async def clip_task(task_id: str, req: ClipRequest):
         if stem.endswith(".mp4"):
             stem = stem[:-4]
         clip_name = f"{stem}_clip_{_fmt_hms(req.start)}-{_fmt_hms(req.end)}.mp4"
-        clip_path = DOWNLOADS_DIR / clip_name
 
         if is_cmaf:
             seg_files = sorted(tmpdir_path.glob(f"seg_*{seg_ext}"))
@@ -888,8 +946,7 @@ async def clip_task(task_id: str, req: ClipRequest):
                 "-ss", str(req.start),
                 "-i", str(raw_path),
                 "-t", str(req.end - req.start),
-                "-c", "copy", "-movflags", "+faststart",
-                str(clip_path),
+                *_stream_flags,
             ]
         else:
             seg_files = sorted(tmpdir_path.glob("seg_*.ts"))
@@ -905,17 +962,17 @@ async def clip_task(task_id: str, req: ClipRequest):
                 "-i", str(list_file),
                 "-ss", str(req.start),
                 "-t", str(req.end - req.start),
-                "-c", "copy", "-movflags", "+faststart",
-                str(clip_path),
+                *_stream_flags,
             ]
 
         proc = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
+            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
         )
-        await proc.wait()
-        if proc.returncode != 0:
-            raise HTTPException(500, "ffmpeg clip failed")
-        return {"filename": clip_name}
+        return StreamingResponse(
+            _pipe_proc(proc),
+            media_type="video/mp4",
+            headers={"Content-Disposition": f'attachment; filename="{clip_name}"'},
+        )
 
     raise HTTPException(400, "Task cannot be clipped in its current state")
 
