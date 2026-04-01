@@ -27,3 +27,4 @@ hex                = { workspace = true }
 regex-lite         = "0.1"
 chrono             = { workspace = true }
 url                = { workspace = true }
+tokio-util         = { workspace = true }

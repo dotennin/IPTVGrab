@@ -1447,13 +1447,19 @@ clipDownloadBtn.addEventListener("click", async () => {
       const d = await res.json();
       throw new Error(d.detail || "Clip failed");
     }
-    const { filename } = await res.json();
+    // Server streams the clip directly — derive filename from Content-Disposition.
+    const cd = res.headers.get("Content-Disposition") || "";
+    const fnMatch = cd.match(/filename="?([^"]+)"?/);
+    const filename = fnMatch ? fnMatch[1] : "clip.mp4";
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = `/downloads/${filename}`;
+    a.href = url;
     a.download = filename;
     document.body.appendChild(a);
     a.click();
     a.remove();
+    URL.revokeObjectURL(url);
     toast(`Clip ready: ${filename}`, "success");
   } catch (e) {
     toast(e.message, "danger");

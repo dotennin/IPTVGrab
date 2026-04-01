@@ -1084,8 +1084,7 @@ async fn clip_task(
             .to_string_lossy()
             .to_string();
         let clip_name = format!("{stem}_clip_{suffix}.mp4");
-        let clip_path = downloads_dir.join(&clip_name);
-        let out = tokio::process::Command::new("ffmpeg")
+        let child = tokio::process::Command::new("ffmpeg")
             .args([
                 "-y",
                 "-ss",
@@ -1097,28 +1096,26 @@ async fn clip_task(
                 "-c",
                 "copy",
                 "-movflags",
-                "+faststart",
-                &clip_path.to_string_lossy(),
+                "frag_keyframe+empty_moov",
+                "-f",
+                "mp4",
+                "pipe:1",
             ])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::piped())
-            .output()
-            .await;
-        return match out {
-            Ok(o) if o.status.success() => {
-                Json(serde_json::json!({"filename": clip_name})).into_response()
-            }
-            Ok(o) => {
-                let stderr = String::from_utf8_lossy(&o.stderr)
-                    .lines()
-                    .last()
-                    .unwrap_or("")
-                    .to_string();
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({"detail": format!("ffmpeg clip failed: {stderr}")})),
-                )
-                    .into_response()
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn();
+        return match child {
+            Ok(mut proc) => {
+                let stdout = proc.stdout.take().unwrap();
+                let stream = tokio_util::io::ReaderStream::new(stdout);
+                Response::builder()
+                    .header("Content-Type", "video/mp4")
+                    .header(
+                        "Content-Disposition",
+                        format!("attachment; filename=\"{clip_name}\""),
+                    )
+                    .body(Body::from_stream(stream))
+                    .unwrap()
             }
             Err(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -1156,7 +1153,6 @@ async fn clip_task(
         .trim_end_matches(".mp4")
         .to_string();
     let clip_name = format!("{stem}_clip_{suffix}.mp4");
-    let clip_path = downloads_dir.join(&clip_name);
     let is_cmaf = task.is_cmaf.unwrap_or(false);
     let seg_ext = task
         .seg_ext
@@ -1165,7 +1161,9 @@ async fn clip_task(
         .trim_start_matches('.')
         .to_string();
 
-    let ffmpeg_out = if is_cmaf {
+    let stream_flags = ["-c", "copy", "-movflags", "frag_keyframe+empty_moov", "-f", "mp4", "pipe:1"];
+
+    let child = if is_cmaf {
         let mut seg_files: Vec<_> = std::fs::read_dir(&tmpdir)
             .into_iter()
             .flatten()
@@ -1200,16 +1198,11 @@ async fn clip_task(
                 &raw_path.to_string_lossy(),
                 "-t",
                 &duration.to_string(),
-                "-c",
-                "copy",
-                "-movflags",
-                "+faststart",
-                &clip_path.to_string_lossy(),
             ])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::piped())
-            .output()
-            .await
+            .args(stream_flags)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()
     } else {
         let mut seg_files: Vec<_> = std::fs::read_dir(&tmpdir)
             .into_iter()
@@ -1247,32 +1240,24 @@ async fn clip_task(
                 &body.start.to_string(),
                 "-t",
                 &duration.to_string(),
-                "-c",
-                "copy",
-                "-movflags",
-                "+faststart",
-                &clip_path.to_string_lossy(),
             ])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::piped())
-            .output()
-            .await
+            .args(stream_flags)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()
     };
-    match ffmpeg_out {
-        Ok(o) if o.status.success() => {
-            Json(serde_json::json!({"filename": clip_name})).into_response()
-        }
-        Ok(o) => {
-            let stderr = String::from_utf8_lossy(&o.stderr)
-                .lines()
-                .last()
-                .unwrap_or("")
-                .to_string();
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"detail": format!("ffmpeg clip failed: {stderr}")})),
-            )
-                .into_response()
+    match child {
+        Ok(mut proc) => {
+            let stdout = proc.stdout.take().unwrap();
+            let stream = tokio_util::io::ReaderStream::new(stdout);
+            Response::builder()
+                .header("Content-Type", "video/mp4")
+                .header(
+                    "Content-Disposition",
+                    format!("attachment; filename=\"{clip_name}\""),
+                )
+                .body(Body::from_stream(stream))
+                .unwrap()
         }
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
