@@ -113,7 +113,7 @@ server:
 	$(CARGO) build --release -p server
 
 run:
-	$(CARGO) run -p server
+	$(CARGO) watch -w crates -x 'run -p server'
 
 # ── iOS native artifacts for Flutter ──────────────────────────────────────────
 ios-targets:
