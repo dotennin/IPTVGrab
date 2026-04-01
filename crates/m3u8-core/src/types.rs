@@ -12,6 +12,8 @@ pub struct DownloadConfig {
     pub concurrency: usize,
     pub retry: u32,
     pub task_id: String,
+    /// For resumed live recordings: elapsed seconds accumulated in prior sessions.
+    pub base_elapsed_sec: u64,
 }
 
 impl Default for DownloadConfig {
@@ -25,6 +27,7 @@ impl Default for DownloadConfig {
             concurrency: 8,
             retry: 3,
             task_id: uuid::Uuid::new_v4().to_string(),
+            base_elapsed_sec: 0,
         }
     }
 }

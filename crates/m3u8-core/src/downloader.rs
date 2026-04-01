@@ -245,28 +245,14 @@ impl Downloader {
         let segments = &media_pl.segments;
         let total = segments.len();
 
-        let _ = tx
-            .send(ProgressEvent::Downloading {
-                total,
-                downloaded: 0,
-                failed: 0,
-                progress: 0,
-                speed_mbps: 0.0,
-                bytes_downloaded: 0,
-                tmpdir: tmpdir.to_string_lossy().to_string(),
-                is_cmaf: cmaf,
-                seg_ext: seg_ext.to_string(),
-                target_duration: target_dur,
-            })
-            .await;
-
         let semaphore = Arc::new(Semaphore::new(self.config.concurrency));
         let bytes_dl = Arc::new(AtomicU64::new(0));
         let downloaded = Arc::new(AtomicU64::new(0));
         let failed_count = Arc::new(AtomicU64::new(0));
         let cancelled = self.cancelled.clone();
 
-        // Check for already-downloaded segments (resume)
+        // Check for already-downloaded segments (resume) — must happen before
+        // emitting the initial progress event so the UI shows correct totals.
         for i in 0..total {
             let seg_path = tmpdir.join(format!("seg_{i:06}{seg_ext}"));
             if seg_path.exists() {
@@ -280,6 +266,28 @@ impl Downloader {
                 }
             }
         }
+
+        let base_dl = downloaded.load(Ordering::Relaxed) as usize;
+        let base_bytes = bytes_dl.load(Ordering::Relaxed);
+        let base_progress = if total > 0 {
+            ((base_dl as f64 / total as f64) * 100.0) as u8
+        } else {
+            0
+        };
+        let _ = tx
+            .send(ProgressEvent::Downloading {
+                total,
+                downloaded: base_dl,
+                failed: 0,
+                progress: base_progress,
+                speed_mbps: 0.0,
+                bytes_downloaded: base_bytes,
+                tmpdir: tmpdir.to_string_lossy().to_string(),
+                is_cmaf: cmaf,
+                seg_ext: seg_ext.to_string(),
+                target_duration: target_dur,
+            })
+            .await;
 
         // Spawn all segment download tasks
         let mut handles = Vec::with_capacity(total);
@@ -392,8 +400,10 @@ impl Downloader {
             let failed = failed_count.load(Ordering::Relaxed) as usize;
             let bytes = bytes_dl.load(Ordering::Relaxed);
             let elapsed = start.elapsed().as_secs_f64();
+            // Speed is based on newly downloaded bytes only (excludes resumed base).
+            let new_bytes = bytes.saturating_sub(base_bytes);
             let speed = if elapsed > 0.0 {
-                bytes as f64 / elapsed / 1_048_576.0
+                new_bytes as f64 / elapsed / 1_048_576.0
             } else {
                 0.0
             };
@@ -480,11 +490,11 @@ impl Downloader {
         start: Instant,
     ) -> Result<(), DownloadError> {
         let semaphore = Arc::new(Semaphore::new(self.config.concurrency));
-        let bytes_dl = Arc::new(AtomicU64::new(0));
         let cancelled = self.cancelled.clone();
         let stop_recording = self.stop_recording.clone();
 
-        // Resume: count existing segments
+        // Resume: count existing segments and sum their bytes so the progress
+        // display continues from where the previous session left off.
         let existing: Vec<_> = {
             let mut v: Vec<_> = tmpdir
                 .read_dir()
@@ -498,6 +508,12 @@ impl Downloader {
             v
         };
         let mut seg_idx: usize = existing.len();
+        let base_bytes: u64 = existing
+            .iter()
+            .map(|e| std::fs::metadata(e.path()).map(|m| m.len()).unwrap_or(0))
+            .sum();
+        let bytes_dl = Arc::new(AtomicU64::new(base_bytes));
+
         let mut audio_seg_idx: usize = if let Some(ref ad) = audio_tmpdir {
             ad.read_dir()
                 .ok()
@@ -523,13 +539,14 @@ impl Downloader {
         }
 
         let poll_interval = (current_pl.target_duration as f64 / 2.0).max(1.0);
+        let base_elapsed = self.config.base_elapsed_sec;
 
         let _ = tx
             .send(ProgressEvent::Recording {
                 recorded_segments: seg_idx,
-                bytes_downloaded: 0,
+                bytes_downloaded: base_bytes,
                 speed_mbps: 0.0,
-                elapsed_sec: 0,
+                elapsed_sec: base_elapsed,
                 tmpdir: tmpdir.to_string_lossy().to_string(),
                 is_cmaf: cmaf,
                 seg_ext: seg_ext.to_string(),
@@ -665,8 +682,10 @@ impl Downloader {
             // Emit progress
             let bytes = bytes_dl.load(Ordering::Relaxed);
             let elapsed = start.elapsed().as_secs_f64();
+            // Speed based on new bytes only; elapsed is cumulative across resume sessions.
+            let new_bytes = bytes.saturating_sub(base_bytes);
             let speed = if elapsed > 0.0 {
-                bytes as f64 / elapsed / 1_048_576.0
+                new_bytes as f64 / elapsed / 1_048_576.0
             } else {
                 0.0
             };
@@ -675,7 +694,7 @@ impl Downloader {
                     recorded_segments: seg_idx,
                     bytes_downloaded: bytes,
                     speed_mbps: (speed * 100.0).round() / 100.0,
-                    elapsed_sec: elapsed as u64,
+                    elapsed_sec: base_elapsed + elapsed as u64,
                     tmpdir: tmpdir.to_string_lossy().to_string(),
                     is_cmaf: cmaf,
                     seg_ext: seg_ext.to_string(),

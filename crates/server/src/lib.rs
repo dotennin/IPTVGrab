@@ -756,6 +756,7 @@ async fn resume_task(
         quality,
         concurrency: task.concurrency,
         task_id: task_id.clone(),
+        base_elapsed_sec: task.elapsed_sec.unwrap_or(0),
         ..Default::default()
     };
     drop(tasks);

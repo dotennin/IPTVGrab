@@ -937,17 +937,6 @@ class _TasksTab extends StatelessWidget {
                           icon: const Icon(Icons.photo_library_outlined),
                           label: const Text('Save to Photos'),
                         ),
-                      if (task.output != null)
-                        OutlinedButton.icon(
-                          onPressed: () => _copyToClipboard(
-                            context,
-                            controller.downloadUri(task.output!).toString(),
-                            label:
-                                'Saved media URL copied. It still requires the active session cookie when auth is enabled.',
-                          ),
-                          icon: const Icon(Icons.copy),
-                          label: const Text('Copy saved file URL'),
-                        ),
                       if (task.canPreview)
                         FilledButton.tonalIcon(
                           onPressed: () => _openMediaPlayer(
