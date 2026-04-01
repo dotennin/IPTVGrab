@@ -101,3 +101,6 @@ yarn-error.log*
 /mobile/flutter/android/key.properties
 /mobile/flutter/android/**/*.keystore
 /mobile/flutter/android/**/*.jks
+
+# python
+__pycache__/

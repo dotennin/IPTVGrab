@@ -60,7 +60,7 @@ class _M3u8FlutterClientAppState extends State<M3u8FlutterClientApp>
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'IPTVGrab',
+      title: 'MediaNest',
       theme: ThemeData(
         useMaterial3: true,
         brightness: Brightness.dark,
@@ -155,9 +155,13 @@ class _M3u8FlutterClientAppState extends State<M3u8FlutterClientApp>
               title: const Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  Text('IPTVGrab',
+                  Text('MediaNest',
                       style:
                           TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  Text(
+                    'Personal media archive',
+                    style: TextStyle(fontSize: 12, color: _appTextMuted),
+                  ),
                 ],
               ),
               actions: <Widget>[],
@@ -181,15 +185,15 @@ class _M3u8FlutterClientAppState extends State<M3u8FlutterClientApp>
               destinations: const <NavigationDestination>[
                 NavigationDestination(
                   icon: Icon(Icons.download),
-                  label: 'Grab',
+                  label: 'Library',
                 ),
                 NavigationDestination(
                   icon: Icon(Icons.task_alt),
-                  label: 'Tasks',
+                  label: 'Activity',
                 ),
                 NavigationDestination(
                   icon: Icon(Icons.playlist_play),
-                  label: 'Channels',
+                  label: 'Sources',
                 ),
               ],
               onDestinationSelected: (index) => setState(() => _index = index),
@@ -249,14 +253,14 @@ class _DownloadTabState extends State<_DownloadTab> {
     }
     _urlController.text = url;
     if (mounted) {
-      _showMessage(context, 'Filled the download URL from playlists.');
+      _showMessage(context, 'Filled the source URL from your saved sources.');
     }
   }
 
   Future<void> _parse() async {
     final url = _urlController.text.trim();
     if (url.isEmpty) {
-      _showMessage(context, 'Please enter a URL.', error: true);
+      _showMessage(context, 'Please enter a source URL.', error: true);
       return;
     }
     final headers = _parseHeadersText(_headersController.text);
@@ -269,7 +273,7 @@ class _DownloadTabState extends State<_DownloadTab> {
         return;
       }
       setState(() => _selectedQuality = 'best');
-      _showMessage(context, 'Stream parsed successfully.');
+      _showMessage(context, 'Source checked successfully.');
     } on ApiException catch (error) {
       if (!mounted) {
         return;
@@ -281,7 +285,7 @@ class _DownloadTabState extends State<_DownloadTab> {
   Future<void> _startDownload() async {
     final url = _urlController.text.trim();
     if (url.isEmpty) {
-      _showMessage(context, 'Please enter a URL.', error: true);
+      _showMessage(context, 'Please enter a source URL.', error: true);
       return;
     }
     final headers = _parseHeadersText(_headersController.text);
@@ -299,7 +303,7 @@ class _DownloadTabState extends State<_DownloadTab> {
         return;
       }
       widget.onOpenTasks();
-      _showMessage(context, 'Download started.');
+      _showMessage(context, 'Archive job started.');
     } on ApiException catch (error) {
       if (!mounted) {
         return;
@@ -332,7 +336,7 @@ class _DownloadTabState extends State<_DownloadTab> {
       return const Center(
         child: Padding(
           padding: EdgeInsets.all(24),
-          child: Text('Start the on-device Rust server first.'),
+          child: Text('Start the on-device media service first.'),
         ),
       );
     }
@@ -343,16 +347,61 @@ class _DownloadTabState extends State<_DownloadTab> {
         Card(
           child: Padding(
             padding: const EdgeInsets.all(16),
+            child: Row(
+              children: <Widget>[
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: _appPrimary.withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: const Icon(Icons.video_library_outlined),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text('Build your offline library',
+                          style: Theme.of(context).textTheme.titleMedium),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Import a source you control, inspect its variants, and save a local copy for playback, clipping, and export.',
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodySmall
+                            ?.copyWith(color: _appTextMuted),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                Text('Create a download',
+                Text('Import a source',
                     style: Theme.of(context).textTheme.titleLarge),
+                const SizedBox(height: 8),
+                Text(
+                  'Use media URLs and headers from sources you own or are authorized to access.',
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(color: _appTextMuted),
+                ),
                 const SizedBox(height: 12),
                 TextField(
                   controller: _urlController,
                   decoration: const InputDecoration(
-                    labelText: 'M3U8 URL',
+                    labelText: 'Source URL',
                     border: OutlineInputBorder(),
                   ),
                 ),
@@ -362,7 +411,7 @@ class _DownloadTabState extends State<_DownloadTab> {
                   minLines: 3,
                   maxLines: 6,
                   decoration: const InputDecoration(
-                    labelText: 'Headers (optional)',
+                    labelText: 'Request headers (optional)',
                     helperText:
                         'One header per line, for example Authorization: Bearer ...',
                     border: OutlineInputBorder(),
@@ -375,7 +424,7 @@ class _DownloadTabState extends State<_DownloadTab> {
                       child: TextField(
                         controller: _outputNameController,
                         decoration: const InputDecoration(
-                          labelText: 'Output file name (optional)',
+                          labelText: 'Saved file name (optional)',
                           border: OutlineInputBorder(),
                         ),
                       ),
@@ -387,7 +436,7 @@ class _DownloadTabState extends State<_DownloadTab> {
                         controller: _concurrencyController,
                         keyboardType: TextInputType.number,
                         decoration: const InputDecoration(
-                          labelText: 'Concurrency',
+                          labelText: 'Workers',
                           border: OutlineInputBorder(),
                         ),
                       ),
@@ -407,7 +456,7 @@ class _DownloadTabState extends State<_DownloadTab> {
                           setState(() => _selectedQuality = value);
                         },
                   decoration: const InputDecoration(
-                    labelText: 'Quality',
+                    labelText: 'Variant',
                     border: OutlineInputBorder(),
                   ),
                 ),
@@ -419,12 +468,12 @@ class _DownloadTabState extends State<_DownloadTab> {
                     FilledButton.icon(
                       onPressed: controller.isBusy ? null : _parse,
                       icon: const Icon(Icons.analytics_outlined),
-                      label: const Text('Parse'),
+                      label: const Text('Inspect source'),
                     ),
                     FilledButton.icon(
                       onPressed: controller.isBusy ? null : _startDownload,
                       icon: const Icon(Icons.download_for_offline_outlined),
-                      label: const Text('Start download'),
+                      label: const Text('Save offline'),
                     ),
                   ],
                 ),
@@ -440,7 +489,7 @@ class _DownloadTabState extends State<_DownloadTab> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  Text('Parsed stream',
+                  Text('Source details',
                       style: Theme.of(context).textTheme.titleLarge),
                   const SizedBox(height: 12),
                   Wrap(
@@ -464,7 +513,7 @@ class _DownloadTabState extends State<_DownloadTab> {
                   ),
                   if (parsedInfo.streams.isNotEmpty) ...<Widget>[
                     const SizedBox(height: 12),
-                    Text('Variants',
+                    Text('Available variants',
                         style: Theme.of(context).textTheme.titleMedium),
                     const SizedBox(height: 8),
                     ...parsedInfo.streams.asMap().entries.map(
@@ -498,7 +547,7 @@ class _TasksTab extends StatelessWidget {
       return const Center(
         child: Padding(
           padding: EdgeInsets.all(24),
-          child: Text('Connect and log in before managing tasks.'),
+          child: Text('Connect and sign in before managing library activity.'),
         ),
       );
     }
@@ -513,7 +562,7 @@ class _TasksTab extends StatelessWidget {
             children: <Widget>[
               const Icon(Icons.task_alt, size: 48),
               const SizedBox(height: 12),
-              const Text('No tasks yet.'),
+              const Text('No library activity yet.'),
               const SizedBox(height: 12),
               OutlinedButton.icon(
                 onPressed: () async {
@@ -598,15 +647,15 @@ class _TasksTab extends StatelessWidget {
                           label: 'Speed',
                           value: '${task.speedMbps.toStringAsFixed(2)} Mbps'),
                       _InfoChip(
-                          label: 'Downloaded',
+                          label: 'Saved',
                           value: _formatBytes(task.bytesDownloaded)),
                       if (task.total > 0)
                         _InfoChip(
-                            label: 'Segments',
+                            label: 'Parts',
                             value: '${task.downloaded}/${task.total}'),
                       if (task.recordedSegments > 0)
                         _InfoChip(
-                            label: 'Recorded',
+                            label: 'Captured',
                             value: task.recordedSegments.toString()),
                       if (task.elapsedSec > 0)
                         _InfoChip(
@@ -681,11 +730,11 @@ class _TasksTab extends StatelessWidget {
                                       result == 'stopping') {
                                     _showMessage(
                                       context,
-                                      'Stop requested. Saving on-device with FFmpegKit...',
+                                      'Stop requested. Finalizing the local media file...',
                                     );
                                   } else {
-                                    _showMessage(
-                                        context, 'Task action: $result');
+                                      _showMessage(
+                                          context, 'Action completed: $result');
                                   }
                                 } on ApiException catch (error) {
                                   if (!context.mounted) {
@@ -707,12 +756,12 @@ class _TasksTab extends StatelessWidget {
                         label: Text(autoFinalizing
                             ? 'Saving...'
                             : task.isRecording
-                                ? 'Stop & save'
+                                ? 'Stop & finalize'
                                 : task.isStopping
                                     ? 'Stopping...'
                                     : task.isTerminal
-                                        ? 'Delete'
-                                        : 'Cancel'),
+                                        ? 'Remove'
+                                        : 'Cancel job'),
                       ),
                       if (task.canResume)
                         OutlinedButton.icon(
@@ -770,7 +819,7 @@ class _TasksTab extends StatelessWidget {
                                       return;
                                     }
                                     _showMessage(context,
-                                        'Stopped current recording and started a new one (${_shortId(newTaskId)}).');
+                                        'Stopped the current capture and started a new one (${_shortId(newTaskId)}).');
                                   } on ApiException catch (error) {
                                     if (!context.mounted) {
                                       return;
@@ -794,7 +843,7 @@ class _TasksTab extends StatelessWidget {
                                       return;
                                     }
                                     _showMessage(context,
-                                        'Recording restarted (${_shortId(newTaskId)}).');
+                                        'Capture restarted (${_shortId(newTaskId)}).');
                                   } on ApiException catch (error) {
                                     if (!context.mounted) {
                                       return;
@@ -894,10 +943,10 @@ class _TasksTab extends StatelessWidget {
                             context,
                             controller.downloadUri(task.output!).toString(),
                             label:
-                                'Download URL copied. It still requires the active session cookie when auth is enabled.',
+                                'Saved media URL copied. It still requires the active session cookie when auth is enabled.',
                           ),
                           icon: const Icon(Icons.copy),
-                          label: const Text('Copy MP4 URL'),
+                          label: const Text('Copy saved file URL'),
                         ),
                       if (task.canPreview)
                         FilledButton.tonalIcon(
@@ -975,7 +1024,7 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
       return const Center(
         child: Padding(
           padding: EdgeInsets.all(24),
-          child: Text('Connect and log in before loading playlists.'),
+          child: Text('Connect and sign in before loading your source lists.'),
         ),
       );
     }
@@ -1052,8 +1101,8 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
     final hiddenUnavailableCount =
         math.max(0, playlistScoped.length - visibleItems.length);
     final playlistSummary = usingMergedView
-        ? 'Merged all-playlists view'
-        : selectedPlaylist?.name ?? 'All playlists';
+        ? 'Merged library view'
+        : selectedPlaylist?.name ?? 'All source lists';
 
     return Column(
       children: <Widget>[
@@ -1066,7 +1115,7 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
                     Text(
-                      'Channels',
+                      'Sources',
                       style: Theme.of(context).textTheme.titleLarge,
                     ),
                     const SizedBox(height: 4),
@@ -1090,7 +1139,7 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
                       return const SizedBox.shrink();
                     }
                     return PopupMenuButton<String>(
-                      tooltip: 'Manage selected playlist',
+                      tooltip: 'Manage selected source list',
                       onSelected: (value) async {
                         try {
                           if (value == 'refresh') {
@@ -1098,7 +1147,7 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
                             if (!context.mounted) {
                               return;
                             }
-                            _showMessage(context, 'Playlist refreshed.');
+                            _showMessage(context, 'Source list refreshed.');
                           } else if (value == 'edit') {
                             await _showEditPlaylistDialog(
                               context,
@@ -1111,7 +1160,7 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
                               return;
                             }
                             setState(() => _selectedPlaylistId = null);
-                            _showMessage(context, 'Playlist deleted.');
+                            _showMessage(context, 'Source list deleted.');
                           }
                         } on ApiException catch (error) {
                           if (!context.mounted) {
@@ -1140,7 +1189,7 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
                 ),
               IconButton.filledTonal(
                 tooltip: controller.healthState.running
-                    ? 'Channel health check is running'
+                    ? 'Source health check is running'
                     : 'Run health check',
                 onPressed: controller.isBusy || controller.healthState.running
                     ? null
@@ -1151,7 +1200,7 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
                             return;
                           }
                           _showMessage(
-                              context, 'Channel health check started.');
+                              context, 'Source health check started.');
                         } on ApiException catch (error) {
                           if (!context.mounted) {
                             return;
@@ -1167,7 +1216,7 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
               ),
               const SizedBox(width: 6),
               IconButton.filledTonal(
-                tooltip: 'Refresh channels',
+                tooltip: 'Refresh sources',
                 onPressed: controller.isBusy
                     ? null
                     : () async {
@@ -1186,7 +1235,7 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
               ),
               const SizedBox(width: 6),
               IconButton.filledTonal(
-                tooltip: 'Edit all playlists',
+                tooltip: 'Edit all source lists',
                 onPressed: controller.isBusy
                     ? null
                     : () async {
@@ -1198,14 +1247,14 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
                           ),
                         );
                         if (saved == true && context.mounted) {
-                          _showMessage(context, 'All playlists config saved.');
+                          _showMessage(context, 'Source list configuration saved.');
                         }
                       },
                 icon: const Icon(Icons.edit_note),
               ),
               const SizedBox(width: 6),
               IconButton.filled(
-                tooltip: 'Add playlist',
+                tooltip: 'Add source list',
                 onPressed: controller.isBusy
                     ? null
                     : () => _showAddPlaylistDialog(context, controller),
@@ -1236,7 +1285,7 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
                                 },
                                 icon: const Icon(Icons.close),
                               ),
-                        labelText: 'Search channels, groups or playlist names',
+                        labelText: 'Search sources, groups or list names',
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -1247,12 +1296,12 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
                             initialValue: _selectedPlaylistId ?? '__all__',
                             decoration: const InputDecoration(
                               isDense: true,
-                              labelText: 'Playlist',
+                              labelText: 'Source list',
                             ),
                             items: <DropdownMenuItem<String>>[
                               const DropdownMenuItem<String>(
                                 value: '__all__',
-                                child: Text('All playlists'),
+                                child: Text('All source lists'),
                               ),
                               ...controller.playlists.map(
                                 (playlist) => DropdownMenuItem<String>(
@@ -1332,7 +1381,7 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
                       SizedBox(height: 80),
                       Icon(Icons.playlist_add, size: 48),
                       SizedBox(height: 12),
-                      Center(child: Text('No playlists saved yet.')),
+                      Center(child: Text('No source lists saved yet.')),
                     ],
                   )
                 : visibleItems.isEmpty
@@ -1350,12 +1399,12 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
                           Center(
                             child: Text(
                               waitingForInitialHealthResults
-                                  ? 'Scanning channel availability. Unavailable channels stay hidden until results arrive.'
+                                  ? 'Scanning source availability. Unavailable entries stay hidden until results arrive.'
                                   : usingMergedView && playlistScoped.isEmpty
-                                      ? 'No enabled channels are exposed by the merged all-playlists view. Open "Edit all" to re-enable groups or channels.'
+                                      ? 'No enabled entries are exposed by the merged library view. Open "Edit all" to re-enable groups or sources.'
                                       : _showUnavailableChannels
-                                          ? 'No channels match the current filters.'
-                                          : 'No available channels match the current filters. Turn on "Show unavailable channels" to inspect dead entries.',
+                                          ? 'No sources match the current filters.'
+                                          : 'No available sources match the current filters. Turn on "Show unavailable channels" to inspect unavailable entries.',
                             ),
                           ),
                         ],
@@ -1450,7 +1499,7 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
                                             isLive: true,
                                             copyUrl: item.channelUrl,
                                             copyLabel:
-                                                'Original stream URL copied.',
+                                                'Source URL copied.',
                                             onGrabRequested: () {
                                               Navigator.of(context).maybePop();
                                               controller.suggestDownloadUrl(
@@ -1468,7 +1517,7 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
                                       const SizedBox(width: 8),
                                       IconButton.filledTonal(
                                         tooltip:
-                                            'Open Grab with this stream URL',
+                                            'Open Library with this source URL',
                                         onPressed: () {
                                           controller.suggestDownloadUrl(
                                             item.channelUrl,
@@ -1484,7 +1533,7 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
                                         onPressed: () => _copyToClipboard(
                                           context,
                                           item.channelUrl,
-                                          label: 'Original stream URL copied.',
+                                          label: 'Source URL copied.',
                                         ),
                                         icon: const Icon(Icons.copy),
                                       ),
@@ -1555,11 +1604,11 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
     required int hiddenCount,
   }) {
     if (waitingForHealthResults) {
-      return 'Channel health scan is still running.';
+      return 'Source health scan is still running.';
     }
 
     if (isActiveOnly) {
-      return 'Showing $visibleCount/$totalCount matching channels.';
+      return 'Showing $visibleCount/$totalCount matching sources.';
     }
 
     return 'Healthy $visibleCount/$totalCount · Hidden $hiddenCount';
@@ -2051,7 +2100,7 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
                 actions: <Widget>[
                   if (widget.onGrabRequested != null)
                     IconButton(
-                      tooltip: 'Grab',
+                      tooltip: 'Save offline',
                       onPressed: widget.onGrabRequested,
                       icon: const Icon(Icons.download_for_offline),
                     ),
@@ -2120,8 +2169,8 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
                           Expanded(
                             child: Text(
                               widget.isLive
-                                  ? 'Live stream / preview. Use fullscreen when you want an immersive view.'
-                                  : 'Pause, seek, clip a segment, or go fullscreen.',
+                                  ? 'Live preview from your source. Use fullscreen for a cleaner view.'
+                                  : 'Pause, seek, clip a segment, or keep a local copy in your library.',
                               style: Theme.of(context)
                                   .textTheme
                                   .bodySmall
@@ -3774,7 +3823,7 @@ Future<void> _showEditPlaylistDialog(
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          title: const Text('Edit playlist'),
+          title: const Text('Edit source list'),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -3790,7 +3839,7 @@ Future<void> _showEditPlaylistDialog(
                 TextField(
                   controller: urlController,
                   decoration: const InputDecoration(
-                    labelText: 'Playlist URL',
+                    labelText: 'Source list URL',
                     border: OutlineInputBorder(),
                   ),
                 ),
@@ -3823,7 +3872,7 @@ Future<void> _showEditPlaylistDialog(
     if (!context.mounted) {
       return;
     }
-    _showMessage(context, 'Playlist updated.');
+    _showMessage(context, 'Source list updated.');
   } on ApiException catch (error) {
     if (!context.mounted) {
       return;
@@ -3846,7 +3895,7 @@ Future<void> _showAddPlaylistDialog(
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          title: const Text('Add playlist'),
+          title: const Text('Add source list'),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -3862,7 +3911,7 @@ Future<void> _showAddPlaylistDialog(
                 TextField(
                   controller: urlController,
                   decoration: const InputDecoration(
-                    labelText: 'Playlist URL',
+                    labelText: 'Source list URL',
                     border: OutlineInputBorder(),
                   ),
                 ),
@@ -3872,7 +3921,7 @@ Future<void> _showAddPlaylistDialog(
                   minLines: 4,
                   maxLines: 8,
                   decoration: const InputDecoration(
-                    labelText: 'Raw M3U (optional)',
+                    labelText: 'Raw list contents (optional)',
                     border: OutlineInputBorder(),
                   ),
                 ),
@@ -3905,7 +3954,7 @@ Future<void> _showAddPlaylistDialog(
     if (!context.mounted) {
       return;
     }
-    _showMessage(context, 'Playlist added.');
+    _showMessage(context, 'Source list added.');
   } on ApiException catch (error) {
     if (!context.mounted) {
       return;
@@ -4204,7 +4253,7 @@ String? _taskErrorMessage(DownloadTask task, AppController controller) {
     return null;
   }
   if (task.needsLocalMerge) {
-    return 'FFmpeg is unavailable inside the embedded server. Tap “Finalize locally” to merge on-device and keep the download usable.';
+      return 'FFmpeg is unavailable inside the embedded service. Tap “Finalize locally” to merge on-device and keep the saved media usable.';
   }
   return error;
 }

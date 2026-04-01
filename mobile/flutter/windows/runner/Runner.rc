@@ -90,12 +90,12 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "com.iptvgrab" "\0"
-            VALUE "FileDescription", "iptvgrab" "\0"
+            VALUE "FileDescription", "MediaNest" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "iptvgrab" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 com.iptvgrab. All rights reserved." "\0"
             VALUE "OriginalFilename", "iptvgrab.exe" "\0"
-            VALUE "ProductName", "iptvgrab" "\0"
+            VALUE "ProductName", "MediaNest" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

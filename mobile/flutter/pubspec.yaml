@@ -1,5 +1,5 @@
 name: iptvgrab
-description: Flutter app that runs the Rust IPTVGrab server locally on-device.
+description: Flutter app for personal media archiving, offline playback, and source management powered by an on-device Rust server.
 publish_to: "none"
 version: 0.1.0+1
 

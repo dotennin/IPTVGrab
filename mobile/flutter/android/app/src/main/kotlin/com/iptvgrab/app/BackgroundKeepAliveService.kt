@@ -48,8 +48,8 @@ class BackgroundKeepAliveService : Service() {
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle("IPTVGrab is downloading")
-            .setContentText("Keeping the local server alive for background downloads.")
+            .setContentTitle("MediaNest is saving media")
+            .setContentText("Keeping the local media workspace alive in the background.")
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
@@ -78,10 +78,10 @@ class BackgroundKeepAliveService : Service() {
         val manager = getSystemService(NotificationManager::class.java)
         val channel = NotificationChannel(
             CHANNEL_ID,
-            "Background downloads",
+            "Background media activity",
             NotificationManager.IMPORTANCE_LOW
         ).apply {
-            description = "Keeps IPTVGrab downloads running while the app is backgrounded."
+            description = "Keeps MediaNest media activity running while the app is backgrounded."
             setShowBadge(false)
         }
         manager.createNotificationChannel(channel)
