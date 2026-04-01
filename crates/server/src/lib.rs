@@ -1084,7 +1084,8 @@ async fn clip_task(
             .to_string_lossy()
             .to_string();
         let clip_name = format!("{stem}_clip_{suffix}.mp4");
-        let child = tokio::process::Command::new("ffmpeg")
+        let clip_path = downloads_dir.join(&clip_name);
+        let status = tokio::process::Command::new("ffmpeg")
             .args([
                 "-y",
                 "-ss",
@@ -1095,28 +1096,19 @@ async fn clip_task(
                 &duration.to_string(),
                 "-c",
                 "copy",
-                "-movflags",
-                "frag_keyframe+empty_moov",
-                "-f",
-                "mp4",
-                "pipe:1",
+                clip_path.to_str().unwrap_or(""),
             ])
-            .stdout(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
-            .spawn();
-        return match child {
-            Ok(mut proc) => {
-                let stdout = proc.stdout.take().unwrap();
-                let stream = tokio_util::io::ReaderStream::new(stdout);
-                Response::builder()
-                    .header("Content-Type", "video/mp4")
-                    .header(
-                        "Content-Disposition",
-                        format!("attachment; filename=\"{clip_name}\""),
-                    )
-                    .body(Body::from_stream(stream))
-                    .unwrap()
-            }
+            .status()
+            .await;
+        return match status {
+            Ok(s) if s.success() => Json(serde_json::json!({"filename": clip_name})).into_response(),
+            Ok(_) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"detail": "ffmpeg clip failed"})),
+            )
+                .into_response(),
             Err(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({"detail": format!("ffmpeg not found: {e}")})),
@@ -1161,7 +1153,8 @@ async fn clip_task(
         .trim_start_matches('.')
         .to_string();
 
-    let stream_flags = ["-c", "copy", "-movflags", "frag_keyframe+empty_moov", "-f", "mp4", "pipe:1"];
+    let clip_path = downloads_dir.join(&clip_name);
+    let clip_path_str = clip_path.to_string_lossy().to_string();
 
     let child = if is_cmaf {
         let mut seg_files: Vec<_> = std::fs::read_dir(&tmpdir)
@@ -1199,8 +1192,8 @@ async fn clip_task(
                 "-t",
                 &duration.to_string(),
             ])
-            .args(stream_flags)
-            .stdout(std::process::Stdio::piped())
+            .args(["-c", "copy", clip_path_str.as_str()])
+            .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .spawn()
     } else {
@@ -1241,24 +1234,25 @@ async fn clip_task(
                 "-t",
                 &duration.to_string(),
             ])
-            .args(stream_flags)
-            .stdout(std::process::Stdio::piped())
+            .args(["-c", "copy", clip_path_str.as_str()])
+            .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .spawn()
     };
     match child {
-        Ok(mut proc) => {
-            let stdout = proc.stdout.take().unwrap();
-            let stream = tokio_util::io::ReaderStream::new(stdout);
-            Response::builder()
-                .header("Content-Type", "video/mp4")
-                .header(
-                    "Content-Disposition",
-                    format!("attachment; filename=\"{clip_name}\""),
-                )
-                .body(Body::from_stream(stream))
-                .unwrap()
-        }
+        Ok(mut proc) => match proc.wait().await {
+            Ok(s) if s.success() => Json(serde_json::json!({"filename": clip_name})).into_response(),
+            Ok(_) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"detail": "ffmpeg clip failed"})),
+            )
+                .into_response(),
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"detail": format!("{e}")})),
+            )
+                .into_response(),
+        },
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({"detail": format!("ffmpeg not found: {e}")})),

@@ -1443,23 +1443,18 @@ clipDownloadBtn.addEventListener("click", async () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ start, end }),
     });
+    const d = await res.json();
     if (!res.ok) {
-      const d = await res.json();
       throw new Error(d.detail || "Clip failed");
     }
-    // Server streams the clip directly — derive filename from Content-Disposition.
-    const cd = res.headers.get("Content-Disposition") || "";
-    const fnMatch = cd.match(/filename="?([^"]+)"?/);
-    const filename = fnMatch ? fnMatch[1] : "clip.mp4";
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
+    const filename = d.filename || "clip.mp4";
+    // Trigger download via the saved file URL.
     const a = document.createElement("a");
-    a.href = url;
+    a.href = `/downloads/${filename}`;
     a.download = filename;
     document.body.appendChild(a);
     a.click();
     a.remove();
-    URL.revokeObjectURL(url);
     toast(`Clip ready: ${filename}`, "success");
   } catch (e) {
     toast(e.message, "danger");
