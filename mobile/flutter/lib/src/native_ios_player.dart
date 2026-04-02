@@ -77,6 +77,11 @@ class NativeIosPlayerController extends ChangeNotifier {
         <String, dynamic>{'muted': value},
       );
 
+  Future<void> setPreferredBitRate(int bandwidth) => _invoke<void>(
+        'setPreferredBitRate',
+        <String, dynamic>{'bandwidth': bandwidth.toDouble()},
+      );
+
   Future<bool> enterPictureInPicture() async =>
       (await _invoke<bool>('enterPictureInPicture')) ?? false;
 

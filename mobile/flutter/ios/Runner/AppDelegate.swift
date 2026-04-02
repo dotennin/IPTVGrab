@@ -734,6 +734,11 @@ private final class NativeInlinePlayerPlatformView: NSObject, FlutterPlatformVie
       player?.isMuted = muted
       emitState()
       result(nil)
+    case "setPreferredBitRate":
+      let bandwidth = (call.arguments as? [String: Any])?["bandwidth"] as? Double ?? 0
+      player?.currentItem?.preferredPeakBitRate = bandwidth
+      emitState()
+      result(nil)
     case "enterPictureInPicture":
       enterPictureInPicture(result: result)
     case "dispose":
@@ -851,6 +856,9 @@ private final class NativeInlinePlayerPlatformView: NSObject, FlutterPlatformVie
       }
     }
 
+    // Re-activate the audio session before starting each new player instance to
+    // ensure audio is routed correctly after quality switches or interruptions.
+    try? AVAudioSession.sharedInstance().setActive(true)
     player.play()
     emitState()
   }

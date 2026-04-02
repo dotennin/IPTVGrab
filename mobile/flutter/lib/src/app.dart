@@ -1797,6 +1797,9 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
   bool _fetchingVariants = false;
   bool _variantsLoaded = false;
   int _selectedVariantIndex = -1; // -1 = original / auto
+  // Bumped on each quality switch so the UiKitView gets a new ValueKey,
+  // forcing platform-view recreation and re-triggering onPlatformViewCreated.
+  int _iosPlayerVersion = 0;
 
   // Double-tap seek + visual feedback
   Offset? _doubleTapPos;
@@ -2079,29 +2082,26 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
     if (index == _selectedVariantIndex) return;
     final variant = _variants[index];
     final uri = Uri.parse(variant.url);
-    setState(() {
-      _selectedVariantIndex = index;
-      _initialized = false;
-    });
     if (_usesNativeIosPlayer) {
-      final oldCtrl = _iosController;
-      oldCtrl?.removeListener(_handleControllerUpdate);
-      oldCtrl?.dispose();
-      _iosController = null;
-      final ctrl = NativeIosPlayerController(
-        uri: uri,
-        httpHeaders: widget.httpHeaders,
-        isLive: widget.isLive,
-        muted: _muted,
-      );
-      ctrl.addListener(_handleControllerUpdate);
-      if (mounted) setState(() => _iosController = ctrl);
+      // Keep the existing AVPlayer on the original master playlist URL and use
+      // preferredPeakBitRate to guide iOS to the desired quality variant.
+      // Recreating the player with a variant sub-playlist URL would lose the
+      // EXT-X-MEDIA audio group associations, causing silent playback.
+      //
+      // bandwidth=0 or selecting the top (best) variant → no cap (iOS picks freely).
+      final cap = (index == 0 || variant.bandwidth == 0) ? 0 : variant.bandwidth;
+      await _iosController!.setPreferredBitRate(cap);
+      if (!mounted) return;
+      setState(() => _selectedVariantIndex = index);
     } else {
+      setState(() {
+        _selectedVariantIndex = index;
+        _initialized = false;
+      });
       final oldCtrl = _controller;
       oldCtrl?.removeListener(_handleControllerUpdate);
       await oldCtrl?.pause();
       await oldCtrl?.dispose();
-      _controller = null;
       final ctrl = VideoPlayerController.networkUrl(
         uri,
         httpHeaders: widget.httpHeaders,
@@ -2647,7 +2647,14 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
       return Stack(
         children: <Widget>[
           Positioned.fill(
-              child: NativeIosPlayerView(controller: _iosController!)),
+            child: NativeIosPlayerView(
+              // ValueKey changes on quality switch, forcing the UiKitView to
+              // be destroyed and recreated so onPlatformViewCreated fires on
+              // the new controller and it receives its method/event channels.
+              key: ValueKey(_iosPlayerVersion),
+              controller: _iosController!,
+            ),
+          ),
           if (overlay != null) Positioned.fill(child: overlay),
         ],
       );
