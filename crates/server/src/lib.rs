@@ -21,6 +21,7 @@ use m3u8_core::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
+use tokio_util::io::ReaderStream;
 use tokio::sync::{mpsc, RwLock, Semaphore};
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::ServeDir;
@@ -1583,11 +1584,12 @@ async fn serve_download(
     }
 
     let len = end - start + 1;
-    let mut buf = vec![0u8; len as usize];
-    if file.seek(SeekFrom::Start(start)).await.is_err() || file.read_exact(&mut buf).await.is_err()
-    {
-        return StatusCode::NOT_FOUND.into_response();
+    if file.seek(SeekFrom::Start(start)).await.is_err() {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
+
+    let limited = file.take(len);
+    let stream = ReaderStream::new(limited);
 
     let mut builder = Response::builder()
         .status(status)
@@ -1596,14 +1598,14 @@ async fn serve_download(
         .header(header::CONTENT_LENGTH, len.to_string())
         .header(
             header::CONTENT_DISPOSITION,
-            format!("inline; filename=\"{filename}\""),
+            format!("attachment; filename=\"{filename}\""),
         );
     if status == StatusCode::PARTIAL_CONTENT {
         builder = builder.header(header::CONTENT_RANGE, format!("bytes {start}-{end}/{size}"));
     }
 
     builder
-        .body(Body::from(buf))
+        .body(Body::from_stream(stream))
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
 }
 
