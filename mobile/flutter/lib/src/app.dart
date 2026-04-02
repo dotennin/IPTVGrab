@@ -5,6 +5,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:photo_manager/photo_manager.dart';
+import 'package:sensors_plus/sensors_plus.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:video_player/video_player.dart';
 
@@ -169,14 +170,14 @@ class _M3u8FlutterClientAppState extends State<M3u8FlutterClientApp>
             body: IndexedStack(
               index: _index,
               children: <Widget>[
+                _PlaylistsTab(
+                  controller: _controller,
+                  onUseChannel: () => setState(() => _index = 2),
+                ),
+                _TasksTab(controller: _controller),
                 _DownloadTab(
                   controller: _controller,
                   onOpenTasks: () => setState(() => _index = 1),
-                ),
-                _TasksTab(controller: _controller),
-                _PlaylistsTab(
-                  controller: _controller,
-                  onUseChannel: () => setState(() => _index = 0),
                 ),
               ],
             ),
@@ -184,16 +185,16 @@ class _M3u8FlutterClientAppState extends State<M3u8FlutterClientApp>
               selectedIndex: _index,
               destinations: const <NavigationDestination>[
                 NavigationDestination(
-                  icon: Icon(Icons.download),
-                  label: 'Library',
+                  icon: Icon(Icons.playlist_play),
+                  label: 'Sources',
                 ),
                 NavigationDestination(
                   icon: Icon(Icons.task_alt),
                   label: 'Activity',
                 ),
                 NavigationDestination(
-                  icon: Icon(Icons.playlist_play),
-                  label: 'Sources',
+                  icon: Icon(Icons.download),
+                  label: 'Library',
                 ),
               ],
               onDestinationSelected: (index) => setState(() => _index = index),
@@ -1773,6 +1774,14 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
   String? _pictureInPictureFailure;
   List<String> _pictureInPictureReasons = const <String>[];
   Timer? _controlsTimer;
+  StreamSubscription<AccelerometerEvent>? _accelSub;
+  bool _settingFullscreen = false;
+  DateTime? _gyroToggleTime;
+  // Stable key so Flutter moves rather than recreates the player subtree
+  // when _isFullscreen flips (tree depth changes Center→Padding/Column).
+  // Without this, VideoPlayer/_NativeIosPlayerView is destroyed and
+  // rebuilt every fullscreen toggle, opening a duplicate audio stream.
+  final GlobalKey _playerKey = GlobalKey();
 
   bool get _usesNativeIosPlayer => Platform.isIOS;
 
@@ -1851,6 +1860,32 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
       );
       _controller!.addListener(_handleControllerUpdate);
       unawaited(_initialize());
+    }
+    _accelSub = accelerometerEventStream(
+      samplingPeriod: SensorInterval.normalInterval,
+    ).listen(_onAccelerometer);
+  }
+
+  void _onAccelerometer(AccelerometerEvent event) {
+    if (_settingFullscreen) return;
+    // Ignore sensor for 1.5 s after each gyro toggle to prevent rapid
+    // re-triggering that would restart the video_player audio session
+    // and create overlapping streams.
+    final now = DateTime.now();
+    if (_gyroToggleTime != null &&
+        now.difference(_gyroToggleTime!) <
+            const Duration(milliseconds: 1500)) {
+      return;
+    }
+    final absX = event.x.abs();
+    final absY = event.y.abs();
+    // Hysteresis: strong landscape signal (≥7) with portrait axis quiet (<5).
+    if (!_isFullscreen && absX >= 7.0 && absY < 5.0) {
+      _gyroToggleTime = now;
+      unawaited(_setFullscreen(true, fromGyro: true));
+    } else if (_isFullscreen && absY >= 7.0 && absX < 5.0) {
+      _gyroToggleTime = now;
+      unawaited(_setFullscreen(false, fromGyro: true));
     }
   }
 
@@ -1931,24 +1966,33 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
     setState(() => _muted = value);
   }
 
-  Future<void> _setFullscreen(bool enabled) async {
-    if (enabled) {
-      await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-      await SystemChrome.setPreferredOrientations(const <DeviceOrientation>[
-        DeviceOrientation.landscapeLeft,
-        DeviceOrientation.landscapeRight,
-      ]);
-    } else {
-      _restoreSystemUi();
+  Future<void> _setFullscreen(bool enabled, {bool fromGyro = false}) async {
+    if (_settingFullscreen) return;
+    _settingFullscreen = true;
+    try {
+      if (enabled) {
+        await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+        // When triggered by gyroscope the device is already in the correct
+        // orientation; locking here would cause an Activity re-creation on
+        // Android and respawn the video player (duplicate audio/stutter).
+        if (!fromGyro) {
+          await SystemChrome.setPreferredOrientations(const <DeviceOrientation>[
+            DeviceOrientation.landscapeLeft,
+            DeviceOrientation.landscapeRight,
+          ]);
+        }
+      } else {
+        _restoreSystemUi();
+      }
+      if (!mounted) return;
+      setState(() {
+        _isFullscreen = enabled;
+        _showControls = true;
+      });
+      _scheduleControlsHide();
+    } finally {
+      _settingFullscreen = false;
     }
-    if (!mounted) {
-      return;
-    }
-    setState(() {
-      _isFullscreen = enabled;
-      _showControls = true;
-    });
-    _scheduleControlsHide();
   }
 
   void _restoreSystemUi() {
@@ -2039,6 +2083,7 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
   @override
   void dispose() {
     _controlsTimer?.cancel();
+    _accelSub?.cancel();
     _restoreSystemUi();
     _iosController?.removeListener(_handleControllerUpdate);
     _controller?.removeListener(_handleControllerUpdate);
@@ -2052,6 +2097,7 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
     final aspectRatio = _playerAspectRatio;
 
     final player = GestureDetector(
+      key: _playerKey,
       onTap: _playerInitialized ? _toggleControls : null,
       child: Stack(
         children: <Widget>[
