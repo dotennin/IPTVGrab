@@ -93,6 +93,7 @@ apk: flutter-apk
 ipa: flutter-ipa
 
 ipa-debug: flutter-ipa-debug
+	cp -av $(FLUTTER_APP)/build/ios/ipa/*.ipa /Volumes/dotennin/app/ios/
 
 flutter-clean: flutter-check
 	cd $(FLUTTER_APP) && $(FLUTTER) clean
