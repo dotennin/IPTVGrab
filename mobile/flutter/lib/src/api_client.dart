@@ -115,6 +115,10 @@ class ApiClient {
     await _requestJson('POST', '/api/tasks/$taskId/resume');
   }
 
+  Future<void> pauseTask(String taskId) async {
+    await _requestJson('POST', '/api/tasks/$taskId/pause');
+  }
+
   Future<void> restartTask(String taskId) async {
     await _requestJson('POST', '/api/tasks/$taskId/restart');
   }

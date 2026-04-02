@@ -108,4 +108,5 @@ pub enum ProgressEvent {
         error: String,
     },
     Cancelled,
+    Paused,
 }

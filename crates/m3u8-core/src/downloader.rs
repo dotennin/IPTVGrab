@@ -25,6 +25,7 @@ pub struct Downloader {
     config: DownloadConfig,
     cancelled: Arc<AtomicBool>,
     stop_recording: Arc<AtomicBool>, // stop live + merge (vs cancel which discards)
+    paused: Arc<AtomicBool>,         // pause without merging or discarding segments
 }
 
 impl Downloader {
@@ -33,6 +34,7 @@ impl Downloader {
             config,
             cancelled: Arc::new(AtomicBool::new(false)),
             stop_recording: Arc::new(AtomicBool::new(false)),
+            paused: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -44,8 +46,19 @@ impl Downloader {
         self.stop_recording.store(true, Ordering::SeqCst);
     }
 
+    /// Pause: stop downloading segments without merging or discarding them.
+    pub fn pause(&self) {
+        self.paused.store(true, Ordering::SeqCst);
+        // Reuse cancelled flag so in-flight segment spawns stop acquiring new work.
+        self.cancelled.store(true, Ordering::SeqCst);
+    }
+
     pub fn is_cancelled(&self) -> bool {
         self.cancelled.load(Ordering::SeqCst)
+    }
+
+    pub fn is_paused(&self) -> bool {
+        self.paused.load(Ordering::SeqCst)
     }
 
     fn should_stop_live(&self) -> bool {
@@ -96,6 +109,10 @@ impl Downloader {
         // tmpdir is kept for preview/resume — caller is responsible for cleanup
         match result {
             Ok(_) => Ok(()),
+            Err(DownloadError::Paused) => {
+                let _ = tx.send(ProgressEvent::Paused).await;
+                Err(DownloadError::Paused)
+            }
             Err(DownloadError::Cancelled) => {
                 let _ = tx.send(ProgressEvent::Cancelled).await;
                 Err(DownloadError::Cancelled)
@@ -442,6 +459,10 @@ impl Downloader {
             let _ = h.await;
         }
 
+        if self.is_paused() {
+            return Err(DownloadError::Paused);
+        }
+
         if self.is_cancelled() {
             let _ = tx.send(ProgressEvent::Cancelled).await;
             return Err(DownloadError::Cancelled);
@@ -743,6 +764,11 @@ impl Downloader {
             }
         }
 
+        // Paused = stop without merging or discarding
+        if self.is_paused() {
+            return Err(DownloadError::Paused);
+        }
+
         // Cancelled without stop = discard
         if self.cancelled.load(Ordering::SeqCst) && !self.stop_recording.load(Ordering::SeqCst) {
             let _ = tx.send(ProgressEvent::Cancelled).await;
@@ -828,6 +854,14 @@ impl Downloader {
             .await
         }
         .map_err(|e| {
+            // If paused during merge, surface Paused (not Cancelled).
+            if self.is_paused() {
+                let tx = tx.clone();
+                tokio::spawn(async move {
+                    let _ = tx.send(ProgressEvent::Paused).await;
+                });
+                return DownloadError::Paused;
+            }
             // If merge was cancelled, send the Cancelled event so the task transitions cleanly
             if matches!(e, DownloadError::Cancelled) || self.is_cancelled() {
                 let tx = tx.clone();

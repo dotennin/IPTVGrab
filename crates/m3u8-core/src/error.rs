@@ -20,6 +20,9 @@ pub enum DownloadError {
     #[error("Cancelled")]
     Cancelled,
 
+    #[error("Paused")]
+    Paused,
+
     #[error("{0}")]
     Other(String),
 }

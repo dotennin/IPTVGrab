@@ -505,7 +505,7 @@ async fn run_download(state: AppState, task_id: String, dl: Arc<Downloader>) {
                     // with a stale event from the still-running download.
                     let already_terminal = matches!(
                         task.status.as_str(),
-                        "cancelled" | "completed" | "failed" | "interrupted"
+                        "cancelled" | "completed" | "failed" | "interrupted" | "paused"
                     );
                     if !already_terminal {
                         apply_event(task, event.clone());
@@ -543,9 +543,20 @@ async fn run_download(state: AppState, task_id: String, dl: Arc<Downloader>) {
     }
 
     if let Err(e) = dl.download(tx).await {
-        // Only mark as failed if not already in a terminal state (e.g. "cancelled" set
-        // by cancel_task) and this wasn't a cancellation error.
-        if !matches!(e, DownloadError::Cancelled) && !dl.is_cancelled() {
+        if matches!(e, DownloadError::Paused) {
+            // Paused: keep tmpdir, set status to "paused".
+            let mut tasks = state.tasks.write().await;
+            if let Some(t) = tasks.get_mut(&task_id) {
+                if !matches!(t.status.as_str(), "cancelled" | "completed" | "interrupted") {
+                    t.status = "paused".into();
+                    t.error = None;
+                }
+            }
+            drop(tasks);
+            state.save_tasks().await;
+        } else if !matches!(e, DownloadError::Cancelled) && !dl.is_cancelled() {
+            // Only mark as failed if not already in a terminal state (e.g. "cancelled" set
+            // by cancel_task) and this wasn't a cancellation error.
             let mut tasks = state.tasks.write().await;
             if let Some(t) = tasks.get_mut(&task_id) {
                 // Don't overwrite terminal status set externally (e.g. cancel_task)
@@ -631,6 +642,10 @@ fn apply_event(task: &mut Task, event: ProgressEvent) {
         }
         ProgressEvent::Cancelled => {
             task.status = "cancelled".into();
+            task.error = None;
+        }
+        ProgressEvent::Paused => {
+            task.status = "paused".into();
             task.error = None;
         }
     }
@@ -725,6 +740,36 @@ async fn cleanup_tmpdir(state: &AppState, task_id: &str) {
     }
 }
 
+async fn pause_task(
+    State(state): State<AppState>,
+    AxumPath(task_id): AxumPath<String>,
+) -> impl IntoResponse {
+    let mut tasks = state.tasks.write().await;
+    let Some(task) = tasks.get_mut(&task_id) else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"detail":"Not found"})),
+        )
+            .into_response();
+    };
+    let status = task.status.clone();
+    if !matches!(status.as_str(), "downloading" | "recording" | "queued" | "merging" | "stopping") {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"detail":"Task is not pausable in its current state"})),
+        )
+            .into_response();
+    }
+    task.status = "paused".into();
+    task.error = None;
+    drop(tasks);
+    if let Some(dl) = state.downloaders.read().await.get(&task_id) {
+        dl.pause();
+    }
+    state.save_tasks().await;
+    Json(serde_json::json!({"status": "paused"})).into_response()
+}
+
 async fn resume_task(
     State(state): State<AppState>,
     AxumPath(task_id): AxumPath<String>,
@@ -737,7 +782,7 @@ async fn resume_task(
         )
             .into_response();
     };
-    if !matches!(task.status.as_str(), "interrupted" | "failed") {
+    if !matches!(task.status.as_str(), "interrupted" | "failed" | "paused") {
         return (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({"detail":"Not resumable"})),
@@ -2969,6 +3014,7 @@ fn build_api_router() -> Router<AppState> {
         .route("/api/tasks/:id/clip", post(clip_task))
         .route("/api/tasks/:id/local-complete", post(complete_local_merge))
         .route("/api/tasks/:id/resume", post(resume_task))
+        .route("/api/tasks/:id/pause", post(pause_task))
         .route("/api/tasks/:id/recording-restart", post(recording_restart))
         .route("/api/tasks/:id/fork", post(fork_recording))
         .route("/api/tasks/:id/restart", post(restart_task))

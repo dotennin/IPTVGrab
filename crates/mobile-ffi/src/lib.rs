@@ -86,6 +86,7 @@ pub enum FfiProgressEvent {
         error: String,
     },
     Cancelled,
+    Paused,
 }
 
 #[derive(uniffi::Record, Clone)]
@@ -432,5 +433,6 @@ fn to_ffi(event: ProgressEvent) -> FfiProgressEvent {
         },
         ProgressEvent::Failed { error } => FfiProgressEvent::Failed { error },
         ProgressEvent::Cancelled => FfiProgressEvent::Cancelled,
+        ProgressEvent::Paused => FfiProgressEvent::Paused,
     }
 }

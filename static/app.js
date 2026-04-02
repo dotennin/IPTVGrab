@@ -533,6 +533,9 @@ function addTaskCard(taskId, url) {
           <i class="fas fa-cut me-1"></i>Clip
         </button>
         <div class="d-flex gap-1 task-recording-extras d-none"></div>
+        <button class="btn btn-sm btn-outline-secondary task-pause d-none" data-id="${taskId}" title="Pause — keep segments for later resume">
+          <i class="fas fa-pause"></i> Pause
+        </button>
         <button class="btn btn-sm btn-outline-danger task-action" data-id="${taskId}">
           <i class="fas fa-times"></i> Cancel
         </button>
@@ -541,6 +544,7 @@ function addTaskCard(taskId, url) {
 
   list.appendChild(card);
   card.querySelector(".task-action").addEventListener("click", () => cancelTask(taskId));
+  card.querySelector(".task-pause").addEventListener("click", () => pauseTask(taskId));
   applyCategoryFilter();
   applySortOrder();
   updateTaskCount();
@@ -556,6 +560,7 @@ const STATUS_MAP = {
   failed:      { text: "Failed",      cls: "bg-danger"    },
   cancelled:   { text: "Cancelled",   cls: "bg-secondary" },
   interrupted: { text: "Interrupted", cls: "bg-warning"   },
+  paused:      { text: "Paused",      cls: "bg-warning"   },
 };
 
 function updateTaskCard(taskId, task) {
@@ -686,6 +691,19 @@ function updateTaskCard(taskId, task) {
           <i class="fas fa-sync me-1"></i>Restart
         </button>`;
       info.className = "task-info small";
+    } else if (task.status === "paused") {
+      const segs = task.downloaded || task.recorded_segments || 0;
+      const total = task.total || 0;
+      const pct  = total > 0 ? ` (${task.progress || 0}%)` : "";
+      info.innerHTML = `
+        <span class="text-warning"><i class="fas fa-pause me-1"></i>Paused${pct}${segs ? ` — ${segs}${total ? "/" + total : ""} segs saved` : ""}</span>
+        <button class="btn btn-link btn-sm p-0 ms-2 text-warning" onclick="resumeTask('${taskId}')">
+          <i class="fas fa-play me-1"></i>Resume
+        </button>
+        <button class="btn btn-link btn-sm p-0 ms-2 text-info" onclick="restartTask('${taskId}')">
+          <i class="fas fa-sync me-1"></i>Restart
+        </button>`;
+      info.className = "task-info small";
     } else {
       info.className = "task-info small text-muted";
       info.textContent = "Preparing...";
@@ -740,6 +758,13 @@ function updateTaskCard(taskId, task) {
   }
 
   // ── Action button state ───────────────────────────────────────────────────
+  // Show pause button only when actively downloading or recording
+  const pauseBtn = card.querySelector(".task-pause");
+  if (pauseBtn) {
+    const pausable = ["downloading", "recording", "queued"].includes(task.status);
+    pauseBtn.classList.toggle("d-none", !pausable);
+  }
+
   if (task.status === "recording") {
     const btn = card.querySelector(".task-action");
     if (btn && btn.dataset.mode !== "stop") {
@@ -770,7 +795,7 @@ function updateTaskCard(taskId, task) {
       btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Merging';
       btn.className = "btn btn-sm btn-secondary task-action";
     }
-  } else if (["completed", "failed", "cancelled", "interrupted"].includes(task.status)) {
+  } else if (["completed", "failed", "cancelled", "interrupted", "paused"].includes(task.status)) {
     const btn = card.querySelector(".task-action");
     if (btn && btn.dataset.mode !== "trash") {
       btn.innerHTML = '<i class="fas fa-trash"></i>';
@@ -966,6 +991,18 @@ document.querySelectorAll(".sort-btn").forEach(btn => {
     applySortOrder();
   });
 });
+
+// ── Pause task ─────────────────────────────────────────────────────────────────
+async function pauseTask(taskId) {
+  try {
+    const res = await apiFetch(`/api/tasks/${taskId}/pause`, { method: "POST" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Pause failed");
+    toast("Download paused — segments preserved", "warning");
+  } catch (e) {
+    toast(e.message, "danger");
+  }
+}
 
 // ── Resume task ────────────────────────────────────────────────────────────────
 async function resumeTask(taskId) {

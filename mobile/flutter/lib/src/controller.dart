@@ -319,6 +319,14 @@ class AppController extends ChangeNotifier {
     });
   }
 
+  Future<void> pauseTask(String taskId) async {
+    return _runBusy(() async {
+      await api.pauseTask(taskId);
+      unawaited(_refreshTasksQuietly());
+      unawaited(_syncBackgroundExecution());
+    });
+  }
+
   Future<void> restartTask(String taskId) async {
     return _runBusy(() async {
       _userRequestedStops.remove(taskId);
@@ -1105,7 +1113,8 @@ class AppController extends ChangeNotifier {
     for (final task in _tasksById.values) {
       if (task.status == 'completed' ||
           task.status == 'cancelled' ||
-          task.status == 'interrupted') {
+          task.status == 'interrupted' ||
+          task.status == 'paused') {
         _userRequestedStops.remove(task.id);
         _autoFinalizeRequested.remove(task.id);
         _autoFinalizingTasks.remove(task.id);

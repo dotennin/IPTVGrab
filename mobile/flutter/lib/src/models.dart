@@ -481,6 +481,7 @@ class DownloadTask {
         'failed',
         'cancelled',
         'interrupted',
+        'paused',
       }.contains(status);
 
   bool get isRecording => status == 'recording';
@@ -489,13 +490,20 @@ class DownloadTask {
 
   bool get isActive => !isTerminal;
 
-  bool get canResume => const {'failed', 'interrupted'}.contains(status);
+  bool get canPause => const {
+        'downloading',
+        'recording',
+        'queued',
+      }.contains(status);
+
+  bool get canResume => const {'failed', 'interrupted', 'paused'}.contains(status);
 
   bool get canRestart => const {
         'completed',
         'failed',
         'cancelled',
         'interrupted',
+        'paused',
       }.contains(status);
 
   bool get canClip => const {

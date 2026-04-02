@@ -764,6 +764,29 @@ class _TasksTab extends StatelessWidget {
                                         ? 'Remove'
                                         : 'Cancel job'),
                       ),
+                      if (task.canPause)
+                        OutlinedButton.icon(
+                          onPressed: controller.isBusy
+                              ? null
+                              : () async {
+                                  try {
+                                    await controller.pauseTask(task.id);
+                                    if (!context.mounted) {
+                                      return;
+                                    }
+                                    _showMessage(
+                                        context, 'Paused — segments preserved.');
+                                  } on ApiException catch (error) {
+                                    if (!context.mounted) {
+                                      return;
+                                    }
+                                    _showMessage(context, error.message,
+                                        error: true);
+                                  }
+                                },
+                          icon: const Icon(Icons.pause),
+                          label: const Text('Pause'),
+                        ),
                       if (task.canResume)
                         OutlinedButton.icon(
                           onPressed: controller.isBusy
@@ -4491,6 +4514,8 @@ Color _statusColor(String status) {
     case 'cancelled':
     case 'interrupted':
       return Colors.grey;
+    case 'paused':
+      return _appWarning;
     default:
       return Colors.blueGrey;
   }
