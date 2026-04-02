@@ -1488,8 +1488,7 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
                                                 controller.mediaRequestHeaders,
                                             isLive: true,
                                             copyUrl: item.channelUrl,
-                                            copyLabel:
-                                                'Source URL copied.',
+                                            copyLabel: 'Source URL copied.',
                                             onGrabRequested: () {
                                               Navigator.of(context).maybePop();
                                               controller.suggestDownloadUrl(
@@ -1498,6 +1497,12 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
                                               widget.onUseChannel();
                                             },
                                             allowPictureInPicture: true,
+                                            onFetchVariants: () =>
+                                                controller.parseStreamVariants(
+                                              url: item.channelUrl,
+                                              headers: controller
+                                                  .mediaRequestHeaders,
+                                            ),
                                           ),
                                           icon: const Icon(
                                               Icons.play_circle_fill),
@@ -1714,6 +1719,7 @@ Future<void> _openMediaPlayer(
   String? copyLabel,
   VoidCallback? onGrabRequested,
   bool allowPictureInPicture = false,
+  Future<List<StreamVariant>> Function()? onFetchVariants,
 }) {
   return Navigator.of(context).push(
     MaterialPageRoute<void>(
@@ -1728,6 +1734,7 @@ Future<void> _openMediaPlayer(
         copyLabel: copyLabel,
         onGrabRequested: onGrabRequested,
         allowPictureInPicture: allowPictureInPicture,
+        onFetchVariants: onFetchVariants,
       ),
     ),
   );
@@ -1745,6 +1752,7 @@ class _MediaPlayerPage extends StatefulWidget {
     this.copyLabel,
     this.onGrabRequested,
     this.allowPictureInPicture = false,
+    this.onFetchVariants,
   });
 
   final String title;
@@ -1757,6 +1765,7 @@ class _MediaPlayerPage extends StatefulWidget {
   final String? copyLabel;
   final VoidCallback? onGrabRequested;
   final bool allowPictureInPicture;
+  final Future<List<StreamVariant>> Function()? onFetchVariants;
 
   @override
   State<_MediaPlayerPage> createState() => _MediaPlayerPageState();
@@ -1782,6 +1791,17 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
   // Without this, VideoPlayer/_NativeIosPlayerView is destroyed and
   // rebuilt every fullscreen toggle, opening a duplicate audio stream.
   final GlobalKey _playerKey = GlobalKey();
+
+  // Quality / variant selection
+  List<StreamVariant> _variants = const [];
+  bool _fetchingVariants = false;
+  bool _variantsLoaded = false;
+  int _selectedVariantIndex = -1; // -1 = original / auto
+
+  // Double-tap seek + visual feedback
+  Offset? _doubleTapPos;
+  int _seekFeedback = 0; // positive = forward, negative = rewind
+  Timer? _seekFeedbackTimer;
 
   bool get _usesNativeIosPlayer => Platform.isIOS;
 
@@ -1901,6 +1921,7 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
       }
       setState(() => _initialized = true);
       _scheduleControlsHide();
+      unawaited(_loadVariants());
     } catch (error) {
       if (!mounted) {
         return;
@@ -1914,6 +1935,11 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
       return;
     }
     setState(() {});
+    // Trigger variant loading once when the native iOS player finishes init.
+    if (_usesNativeIosPlayer && _playerInitialized && !_variantsLoaded) {
+      _variantsLoaded = true;
+      unawaited(_loadVariants());
+    }
   }
 
   Future<void> _togglePlayback() async {
@@ -1964,6 +1990,7 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
       return;
     }
     setState(() => _muted = value);
+    _scheduleControlsHide();
   }
 
   Future<void> _setFullscreen(bool enabled, {bool fromGyro = false}) async {
@@ -2019,7 +2046,7 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
     if (!_isFullscreen || !_playerIsPlaying) {
       return;
     }
-    _controlsTimer = Timer(const Duration(seconds: 2), () {
+    _controlsTimer = Timer(const Duration(seconds: 4), () {
       if (!mounted || !_playerIsPlaying) {
         return;
       }
@@ -2028,6 +2055,137 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
   }
 
   String get _resolvedCopyUrl => widget.copyUrl ?? widget.uri.toString();
+
+  // ── Quality / variant selection ──────────────────────────────────────────
+
+  Future<void> _loadVariants() async {
+    if (widget.onFetchVariants == null || _fetchingVariants) return;
+    setState(() => _fetchingVariants = true);
+    try {
+      final variants = await widget.onFetchVariants!();
+      if (!mounted) return;
+      setState(() {
+        _variants = variants;
+        _selectedVariantIndex = variants.isEmpty ? -1 : 0;
+        _variantsLoaded = true;
+        _fetchingVariants = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _fetchingVariants = false);
+    }
+  }
+
+  Future<void> _switchVariant(int index) async {
+    if (index == _selectedVariantIndex) return;
+    final variant = _variants[index];
+    final uri = Uri.parse(variant.url);
+    setState(() {
+      _selectedVariantIndex = index;
+      _initialized = false;
+    });
+    if (_usesNativeIosPlayer) {
+      final oldCtrl = _iosController;
+      oldCtrl?.removeListener(_handleControllerUpdate);
+      oldCtrl?.dispose();
+      _iosController = null;
+      final ctrl = NativeIosPlayerController(
+        uri: uri,
+        httpHeaders: widget.httpHeaders,
+        isLive: widget.isLive,
+        muted: _muted,
+      );
+      ctrl.addListener(_handleControllerUpdate);
+      if (mounted) setState(() => _iosController = ctrl);
+    } else {
+      final oldCtrl = _controller;
+      oldCtrl?.removeListener(_handleControllerUpdate);
+      await oldCtrl?.pause();
+      await oldCtrl?.dispose();
+      _controller = null;
+      final ctrl = VideoPlayerController.networkUrl(
+        uri,
+        httpHeaders: widget.httpHeaders,
+      );
+      _controller = ctrl;
+      ctrl.addListener(_handleControllerUpdate);
+      await ctrl.initialize();
+      await ctrl.setVolume(_muted ? 0 : 1);
+      await ctrl.play();
+      if (mounted) setState(() => _initialized = true);
+    }
+  }
+
+  void _showQualitySheet(BuildContext context) {
+    if (_variants.isEmpty) return;
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.black87,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 14),
+              child: Text(
+                'Quality',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                ),
+              ),
+            ),
+            const Divider(color: Colors.white24, height: 1),
+            ..._variants.asMap().entries.map((e) {
+              final i = e.key;
+              final v = e.value;
+              final selected = i == _selectedVariantIndex;
+              return ListTile(
+                leading: Icon(
+                  selected ? Icons.check_circle : Icons.radio_button_unchecked,
+                  color: selected ? Colors.blue : Colors.white54,
+                  size: 20,
+                ),
+                title: Text(
+                  v.displayLabel,
+                  style: TextStyle(
+                    color: selected ? Colors.white : Colors.white70,
+                  ),
+                ),
+                onTap: () {
+                  Navigator.of(context).pop();
+                  unawaited(_switchVariant(i));
+                },
+              );
+            }),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Double-tap seek ──────────────────────────────────────────────────────
+
+  void _handleDoubleTap() {
+    if (!_isFullscreen || !_playerInitialized || widget.isLive) return;
+    final pos = _doubleTapPos;
+    if (pos == null) return;
+    final screenW = MediaQuery.of(context).size.width;
+    final seconds = pos.dx > screenW / 2 ? 10 : -10;
+    unawaited(_seekRelative(seconds));
+    _showSeekFeedback(seconds);
+  }
+
+  void _showSeekFeedback(int seconds) {
+    _seekFeedbackTimer?.cancel();
+    setState(() => _seekFeedback = seconds);
+    _seekFeedbackTimer = Timer(const Duration(milliseconds: 700), () {
+      if (mounted) setState(() => _seekFeedback = 0);
+    });
+  }
 
   String get _resolvedCopyLabel =>
       widget.copyLabel ??
@@ -2083,6 +2241,7 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
   @override
   void dispose() {
     _controlsTimer?.cancel();
+    _seekFeedbackTimer?.cancel();
     _accelSub?.cancel();
     _restoreSystemUi();
     _iosController?.removeListener(_handleControllerUpdate);
@@ -2096,9 +2255,24 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
   Widget build(BuildContext context) {
     final aspectRatio = _playerAspectRatio;
 
-    final player = GestureDetector(
+    // Gesture-capture layer: sits between the player surface and the controls
+    // overlay in the Stack so it is hit-tested AFTER the controls. When
+    // controls are hidden their IgnorePointer returns false, so the Stack
+    // descends to this layer and all taps/double-taps are captured here —
+    // even through iOS platform-views (UIKit) that would otherwise swallow
+    // every touch before Flutter sees it.
+    final gestureLayer = Positioned.fill(
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: _playerInitialized ? _toggleControls : null,
+        onDoubleTapDown: (d) => _doubleTapPos = d.localPosition,
+        onDoubleTap: _handleDoubleTap,
+        child: const SizedBox.expand(),
+      ),
+    );
+
+    final player = SizedBox(
       key: _playerKey,
-      onTap: _playerInitialized ? _toggleControls : null,
       child: Stack(
         children: <Widget>[
           Positioned.fill(
@@ -2113,7 +2287,47 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
               ),
             ),
           ),
+          // Gesture layer is BELOW controls so button taps reach controls first.
+          // When controls' IgnorePointer is on (hidden), this layer is reached.
+          gestureLayer,
           Positioned.fill(child: _buildControls(context)),
+          // Seek feedback flash
+          if (_seekFeedback != 0)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: Center(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 20, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: Colors.black54,
+                      borderRadius: BorderRadius.circular(32),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          _seekFeedback > 0
+                              ? Icons.forward_10
+                              : Icons.replay_10,
+                          color: Colors.white,
+                          size: 30,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          '${_seekFeedback.abs()}s',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -2364,6 +2578,34 @@ class _MediaPlayerPageState extends State<_MediaPlayerPage> {
                             _muted ? Icons.volume_off : Icons.volume_up,
                           ),
                         ),
+                        if (_fetchingVariants)
+                          const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white54,
+                            ),
+                          )
+                        else if (_variants.length > 1)
+                          TextButton.icon(
+                            onPressed: () => _showQualitySheet(context),
+                            icon: const Icon(Icons.hd, size: 18),
+                            label: Text(
+                              _selectedVariantIndex >= 0
+                                  ? _variants[_selectedVariantIndex].displayLabel
+                                  : 'Auto',
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                            style: TextButton.styleFrom(
+                              foregroundColor: Colors.white,
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 4),
+                              minimumSize: Size.zero,
+                              tapTargetSize:
+                                  MaterialTapTargetSize.shrinkWrap,
+                            ),
+                          ),
                         IconButton(
                           onPressed: _playerInitialized
                               ? () => _setFullscreen(!_isFullscreen)

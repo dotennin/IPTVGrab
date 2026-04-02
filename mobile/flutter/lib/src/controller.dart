@@ -246,6 +246,19 @@ class AppController extends ChangeNotifier {
     });
   }
 
+  /// Fetches quality variants for [url] without modifying any controller state.
+  Future<List<StreamVariant>> parseStreamVariants({
+    required String url,
+    Map<String, String>? headers,
+  }) async {
+    try {
+      final info = await api.parse(url: url, headers: headers);
+      return info.streams;
+    } catch (_) {
+      return const [];
+    }
+  }
+
   Future<String> startDownload({
     required String url,
     required Map<String, String> headers,
