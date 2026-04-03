@@ -217,53 +217,6 @@ class _PlaylistsTabState extends State<PlaylistsTab> {
                   },
                 ),
               IconButton.filledTonal(
-                tooltip: controller.healthState.running
-                    ? 'Source health check is running'
-                    : 'Run health check',
-                onPressed: controller.isBusy || controller.healthState.running
-                    ? null
-                    : () async {
-                        try {
-                          await controller.runHealthCheck();
-                          if (!context.mounted) {
-                            return;
-                          }
-                          showMessage(
-                              context, 'Source health check started.');
-                        } on ApiException catch (error) {
-                          if (!context.mounted) {
-                            return;
-                          }
-                          showMessage(context, error.message, error: true);
-                        }
-                      },
-                icon: Icon(
-                  controller.healthState.running
-                      ? Icons.sync
-                      : Icons.health_and_safety_outlined,
-                ),
-              ),
-              const SizedBox(width: 6),
-              IconButton.filledTonal(
-                tooltip: 'Refresh sources',
-                onPressed: controller.isBusy
-                    ? null
-                    : () async {
-                        try {
-                          await controller.refreshData(
-                            runHealthCheckAfterRefresh: true,
-                          );
-                        } on ApiException catch (error) {
-                          if (!context.mounted) {
-                            return;
-                          }
-                          showMessage(context, error.message, error: true);
-                        }
-                      },
-                icon: const Icon(Icons.refresh),
-              ),
-              const SizedBox(width: 6),
-              IconButton.filledTonal(
                 tooltip: 'Edit all source lists',
                 onPressed: controller.isBusy
                     ? null
