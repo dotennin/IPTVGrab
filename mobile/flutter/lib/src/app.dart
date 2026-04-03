@@ -44,7 +44,7 @@ class _M3u8FlutterClientAppState extends State<M3u8FlutterClientApp>
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'MediaNest',
+      title: 'IPTV Nest',
       theme: buildAppTheme(),
       home: AnimatedBuilder(
         animation: _controller,
@@ -54,7 +54,7 @@ class _M3u8FlutterClientAppState extends State<M3u8FlutterClientApp>
               title: const Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  Text('MediaNest',
+                  Text('IPTV Nest',
                       style:
                           TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                   Text(
