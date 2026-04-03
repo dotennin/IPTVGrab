@@ -54,9 +54,6 @@ class _DownloadTabState extends State<DownloadTab> {
       return;
     }
     _urlController.text = url;
-    if (mounted) {
-      showMessage(context, 'Filled the source URL from your saved sources.');
-    }
   }
 
   Future<void> _parse() async {
