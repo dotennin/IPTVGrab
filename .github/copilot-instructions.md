@@ -189,7 +189,22 @@ When `cancel()` is called while ffmpeg is running in merge phase, ffmpeg receive
 
 ## Testing workflow
 
-After any code change:
+**Rule: Run `make test` after every code change before committing.**
+
+```bash
+# Run ALL tests (Rust unit tests + Flutter unit/widget tests)
+make test
+
+# Run only Rust unit tests across all crates
+make test-rust
+# equivalent: cargo test --workspace
+
+# Run only Flutter tests
+make test-flutter
+# equivalent: cd mobile/flutter && flutter test
+```
+
+After any server-side change, also verify compilation and the API integration tests:
 ```bash
 # 1. Verify compilation
 cargo check -p server
@@ -197,14 +212,24 @@ cargo check -p server
 # 2. Kill any running server
 lsof -ti:8765 | xargs kill 2>/dev/null; true
 
-# 3. Run tests (auto-starts server)
+# 3. Run API integration tests (auto-starts server)
 cd /Users/dotennin-mac14/projects/m3u8-downloader-rs && ./tests/test_api.sh
 ```
+
+### Test locations
+| Layer | Command | Files |
+|-------|---------|-------|
+| Rust unit (m3u8-core) | `cargo test -p m3u8-core` | `crates/m3u8-core/src/{parser,aes,downloader,merge}.rs` |
+| Rust unit (server) | `cargo test -p server` | `crates/server/src/lib.rs` |
+| Flutter unit | `flutter test` in `mobile/flutter` | `test/utils_test.dart`, `test/models_test.dart`, `test/task_helpers_test.dart`, `test/theme_test.dart` |
+| Flutter widget | `flutter test` in `mobile/flutter` | `test/widgets_test.dart` |
+| API integration | `./tests/test_api.sh` | `tests/test_api.sh` |
 
 ## Mobile build commands
 
 ```bash
 make setup          # Install cargo-ndk + uniffi-bindgen
+make test           # Run all tests (Rust + Flutter) ← run after every change
 make flutter-prepare # Build Rust native artifacts for Flutter
 make apk             # Flutter Android APK
 make ipa-debug       # Flutter debugging IPA for local device install

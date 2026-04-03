@@ -34,3 +34,128 @@ pub fn decrypt_aes128(
         .decrypt_padded_vec_mut::<Pkcs7>(&mut buf)
         .map_err(|e| DownloadError::Decryption(e.to_string()))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aes::Aes128;
+    use cbc::Encryptor;
+    use cipher::{BlockEncryptMut, KeyIvInit};
+
+    type Aes128CbcEnc = Encryptor<Aes128>;
+
+    fn encrypt_aes128_cbc(plaintext: &[u8], key: &[u8; 16], iv: &[u8; 16]) -> Vec<u8> {
+        let enc = Aes128CbcEnc::new_from_slices(key, iv).unwrap();
+        enc.encrypt_padded_vec_mut::<Pkcs7>(plaintext)
+    }
+
+    #[test]
+    fn decrypt_roundtrip_with_explicit_iv() {
+        let key = b"0123456789abcdef";
+        let iv = b"fedcba9876543210";
+        let plaintext = b"Hello, AES world";
+
+        let ciphertext = encrypt_aes128_cbc(plaintext, key, iv);
+        let iv_hex = hex::encode(iv);
+        let result = decrypt_aes128(&ciphertext, key, Some(&iv_hex)).unwrap();
+        assert_eq!(result, plaintext);
+    }
+
+    #[test]
+    fn decrypt_roundtrip_with_null_iv_defaults_to_zeros() {
+        let key = b"0123456789abcdef";
+        let iv = [0u8; 16];
+        let plaintext = b"Test plaintext!!";
+
+        let ciphertext = encrypt_aes128_cbc(plaintext, key, &iv);
+        let result = decrypt_aes128(&ciphertext, key, None).unwrap();
+        assert_eq!(result, plaintext);
+    }
+
+    #[test]
+    fn decrypt_accepts_0x_prefixed_iv() {
+        let key = b"0123456789abcdef";
+        let iv = [0u8; 16];
+        let plaintext = b"Prefixed IV test";
+
+        let ciphertext = encrypt_aes128_cbc(plaintext, key, &iv);
+        let result = decrypt_aes128(
+            &ciphertext,
+            key,
+            Some("0x00000000000000000000000000000000"),
+        )
+        .unwrap();
+        assert_eq!(result, plaintext);
+    }
+
+    #[test]
+    fn decrypt_accepts_uppercase_0x_prefixed_iv() {
+        let key = b"0123456789abcdef";
+        let iv = [0u8; 16];
+        let plaintext = b"UPPERCASE prefix";
+
+        let ciphertext = encrypt_aes128_cbc(plaintext, key, &iv);
+        let result = decrypt_aes128(
+            &ciphertext,
+            key,
+            Some("0X00000000000000000000000000000000"),
+        )
+        .unwrap();
+        assert_eq!(result, plaintext);
+    }
+
+    #[test]
+    fn decrypt_pads_short_iv_hex_on_left() {
+        // "0x1" should be left-padded to "00000000000000000000000000000001"
+        let key = b"0123456789abcdef";
+        let mut iv = [0u8; 16];
+        iv[15] = 1u8;
+        let plaintext = b"Short IV padding";
+
+        let ciphertext = encrypt_aes128_cbc(plaintext, key, &iv);
+        let result = decrypt_aes128(&ciphertext, key, Some("0x1")).unwrap();
+        assert_eq!(result, plaintext);
+    }
+
+    #[test]
+    fn decrypt_fails_with_key_too_short() {
+        let short_key = b"only8byt";
+        let ciphertext = vec![0u8; 16];
+
+        let err = decrypt_aes128(&ciphertext, short_key, None).unwrap_err();
+        assert!(err.to_string().contains("too short") || err.to_string().contains("Key"));
+    }
+
+    #[test]
+    fn decrypt_fails_with_invalid_iv_hex() {
+        let key = b"0123456789abcdef";
+        let ciphertext = vec![0u8; 16];
+
+        let err = decrypt_aes128(&ciphertext, key, Some("0xZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"))
+            .unwrap_err();
+        assert!(matches!(err, DownloadError::Decryption(_)));
+    }
+
+    #[test]
+    fn decrypt_fails_with_invalid_padding() {
+        let key = b"0123456789abcdef";
+        // Random bytes that won't have valid PKCS7 padding after decryption
+        let garbled = vec![0xdeu8, 0xad, 0xbe, 0xef, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb];
+
+        let err = decrypt_aes128(&garbled, key, None).unwrap_err();
+        assert!(matches!(err, DownloadError::Decryption(_)));
+    }
+
+    #[test]
+    fn decrypt_handles_multiblock_plaintext() {
+        let key = b"0123456789abcdef";
+        let iv = b"abcdefghijklmnop";
+        // 48 bytes → 3 AES blocks
+        let plaintext = b"This is a longer plaintext that spans 3 blocks!!";
+
+        let ciphertext = encrypt_aes128_cbc(plaintext, key, iv);
+        let iv_hex = hex::encode(iv);
+        let result = decrypt_aes128(&ciphertext, key, Some(&iv_hex)).unwrap();
+        assert_eq!(result, plaintext);
+    }
+}

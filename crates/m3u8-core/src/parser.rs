@@ -461,6 +461,8 @@ mod tests {
 
     const BASE_URL: &str = "https://example.com/master.m3u8";
 
+    // ── playlist_to_info ───────────────────────────────────────────────────────
+
     #[test]
     fn playlist_to_info_recovers_variants_when_audio_tags_follow_streams() {
         let playlist = parse_playlist(SAMPLE_MASTER).unwrap();
@@ -471,6 +473,49 @@ mod tests {
         assert_eq!(info.streams[0].url, "https://example.com/0.m3u8");
         assert_eq!(info.streams[4].url, "https://example.com/4.m3u8");
     }
+
+    #[test]
+    fn playlist_to_info_sorts_streams_by_bandwidth_descending() {
+        let playlist = parse_playlist(SAMPLE_MASTER).unwrap();
+        let info = playlist_to_info(&playlist, SAMPLE_MASTER, BASE_URL);
+
+        let bandwidths: Vec<u64> = info.streams.iter().map(|s| s.bandwidth).collect();
+        let mut sorted = bandwidths.clone();
+        sorted.sort_by(|a, b| b.cmp(a));
+        assert_eq!(bandwidths, sorted);
+    }
+
+    #[test]
+    fn playlist_to_info_media_playlist_computes_duration() {
+        let media_m3u8 = "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6.0,\nseg1.ts\n#EXTINF:6.0,\nseg2.ts\n#EXTINF:4.5,\nseg3.ts\n#EXT-X-ENDLIST\n";
+        let playlist = parse_playlist(media_m3u8).unwrap();
+        let info = playlist_to_info(&playlist, media_m3u8, BASE_URL);
+
+        assert_eq!(info.kind, StreamKind::Media);
+        assert_eq!(info.segments, 3);
+        assert!((info.duration - 16.5).abs() < 0.01);
+        assert!(!info.is_live);
+    }
+
+    #[test]
+    fn playlist_to_info_detects_live_stream() {
+        let live_m3u8 = "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6.0,\nseg1.ts\n";
+        let playlist = parse_playlist(live_m3u8).unwrap();
+        let info = playlist_to_info(&playlist, live_m3u8, BASE_URL);
+
+        assert!(info.is_live);
+    }
+
+    #[test]
+    fn playlist_to_info_detects_encrypted_segments() {
+        let enc_m3u8 = "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXT-X-KEY:METHOD=AES-128,URI=\"key.bin\",IV=0x0\n#EXTINF:6.0,\nseg1.ts\n#EXT-X-ENDLIST\n";
+        let playlist = parse_playlist(enc_m3u8).unwrap();
+        let info = playlist_to_info(&playlist, enc_m3u8, BASE_URL);
+
+        assert!(info.encrypted);
+    }
+
+    // ── pick_quality ───────────────────────────────────────────────────────────
 
     #[test]
     fn pick_quality_ignores_audio_tag_parser_regression() {
@@ -490,6 +535,31 @@ mod tests {
     }
 
     #[test]
+    fn pick_quality_index_clamps_to_last_variant() {
+        let playlist = parse_playlist(SAMPLE_MASTER).unwrap();
+        let Playlist::MasterPlaylist(master) = playlist else {
+            panic!("expected master playlist");
+        };
+
+        // Index 999 out of 5 variants → falls back to last (worst quality)
+        let result = pick_quality(&master, SAMPLE_MASTER, &Quality::Index(999), BASE_URL);
+        assert_eq!(result, "https://example.com/4.m3u8");
+    }
+
+    #[test]
+    fn pick_quality_index_0_selects_best() {
+        let playlist = parse_playlist(SAMPLE_MASTER).unwrap();
+        let Playlist::MasterPlaylist(master) = playlist else {
+            panic!("expected master playlist");
+        };
+
+        let result = pick_quality(&master, SAMPLE_MASTER, &Quality::Index(0), BASE_URL);
+        assert_eq!(result, "https://example.com/0.m3u8");
+    }
+
+    // ── find_audio_playlist ───────────────────────────────────────────────────
+
+    #[test]
     fn find_audio_playlist_recovers_default_audio_rendition() {
         let playlist = parse_playlist(SAMPLE_MASTER).unwrap();
         let Playlist::MasterPlaylist(master) = playlist else {
@@ -501,5 +571,154 @@ mod tests {
             find_audio_playlist(&master, SAMPLE_MASTER, &chosen, BASE_URL),
             Some("https://example.com/5.m3u8".into())
         );
+    }
+
+    #[test]
+    fn find_audio_playlist_returns_none_for_media_playlist_without_audio() {
+        let media_m3u8 = "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6.0,\nseg1.ts\n#EXT-X-ENDLIST\n";
+        let playlist = parse_playlist(media_m3u8).unwrap();
+        let Playlist::MediaPlaylist(_) = &playlist else {
+            panic!("expected media playlist");
+        };
+        // build a stub master with no audio
+        let master_m3u8 = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000\nstream.m3u8\n";
+        let Playlist::MasterPlaylist(master) = parse_playlist(master_m3u8).unwrap() else {
+            panic!("expected master playlist");
+        };
+
+        assert_eq!(
+            find_audio_playlist(&master, master_m3u8, "https://example.com/stream.m3u8", BASE_URL),
+            None
+        );
+    }
+
+    // ── resolve ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn resolve_returns_absolute_http_url_unchanged() {
+        assert_eq!(
+            resolve("https://cdn.example.com/stream.m3u8", BASE_URL),
+            "https://cdn.example.com/stream.m3u8"
+        );
+    }
+
+    #[test]
+    fn resolve_returns_absolute_http_non_https_unchanged() {
+        assert_eq!(
+            resolve("http://cdn.example.com/stream.m3u8", BASE_URL),
+            "http://cdn.example.com/stream.m3u8"
+        );
+    }
+
+    #[test]
+    fn resolve_resolves_relative_uri_against_base() {
+        assert_eq!(
+            resolve("0.m3u8", BASE_URL),
+            "https://example.com/0.m3u8"
+        );
+    }
+
+    #[test]
+    fn resolve_resolves_path_relative_uri() {
+        assert_eq!(
+            resolve("segments/seg1.ts", "https://example.com/hls/master.m3u8"),
+            "https://example.com/hls/segments/seg1.ts"
+        );
+    }
+
+    #[test]
+    fn resolve_resolves_parent_relative_uri() {
+        assert_eq!(
+            resolve("../other/seg1.ts", "https://example.com/hls/v2/master.m3u8"),
+            "https://example.com/hls/other/seg1.ts"
+        );
+    }
+
+    #[test]
+    fn resolve_returns_uri_unchanged_when_base_is_invalid() {
+        assert_eq!(resolve("relative.m3u8", "not-a-url"), "relative.m3u8");
+    }
+
+    // ── parse_attribute_list (tested indirectly via public functions) ──────────
+
+    #[test]
+    fn parse_attribute_list_handles_quoted_values_with_commas() {
+        // Commas inside quotes must not split the attribute list.
+        // Test via playlist_to_info which internally calls parse_attribute_list.
+        let master = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000,CODECS=\"avc1.640028,mp4a.40.2\"\nstream.m3u8\n";
+        let playlist = parse_playlist(master).unwrap();
+        let info = playlist_to_info(&playlist, master, BASE_URL);
+
+        assert_eq!(info.streams.len(), 1);
+        assert_eq!(
+            info.streams[0].codecs.as_deref(),
+            Some("avc1.640028,mp4a.40.2")
+        );
+    }
+
+    // ── variant_label / parse_bandwidth ───────────────────────────────────────
+
+    #[test]
+    fn variant_label_uses_resolution_height() {
+        assert_eq!(variant_label(Some("1920x1080"), 5000000), "1080p");
+        assert_eq!(variant_label(Some("1280x720"), 3000000), "720p");
+        assert_eq!(variant_label(Some("640x360"), 1000000), "360p");
+    }
+
+    #[test]
+    fn variant_label_falls_back_to_kbps_without_resolution() {
+        assert_eq!(variant_label(None, 5000000), "5000kbps");
+        assert_eq!(variant_label(None, 1500000), "1500kbps");
+    }
+
+    #[test]
+    fn parse_bandwidth_prefers_average_bandwidth() {
+        let mut attrs = HashMap::new();
+        attrs.insert("BANDWIDTH".to_string(), "5000000".to_string());
+        attrs.insert("AVERAGE-BANDWIDTH".to_string(), "4500000".to_string());
+
+        assert_eq!(parse_bandwidth(&attrs), 4500000);
+    }
+
+    #[test]
+    fn parse_bandwidth_falls_back_to_bandwidth_key() {
+        let mut attrs = HashMap::new();
+        attrs.insert("BANDWIDTH".to_string(), "3000000".to_string());
+
+        assert_eq!(parse_bandwidth(&attrs), 3000000);
+    }
+
+    #[test]
+    fn parse_bandwidth_returns_zero_when_missing() {
+        assert_eq!(parse_bandwidth(&HashMap::new()), 0);
+    }
+
+    // ── is_cmaf ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn is_cmaf_detects_m4s_segments() {
+        let m3u8 = "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6.0,\nseg_000001.m4s\n#EXT-X-ENDLIST\n";
+        let Playlist::MediaPlaylist(media) = parse_playlist(m3u8).unwrap() else {
+            panic!("expected media playlist");
+        };
+        assert!(is_cmaf(&media));
+    }
+
+    #[test]
+    fn is_cmaf_detects_m4s_with_query_params() {
+        let m3u8 = "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6.0,\nseg_000001.m4s?token=abc\n#EXT-X-ENDLIST\n";
+        let Playlist::MediaPlaylist(media) = parse_playlist(m3u8).unwrap() else {
+            panic!("expected media playlist");
+        };
+        assert!(is_cmaf(&media));
+    }
+
+    #[test]
+    fn is_cmaf_returns_false_for_ts_segments() {
+        let m3u8 = "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6.0,\nseg_000001.ts\n#EXT-X-ENDLIST\n";
+        let Playlist::MediaPlaylist(media) = parse_playlist(m3u8).unwrap() else {
+            panic!("expected media playlist");
+        };
+        assert!(!is_cmaf(&media));
     }
 }

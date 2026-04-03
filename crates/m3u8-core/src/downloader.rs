@@ -983,6 +983,63 @@ mod tests {
         assert!(dl.is_cancelled());
         assert!(dl.should_stop_live());
     }
+
+    #[test]
+    fn pause_marks_both_paused_and_cancelled() {
+        let dl = Downloader::new(DownloadConfig::default());
+        dl.pause();
+
+        assert!(dl.is_paused());
+        // pause reuses cancelled flag to stop in-flight segment spawns
+        assert!(dl.is_cancelled());
+    }
+
+    #[test]
+    fn new_downloader_starts_with_all_flags_false() {
+        let dl = Downloader::new(DownloadConfig::default());
+
+        assert!(!dl.is_cancelled());
+        assert!(!dl.is_paused());
+        assert!(!dl.should_stop_live());
+    }
+
+    #[test]
+    fn stop_sets_should_stop_live_without_affecting_cancelled() {
+        let dl = Downloader::new(DownloadConfig::default());
+        dl.stop();
+
+        assert!(!dl.is_cancelled());
+        assert!(!dl.is_paused());
+        assert!(dl.should_stop_live());
+    }
+
+    #[test]
+    fn make_client_succeeds_with_empty_headers() {
+        let dl = Downloader::new(DownloadConfig::default());
+        assert!(dl.make_client().is_ok());
+    }
+
+    #[test]
+    fn make_client_succeeds_with_valid_headers() {
+        let mut config = DownloadConfig::default();
+        config.headers.insert("User-Agent".to_string(), "TestAgent/1.0".to_string());
+        config.headers.insert("Accept".to_string(), "application/vnd.apple.mpegurl".to_string());
+
+        let dl = Downloader::new(config);
+        assert!(dl.make_client().is_ok());
+    }
+
+    #[test]
+    fn make_client_silently_skips_invalid_header_names() {
+        // Invalid header names are silently skipped (not an error).
+        let mut config = DownloadConfig::default();
+        config.headers.insert("invalid header name!".to_string(), "value".to_string());
+        config.headers.insert("Valid-Header".to_string(), "ok".to_string());
+
+        let dl = Downloader::new(config);
+        // should still succeed — bad header is skipped
+        assert!(dl.make_client().is_ok());
+    }
 }
 
 // ── Atomic write helper ────────────────────────────────────────────────────────

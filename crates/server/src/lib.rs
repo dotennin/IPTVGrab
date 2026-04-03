@@ -2764,6 +2764,30 @@ fn load_health_cache(dir: &Path) -> HashMap<String, HealthEntry> {
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn embedded_server_serves_auth_status_on_localhost() {
+        let tmpdir = std::env::temp_dir().join(format!("m3u8-server-test-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&tmpdir).unwrap();
+
+        let server = start_embedded_server(EmbeddedServerConfig::local_device(tmpdir.clone()))
+            .await
+            .unwrap();
+
+        let response = reqwest::get(format!("{}/api/auth/status", server.base_url()))
+            .await
+            .unwrap()
+            .json::<serde_json::Value>()
+            .await
+            .unwrap();
+
+        assert_eq!(response["auth_required"], false);
+
+        server.stop().await.unwrap();
+        let _ = std::fs::remove_dir_all(&tmpdir);
+    }
+
+    // ── parse_byte_range ───────────────────────────────────────────────────────
+
     #[test]
     fn parse_byte_range_handles_common_forms() {
         assert_eq!(parse_byte_range("bytes=0-99", 1000), Some((0, 99)));
@@ -2771,6 +2795,47 @@ mod tests {
         assert_eq!(parse_byte_range("bytes=-50", 1000), Some((950, 999)));
         assert_eq!(parse_byte_range("bytes=1000-1001", 1000), None);
     }
+
+    #[test]
+    fn parse_byte_range_rejects_when_size_is_zero() {
+        assert_eq!(parse_byte_range("bytes=0-99", 0), None);
+    }
+
+    #[test]
+    fn parse_byte_range_handles_suffix_larger_than_size() {
+        // bytes=-2000 on a 1000-byte file → entire file
+        assert_eq!(parse_byte_range("bytes=-2000", 1000), Some((0, 999)));
+    }
+
+    #[test]
+    fn parse_byte_range_returns_none_for_inverted_range() {
+        assert_eq!(parse_byte_range("bytes=500-100", 1000), None);
+    }
+
+    #[test]
+    fn parse_byte_range_clamps_end_to_last_byte() {
+        // end exceeds file size → clamped
+        assert_eq!(parse_byte_range("bytes=0-9999", 1000), Some((0, 999)));
+    }
+
+    #[test]
+    fn parse_byte_range_rejects_missing_bytes_prefix() {
+        assert_eq!(parse_byte_range("0-99", 1000), None);
+    }
+
+    #[test]
+    fn parse_byte_range_handles_single_byte() {
+        assert_eq!(parse_byte_range("bytes=0-0", 1000), Some((0, 0)));
+        assert_eq!(parse_byte_range("bytes=999-999", 1000), Some((999, 999)));
+    }
+
+    #[test]
+    fn parse_byte_range_open_start_suffix_zero_is_none() {
+        // bytes=-0 makes no sense
+        assert_eq!(parse_byte_range("bytes=-0", 1000), None);
+    }
+
+    // ── rewrite_watch_playlist ────────────────────────────────────────────────
 
     #[test]
     fn rewrite_watch_playlist_proxies_lines_and_uri_attrs() {
@@ -2785,6 +2850,72 @@ mod tests {
             out.contains("/api/watch/proxy?url=https%3A%2F%2Fexample.com%2Flive%2Fseg_000001.ts")
         );
     }
+
+    #[test]
+    fn rewrite_watch_playlist_handles_absolute_segment_url() {
+        let src = "#EXTM3U\n#EXTINF:6.0,\nhttps://cdn.example.com/seg1.ts";
+        let out = rewrite_watch_playlist(src, "https://example.com/live/index.m3u8");
+
+        assert!(out.contains("/api/watch/proxy?url=https%3A%2F%2Fcdn.example.com%2Fseg1.ts"));
+    }
+
+    #[test]
+    fn rewrite_watch_playlist_preserves_extm3u_header_line() {
+        let src = "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6.0,\nseg1.ts";
+        let out = rewrite_watch_playlist(src, "https://example.com/live/index.m3u8");
+
+        assert!(out.starts_with("#EXTM3U"));
+        assert!(out.contains("#EXT-X-TARGETDURATION:6"));
+    }
+
+    // ── extract_attr ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn extract_attr_finds_quoted_value() {
+        let line = r#"#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio_0",URI="5.m3u8""#;
+
+        assert_eq!(extract_attr(line, "GROUP-ID"), Some("audio_0".to_string()));
+        assert_eq!(extract_attr(line, "URI"), Some("5.m3u8".to_string()));
+    }
+
+    #[test]
+    fn extract_attr_returns_none_when_attr_missing() {
+        let line = r#"#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio_0""#;
+
+        assert_eq!(extract_attr(line, "URI"), None);
+    }
+
+    #[test]
+    fn extract_attr_returns_empty_string_for_empty_value() {
+        let line = r#"#EXT-X-MEDIA:URI="",GROUP-ID="grp""#;
+
+        assert_eq!(extract_attr(line, "URI"), Some("".to_string()));
+    }
+
+    // ── build_preview_master_m3u8 ─────────────────────────────────────────────
+
+    #[test]
+    fn preview_master_playlist_links_video_and_audio_manifests() {
+        let body = build_preview_master_m3u8("task-1");
+
+        assert!(body.contains("/api/tasks/task-1/preview-video.m3u8"));
+        assert!(body.contains("/api/tasks/task-1/preview-audio.m3u8"));
+        assert!(body.contains("#EXT-X-MEDIA:TYPE=AUDIO"));
+    }
+
+    #[test]
+    fn preview_master_playlist_starts_with_extm3u() {
+        let body = build_preview_master_m3u8("some-task-id");
+        assert!(body.starts_with("#EXTM3U"));
+    }
+
+    #[test]
+    fn preview_master_playlist_contains_stream_inf() {
+        let body = build_preview_master_m3u8("task-42");
+        assert!(body.contains("#EXT-X-STREAM-INF:"));
+    }
+
+    // ── preview map URI helpers ───────────────────────────────────────────────
 
     #[test]
     fn preview_map_uri_uses_init_segment_for_cmaf_tasks() {
@@ -2867,37 +2998,6 @@ mod tests {
             Some("/api/tasks/task-1/audio/init.mp4".into())
         );
 
-        let _ = std::fs::remove_dir_all(&tmpdir);
-    }
-
-    #[test]
-    fn preview_master_playlist_links_video_and_audio_manifests() {
-        let body = build_preview_master_m3u8("task-1");
-
-        assert!(body.contains("/api/tasks/task-1/preview-video.m3u8"));
-        assert!(body.contains("/api/tasks/task-1/preview-audio.m3u8"));
-        assert!(body.contains("#EXT-X-MEDIA:TYPE=AUDIO"));
-    }
-
-    #[tokio::test]
-    async fn embedded_server_serves_auth_status_on_localhost() {
-        let tmpdir = std::env::temp_dir().join(format!("m3u8-server-test-{}", Uuid::new_v4()));
-        std::fs::create_dir_all(&tmpdir).unwrap();
-
-        let server = start_embedded_server(EmbeddedServerConfig::local_device(tmpdir.clone()))
-            .await
-            .unwrap();
-
-        let response = reqwest::get(format!("{}/api/auth/status", server.base_url()))
-            .await
-            .unwrap()
-            .json::<serde_json::Value>()
-            .await
-            .unwrap();
-
-        assert_eq!(response["auth_required"], false);
-
-        server.stop().await.unwrap();
         let _ = std::fs::remove_dir_all(&tmpdir);
     }
 }

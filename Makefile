@@ -1,4 +1,4 @@
-.PHONY: all server ios-targets ios-lib ios-xcframework macos-targets macos-lib android-targets flutter-check pod-check flutter-bootstrap flutter-rust-android flutter-rust-ios flutter-rust-macos flutter-prepare flutter-run flutter-run-macos flutter-apk flutter-ipa flutter-ipa-debug flutter-clean apk ipa ipa-debug clean
+.PHONY: all server test test-rust test-flutter ios-targets ios-lib ios-xcframework macos-targets macos-lib android-targets flutter-check pod-check flutter-bootstrap flutter-rust-android flutter-rust-ios flutter-rust-macos flutter-prepare flutter-run flutter-run-macos flutter-apk flutter-ipa flutter-ipa-debug flutter-clean apk ipa ipa-debug clean
 
 PATH := $(HOME)/.cargo/bin:$(PATH)
 RUSTUP_TOOLCHAIN ?= stable
@@ -109,7 +109,19 @@ flutter-clean: flutter-check
 	rm -rf $(FLUTTER_APP)/android/app/src/main/jniLibs
 	rm -rf $(FLUTTER_APP)/ios/Frameworks/MobileFfi.xcframework
 
-# ── Rust server (desktop / Docker) ─────────────────────────────────────────────
+# ── Tests ──────────────────────────────────────────────────────────────────────
+# Run all Rust unit tests across every crate.
+# Use plain cargo (not the $(CARGO) cross-compile wrapper) to avoid toolchain
+# mismatches between the unit-test and doctest link steps.
+test-rust:
+	cargo test --workspace
+
+# Run all Flutter unit and widget tests.
+test-flutter: flutter-check
+	cd $(FLUTTER_APP) && $(FLUTTER) test
+
+# Run all tests (Rust + Flutter). Run after every code change before committing.
+test: test-rust test-flutter
 server:
 	$(CARGO) build --release -p server
 
