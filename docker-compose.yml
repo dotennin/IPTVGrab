@@ -10,11 +10,11 @@ services:
       - "${PORT:-8765}:${PORT:-8765}"
     volumes:
       # Persist downloaded files and server state (tasks, playlists, health cache)
-      - ./downloads:/app/downloads
+      - /Volumes/100GB/Downloads:/downloads
     environment:
       HOST: 0.0.0.0
       PORT: ${PORT:-8765}
-      DOWNLOADS_DIR: /app/downloads
+      DOWNLOADS_DIR: /downloads
       STATIC_DIR: /app/static
       AUTH_PASSWORD: ${AUTH_PASSWORD:-}
       RUST_LOG: ${RUST_LOG:-info}
