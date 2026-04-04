@@ -1,6 +1,6 @@
-# MediaNest
+# Media Nest
 
-A Flutter shell that boots the embedded Rust MediaNest server on-device and talks to it over localhost.
+A Flutter shell that boots the embedded Rust Media Nest server on-device and talks to it over localhost.
 
 ## Getting Started
 

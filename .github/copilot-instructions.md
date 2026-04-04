@@ -1,4 +1,4 @@
-# GitHub Copilot Instructions — IPTVGrab
+# GitHub Copilot Instructions — Media Nest
 
 ## Project overview
 

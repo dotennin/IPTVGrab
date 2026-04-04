@@ -334,7 +334,7 @@ private final class BackgroundKeepAliveController {
 
   private func beginBackgroundTask() {
     guard backgroundTask == .invalid else { return }
-    backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "MediaNest downloads") {
+    backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "Media Nest downloads") {
       [weak self] in
       self?.endBackgroundTask()
     }

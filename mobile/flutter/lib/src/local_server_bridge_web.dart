@@ -14,7 +14,7 @@ String bridgeStart({
 }) {
   throw LocalServerBridgeException(
     'Local server (FFI) is not available on web. '
-    'Web builds should connect to a remote MediaNest server via HTTP/WebSocket API.\n'
+    'Web builds should connect to a remote Media Nest server via HTTP/WebSocket API.\n'
     'Use ApiClient instead of LocalServerBridge for web builds.'
   );
 }

@@ -48,7 +48,7 @@ class BackgroundKeepAliveService : Service() {
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle("MediaNest is saving media")
+            .setContentTitle("Media Nest is saving media")
             .setContentText("Keeping the local media workspace alive in the background.")
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -81,7 +81,7 @@ class BackgroundKeepAliveService : Service() {
             "Background media activity",
             NotificationManager.IMPORTANCE_LOW
         ).apply {
-            description = "Keeps MediaNest media activity running while the app is backgrounded."
+            description = "Keeps Media Nest media activity running while the app is backgrounded."
             setShowBadge(false)
         }
         manager.createNotificationChannel(channel)

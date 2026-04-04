@@ -3,8 +3,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: iptvgrab:latest
-    container_name: iptvgrab
+    image: media-nest:latest
+    container_name: media-nest
     restart: unless-stopped
     ports:
       - "${PORT:-8765}:${PORT:-8765}"

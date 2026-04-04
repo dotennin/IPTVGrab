@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ────────────────────────────────────────────────────────────────────────────────
-# API integration test suite for IPTVGrab Rust server
+# API integration test suite for Media Nest Rust server
 # Usage:
 #   ./tests/test_api.sh               # starts server internally
 #   BASE=http://192.168.1.10:8765 ./tests/test_api.sh  # against existing server
@@ -119,7 +119,7 @@ trap stop_server EXIT
 # ════════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo " IPTVGrab API Test Suite"
+echo " Media Nest API Test Suite"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 start_server
 
