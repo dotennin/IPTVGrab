@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:iptvgrab/src/utils.dart';
+import 'package:media_nest/src/utils.dart';
 
 void main() {
   group('formatBytes', () {

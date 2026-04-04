@@ -1,4 +1,4 @@
-name: iptvgrab
+name: media_nest
 description: Flutter app for personal media archiving, offline playback, and source management powered by an on-device Rust server.
 publish_to: "none"
 version: 0.1.0+1

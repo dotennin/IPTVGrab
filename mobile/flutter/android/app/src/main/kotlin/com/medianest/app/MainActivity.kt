@@ -1,4 +1,4 @@
-package com.iptvgrab.app
+package com.medianest.app
 
 import android.app.PictureInPictureParams
 import android.content.Intent
@@ -14,7 +14,7 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
-            "iptvgrab/background-control"
+            "medianest/background-control"
         ).setMethodCallHandler { call, result ->
             when (call.method) {
                 "setKeepAlive" -> {

@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:iptvgrab/src/models.dart';
+import 'package:media_nest/src/models.dart';
 
 void main() {
   group('indicatesMissingFfmpeg', () {

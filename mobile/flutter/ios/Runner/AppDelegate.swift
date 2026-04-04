@@ -24,7 +24,7 @@ import UIKit
     return _liveActivities as! LiveActivitiesController
   }
 
-  private static let bgTaskIdentifier = "com.iptvgrab.app.downloads"
+  private static let bgTaskIdentifier = "com.medianest.app.downloads"
 
   override func application(
     _ application: UIApplication,
@@ -64,7 +64,7 @@ import UIKit
     else { return }
     registrar.register(
       NativeInlinePlayerFactory(messenger: registrar.messenger()),
-      withId: "iptvgrab/native-inline-player"
+      withId: "medianest/native-inline-player"
     )
     nativeInlinePlayerRegistered = true
   }
@@ -112,7 +112,7 @@ import UIKit
     }
 
     let channel = FlutterMethodChannel(
-      name: "iptvgrab/background-control",
+      name: "medianest/background-control",
       binaryMessenger: controller.binaryMessenger
     )
     channel.setMethodCallHandler { [weak self] call, result in
@@ -179,7 +179,7 @@ import UIKit
   private func installLiveActivitiesChannelWith(messenger: FlutterBinaryMessenger) {
     guard liveActivitiesChannel == nil else { return }
     let channel = FlutterMethodChannel(
-      name: "iptvgrab/live-activities",
+      name: "medianest/live-activities",
       binaryMessenger: messenger
     )
     channel.setMethodCallHandler { [weak self] call, result in
@@ -679,11 +679,11 @@ private final class NativeInlinePlayerPlatformView: NSObject, FlutterPlatformVie
     hostView.backgroundColor = .black
     hostView.playerLayer.videoGravity = .resizeAspect
     methodChannel = FlutterMethodChannel(
-      name: "iptvgrab/native-player/\(viewIdentifier)/method",
+      name: "medianest/native-player/\(viewIdentifier)/method",
       binaryMessenger: messenger
     )
     eventChannel = FlutterEventChannel(
-      name: "iptvgrab/native-player/\(viewIdentifier)/events",
+      name: "medianest/native-player/\(viewIdentifier)/events",
       binaryMessenger: messenger
     )
     super.init()

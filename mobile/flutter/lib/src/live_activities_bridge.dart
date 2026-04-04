@@ -9,7 +9,7 @@ class LiveActivitiesBridge {
 
   static final LiveActivitiesBridge instance = LiveActivitiesBridge._();
 
-  static const _channel = MethodChannel('iptvgrab/live-activities');
+  static const _channel = MethodChannel('medianest/live-activities');
 
   bool get isSupported => Platform.isIOS;
 

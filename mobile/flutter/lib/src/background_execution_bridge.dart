@@ -15,7 +15,7 @@ class BackgroundExecutionBridge {
   static final BackgroundExecutionBridge instance =
       BackgroundExecutionBridge._();
   static const MethodChannel _channel =
-      MethodChannel('iptvgrab/background-control');
+      MethodChannel('medianest/background-control');
 
   Future<void> setKeepAlive(bool enabled) async {
     try {

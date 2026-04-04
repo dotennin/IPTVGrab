@@ -1,4 +1,4 @@
-package com.iptvgrab.app
+package com.medianest.app
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -88,7 +88,7 @@ class BackgroundKeepAliveService : Service() {
     }
 
     private companion object {
-        const val CHANNEL_ID = "iptvgrab_background_downloads"
+        const val CHANNEL_ID = "medianest_background_downloads"
         const val NOTIFICATION_ID = 4207
     }
 }

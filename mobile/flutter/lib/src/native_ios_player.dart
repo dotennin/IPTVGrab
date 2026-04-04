@@ -56,8 +56,8 @@ class NativeIosPlayerController extends ChangeNotifier {
       return;
     }
     _attached = true;
-    _methodChannel = MethodChannel('iptvgrab/native-player/$viewId/method');
-    _eventChannel = EventChannel('iptvgrab/native-player/$viewId/events');
+    _methodChannel = MethodChannel('medianest/native-player/$viewId/method');
+    _eventChannel = EventChannel('medianest/native-player/$viewId/events');
     _eventSubscription = _eventChannel!
         .receiveBroadcastStream()
         .listen(_handleEvent, onError: _handleStreamError);
@@ -193,7 +193,7 @@ class NativeIosPlayerView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return UiKitView(
-      viewType: 'iptvgrab/native-inline-player',
+      viewType: 'medianest/native-inline-player',
       creationParams: controller.creationParams,
       creationParamsCodec: const StandardMessageCodec(),
       onPlatformViewCreated: controller.attach,

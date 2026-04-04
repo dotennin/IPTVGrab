@@ -828,7 +828,7 @@ class AppController extends ChangeNotifier {
 
   Future<String> _ensureDownloadsDir() async {
     final baseDir = await getApplicationDocumentsDirectory();
-    final downloadsDir = Directory('${baseDir.path}/iptvgrab');
+    final downloadsDir = Directory('${baseDir.path}/media_nest');
     final legacyDownloadsDir = Directory('${baseDir.path}/m3u8-downloader');
     if (!await downloadsDir.exists() && await legacyDownloadsDir.exists()) {
       await legacyDownloadsDir.rename(downloadsDir.path);

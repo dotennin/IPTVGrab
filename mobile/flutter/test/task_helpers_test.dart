@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:iptvgrab/src/task_helpers.dart';
-import 'package:iptvgrab/src/theme.dart';
+import 'package:media_nest/src/task_helpers.dart';
+import 'package:media_nest/src/theme.dart';
 
 void main() {
   group('statusColor', () {
