@@ -313,7 +313,7 @@ private final class BackgroundKeepAliveController {
     player.prepareToPlay()
     guard player.play() else {
       throw NSError(
-        domain: "IPTVNestBackgroundKeepAlive",
+        domain: "MediaNestBackgroundKeepAlive",
         code: 1,
         userInfo: [NSLocalizedDescriptionKey: "Silent keepalive audio failed to start."]
       )
@@ -334,7 +334,7 @@ private final class BackgroundKeepAliveController {
 
   private func beginBackgroundTask() {
     guard backgroundTask == .invalid else { return }
-    backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "IPTV Nest downloads") {
+    backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "MediaNest downloads") {
       [weak self] in
       self?.endBackgroundTask()
     }
