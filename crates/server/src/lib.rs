@@ -1466,7 +1466,7 @@ async fn preview_playlist(
     };
     drop(tasks);
 
-    let (tmpdir, seg_ext, target_dur, is_terminal) = match preview_task_context(&task) {
+    let (tmpdir, seg_ext, target_dur) = match preview_task_context(&task) {
         Ok(context) => context,
         Err(error) => return error.into_response(),
     };
@@ -1485,7 +1485,6 @@ async fn preview_playlist(
     preview_manifest_response(build_m3u8(
         &video_segs,
         target_dur,
-        is_terminal,
         &format!("/api/tasks/{task_id}/seg"),
         preview_map_uri(&task, &tmpdir, &task_id).as_deref(),
     ))
@@ -1501,7 +1500,7 @@ async fn preview_video_playlist(
     };
     drop(tasks);
 
-    let (tmpdir, seg_ext, target_dur, is_terminal) = match preview_task_context(&task) {
+    let (tmpdir, seg_ext, target_dur) = match preview_task_context(&task) {
         Ok(context) => context,
         Err(error) => return error.into_response(),
     };
@@ -1510,7 +1509,6 @@ async fn preview_video_playlist(
         &tmpdir,
         &seg_ext,
         target_dur,
-        is_terminal,
         &format!("/api/tasks/{task_id}/seg"),
         preview_map_uri(&task, &tmpdir, &task_id).as_deref(),
     ) {
@@ -1529,7 +1527,7 @@ async fn preview_audio_playlist(
     };
     drop(tasks);
 
-    let (tmpdir, seg_ext, target_dur, is_terminal) = match preview_task_context(&task) {
+    let (tmpdir, seg_ext, target_dur) = match preview_task_context(&task) {
         Ok(context) => context,
         Err(error) => return error.into_response(),
     };
@@ -1539,7 +1537,6 @@ async fn preview_audio_playlist(
         &audio_dir,
         &seg_ext,
         target_dur,
-        is_terminal,
         &format!("/api/tasks/{task_id}/audio"),
         preview_audio_map_uri(&task, &tmpdir, &task_id).as_deref(),
     ) {
@@ -2509,7 +2506,7 @@ fn contiguous_segments(dir: &Path, ext: &str) -> Vec<PathBuf> {
     result
 }
 
-fn preview_task_context(task: &Task) -> Result<(PathBuf, String, u32, bool), (StatusCode, String)> {
+fn preview_task_context(task: &Task) -> Result<(PathBuf, String, u32), (StatusCode, String)> {
     let Some(ref tmpdir) = task.tmpdir else {
         return Err((StatusCode::NOT_FOUND, "No preview yet".to_string()));
     };
@@ -2517,10 +2514,6 @@ fn preview_task_context(task: &Task) -> Result<(PathBuf, String, u32, bool), (St
         PathBuf::from(tmpdir),
         task.seg_ext.clone().unwrap_or_else(|| ".ts".into()),
         task.target_duration.unwrap_or(6.0) as u32,
-        matches!(
-            task.status.as_str(),
-            "completed" | "failed" | "cancelled" | "merging" | "stopping" | "interrupted"
-        ),
     ))
 }
 
@@ -2554,7 +2547,6 @@ fn build_preview_media_playlist(
     dir: &Path,
     seg_ext: &str,
     target_dur: u32,
-    is_terminal: bool,
     base_url: &str,
     map_uri: Option<&str>,
 ) -> Result<String, (StatusCode, String)> {
@@ -2565,7 +2557,6 @@ fn build_preview_media_playlist(
     Ok(build_m3u8(
         &segs,
         target_dur,
-        is_terminal,
         base_url,
         map_uri,
     ))
@@ -2586,35 +2577,57 @@ fn build_preview_master_m3u8(task_id: &str) -> String {
     .join("\n")
 }
 
+// Segments below this size (bytes) are considered corrupt or degenerate.
+// Live-stream recordings occasionally produce malformed fMP4 fragments that
+// contain valid container boxes but virtually no media data (e.g., 428 B or
+// 2 KB vs. the normal ~120–3000 KB per segment).  Players download these
+// successfully (HTTP 200) but fail to decode them, causing an infinite retry loop.
+// Marking them with #EXT-X-GAP tells the player to skip fetching that slot while
+// still advancing the timeline by the segment duration.
+const PREVIEW_MIN_SEGMENT_BYTES: u64 = 8_000;
+
+// Always emit a VOD-style playlist (ENDLIST, no PLAYLIST-TYPE:EVENT) regardless of
+// whether the task is still downloading.  This matches the Python implementation and
+// fixes two player bugs:
+//   1. Players start at the live-edge (last segment) when they see an EVENT playlist
+//      without ENDLIST, causing preview to begin at the end of the recording.
+//   2. Scrubbing on an unbounded live timeline produces wildly incorrect timestamps
+//      (sometimes hundreds or thousands of hours).
+// Each playlist request is a static snapshot of segments downloaded so far; the player
+// treats it as a complete, seekable VOD clip and starts from the beginning.
 fn build_m3u8(
     segs: &[PathBuf],
     target_dur: u32,
-    is_terminal: bool,
     base_url: &str,
     map_uri: Option<&str>,
 ) -> String {
+    let has_gaps = segs
+        .iter()
+        .any(|p| p.metadata().map(|m| m.len()).unwrap_or(u64::MAX) < PREVIEW_MIN_SEGMENT_BYTES);
+    // #EXT-X-GAP requires HLS version 8; EXT-X-MAP (CMAF) requires version 7.
+    let version = if has_gaps { 8 } else if map_uri.is_some() { 7 } else { 3 };
     let mut lines = vec![
         "#EXTM3U".to_string(),
-        format!("#EXT-X-VERSION:{}", if map_uri.is_some() { 7 } else { 3 }),
+        format!("#EXT-X-VERSION:{version}"),
         format!("#EXT-X-TARGETDURATION:{target_dur}"),
         "#EXT-X-MEDIA-SEQUENCE:0".to_string(),
     ];
-    if !is_terminal {
-        lines.push("#EXT-X-PLAYLIST-TYPE:EVENT".to_string());
-    }
     if let Some(uri) = map_uri {
         lines.push(format!("#EXT-X-MAP:URI=\"{uri}\""));
     }
     for seg in segs {
+        let size = seg.metadata().map(|m| m.len()).unwrap_or(0);
+        if size < PREVIEW_MIN_SEGMENT_BYTES {
+            // Corrupt/degenerate segment — preserve timeline slot but skip fetching.
+            lines.push("#EXT-X-GAP".to_string());
+        }
         lines.push(format!("#EXTINF:{target_dur}.000,"));
         lines.push(format!(
             "{base_url}/{}",
             seg.file_name().unwrap().to_string_lossy()
         ));
     }
-    if is_terminal {
-        lines.push("#EXT-X-ENDLIST".to_string());
-    }
+    lines.push("#EXT-X-ENDLIST".to_string());
     lines.join("\n")
 }
 
@@ -2647,6 +2660,81 @@ fn preview_segment_is_valid(filename: &str) -> bool {
         || filename == "init.mp4"
 }
 
+// ── fMP4 preview timestamp normalization ─────────────────────────────────────
+//
+// Live-stream CMAF/fMP4 fragments carry a `tfdt` (TrackFragmentDecodeTime) box
+// whose `baseMediaDecodeTime` reflects the stream's running media clock — often
+// tens of millions of seconds (thousands of hours) from a broadcast epoch.
+// HLS/DASH players use this value directly for the player timeline, causing:
+//   • The seek bar to show thousands of hours
+//   • Scrubbing to produce wildly wrong timestamps
+//
+// Fix: when serving .m4s preview segments, read `seg_000000.m4s` once to get
+// the epoch offset (base_pts), then subtract it from every segment's tfdt so
+// the timeline starts at 0.
+
+/// Recursively walk the MP4 box tree looking for a `tfdt` box.
+/// Returns `(byte_offset_of_time_field, baseMediaDecodeTime, version)`.
+fn find_tfdt_in_mp4(data: &[u8], start: usize, end: usize) -> Option<(usize, u64, u8)> {
+    let mut off = start;
+    while off + 8 <= end {
+        let size = u32::from_be_bytes(data[off..off + 4].try_into().ok()?) as usize;
+        if size < 8 {
+            break;
+        }
+        let box_type = &data[off + 4..off + 8];
+        let box_end = (off + size).min(end);
+
+        if box_type == b"tfdt" {
+            let version = *data.get(off + 8)?;
+            let time_off = off + 12; // version(1) + flags(3) = 4-byte FullBox header
+            return if version == 1 {
+                let ts = u64::from_be_bytes(data.get(time_off..time_off + 8)?.try_into().ok()?);
+                Some((time_off, ts, 1))
+            } else {
+                let ts =
+                    u32::from_be_bytes(data.get(time_off..time_off + 4)?.try_into().ok()?) as u64;
+                Some((time_off, ts, 0))
+            };
+        }
+        // tfdt lives inside moof → traf; recurse into container boxes only.
+        if matches!(box_type, b"moof" | b"traf") {
+            if let Some(found) = find_tfdt_in_mp4(data, off + 8, box_end) {
+                return Some(found);
+            }
+        }
+        off += size;
+    }
+    None
+}
+
+/// Subtract `base_pts` from the `tfdt.baseMediaDecodeTime` in-place.
+fn patch_tfdt(data: &mut [u8], base_pts: u64) {
+    if let Some((time_off, pts, version)) = find_tfdt_in_mp4(data, 0, data.len()) {
+        let new_pts = pts.saturating_sub(base_pts);
+        if version == 1 {
+            data[time_off..time_off + 8].copy_from_slice(&new_pts.to_be_bytes());
+        } else {
+            data[time_off..time_off + 4].copy_from_slice(&(new_pts as u32).to_be_bytes());
+        }
+    }
+}
+
+/// Read the `baseMediaDecodeTime` from the first segment in `dir` (seg_000000.m4s).
+/// Only the first 4 KB are needed; returns 0 if the file is missing or has no tfdt.
+async fn read_base_pts(dir: &Path) -> u64 {
+    use tokio::io::AsyncReadExt;
+    let Ok(mut f) = tokio::fs::File::open(dir.join("seg_000000.m4s")).await else {
+        return 0;
+    };
+    let mut buf = vec![0u8; 4096];
+    let n = f.read(&mut buf).await.unwrap_or(0);
+    buf.truncate(n);
+    find_tfdt_in_mp4(&buf, 0, buf.len())
+        .map(|(_, pts, _)| pts)
+        .unwrap_or(0)
+}
+
 async fn serve_preview_file(
     state: AppState,
     task_id: String,
@@ -2674,12 +2762,22 @@ async fn serve_preview_file(
     }
 
     match tokio::fs::read(&seg_path).await {
-        Ok(bytes) => (
-            StatusCode::OK,
-            [(header::CONTENT_TYPE, content_type)],
-            bytes,
-        )
-            .into_response(),
+        Ok(mut bytes) => {
+            // Normalize baseMediaDecodeTime for fMP4 segments so the player
+            // timeline starts at 0 instead of the live-stream epoch.
+            if filename.ends_with(".m4s") {
+                let base_pts = read_base_pts(&path).await;
+                if base_pts > 0 {
+                    patch_tfdt(&mut bytes, base_pts);
+                }
+            }
+            (
+                StatusCode::OK,
+                [(header::CONTENT_TYPE, content_type)],
+                bytes,
+            )
+                .into_response()
+        }
         Err(_) => StatusCode::NOT_FOUND.into_response(),
     }
 }
