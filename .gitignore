@@ -64,13 +64,13 @@ yarn-error.log*
 # ─────────────────────────────────────────────
 # Flutter (project root)
 # ─────────────────────────────────────────────
-/mobile/flutter/.dart_tool/
-/mobile/flutter/build/
-/mobile/flutter/.packages
-/mobile/flutter/.flutter-plugins
-/mobile/flutter/.flutter-plugins-dependencies
-/mobile/flutter/coverage/
-/mobile/flutter/pubspec.lock
+flutter/.dart_tool/
+flutter/build/
+flutter/.packages
+flutter/.flutter-plugins
+flutter/.flutter-plugins-dependencies
+flutter/coverage/
+!flutter/pubspec.lock
 
 # Dart code generation
 /mobile/flutter/lib/**/*.g.dart
@@ -79,28 +79,28 @@ yarn-error.log*
 # ─────────────────────────────────────────────
 # Flutter – iOS
 # ─────────────────────────────────────────────
-/mobile/flutter/ios/Pods/
-/mobile/flutter/ios/Podfile.lock
-/mobile/flutter/ios/.symlinks/
-/mobile/flutter/ios/Flutter/Flutter.framework
-/mobile/flutter/ios/Flutter/Flutter.podspec
-/mobile/flutter/ios/Flutter/FlutterPluginRegistrant.*
-/mobile/flutter/ios/Runner.xcworkspace/
-/mobile/flutter/ios/Frameworks/
+flutter/ios/Pods/
+!flutter/ios/Podfile.lock
+flutter/ios/.symlinks/
+flutter/ios/Flutter/Flutter.framework
+flutter/ios/Flutter/Flutter.podspec
+flutter/ios/Flutter/FlutterPluginRegistrant.*
+flutter/ios/Runner.xcworkspace/
+flutter/ios/Frameworks/
 
 # ─────────────────────────────────────────────
 # Flutter – Android
 # ─────────────────────────────────────────────
-/mobile/flutter/android/.gradle/
-/mobile/flutter/android/captures/
-/mobile/flutter/android/local.properties
-/mobile/flutter/android/.idea/
-/mobile/flutter/android/build/
-/mobile/flutter/android/.classpath
-/mobile/flutter/android/.project
-/mobile/flutter/android/key.properties
-/mobile/flutter/android/**/*.keystore
-/mobile/flutter/android/**/*.jks
+flutter/android/.gradle/
+flutter/android/captures/
+flutter/android/local.properties
+flutter/android/.idea/
+flutter/android/build/
+flutter/android/.classpath
+flutter/android/.project
+flutter/android/key.properties
+flutter/android/**/*.keystore
+flutter/android/**/*.jks
 
 # python
 __pycache__/
