@@ -405,50 +405,64 @@ class _MediaPlayerPageState extends State<MediaPlayerPage> {
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.black87,
+      isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      builder: (_) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 14),
-              child: Text(
-                'Quality',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 16,
-                ),
-              ),
-            ),
-            const Divider(color: Colors.white24, height: 1),
-            ..._variants.asMap().entries.map((e) {
-              final i = e.key;
-              final v = e.value;
-              final selected = i == _selectedVariantIndex;
-              return ListTile(
-                leading: Icon(
-                  selected ? Icons.check_circle : Icons.radio_button_unchecked,
-                  color: selected ? Colors.blue : Colors.white54,
-                  size: 20,
-                ),
-                title: Text(
-                  v.displayLabel,
-                  style: TextStyle(
-                    color: selected ? Colors.white : Colors.white70,
+      builder: (ctx) {
+        final maxHeight = MediaQuery.of(ctx).size.height * 0.6;
+        return SafeArea(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: maxHeight),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 14),
+                  child: Text(
+                    'Quality',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
                   ),
                 ),
-                onTap: () {
-                  Navigator.of(context).pop();
-                  unawaited(_switchVariant(i));
-                },
-              );
-            }),
-          ],
-        ),
-      ),
+                const Divider(color: Colors.white24, height: 1),
+                Flexible(
+                  child: ListView(
+                    shrinkWrap: true,
+                    children: _variants.asMap().entries.map((e) {
+                      final i = e.key;
+                      final v = e.value;
+                      final selected = i == _selectedVariantIndex;
+                      return ListTile(
+                        leading: Icon(
+                          selected
+                              ? Icons.check_circle
+                              : Icons.radio_button_unchecked,
+                          color: selected ? Colors.blue : Colors.white54,
+                          size: 20,
+                        ),
+                        title: Text(
+                          v.displayLabel,
+                          style: TextStyle(
+                            color: selected ? Colors.white : Colors.white70,
+                          ),
+                        ),
+                        onTap: () {
+                          Navigator.of(ctx).pop();
+                          unawaited(_switchVariant(i));
+                        },
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
