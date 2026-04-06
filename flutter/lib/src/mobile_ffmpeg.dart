@@ -149,25 +149,41 @@ class MobileFfmpeg {
       listFile,
       await _segmentFiles(tmpdir, '.ts'),
     );
+
+    // Detect separate audio rendition (demuxed TS-video + AAC-audio HLS streams).
+    final audioDir = Directory('${tmpdir.path}/audio');
+    final hasAudio = await audioDir.exists();
+    final rawAudio = File('${audioDir.path}/merged_audio.aac');
+
     try {
-      await _runFfmpeg(<String>[
-        '-y',
-        '-f',
-        'concat',
-        '-safe',
-        '0',
-        '-i',
-        listFile.path,
-        '-c',
-        'copy',
-        '-movflags',
-        '+faststart',
-        outputFile.path,
-      ]);
-    } finally {
-      if (await listFile.exists()) {
-        await listFile.delete();
+      if (hasAudio) {
+        final audioSegs = await _segmentFiles(audioDir, '.ts');
+        if (audioSegs.isNotEmpty) {
+          await _concatBinaryNoInit(
+            segmentFiles: audioSegs,
+            outputFile: rawAudio,
+          );
+        }
       }
+
+      final args = <String>[
+        '-y',
+        '-f', 'concat',
+        '-safe', '0',
+        '-i', listFile.path,
+      ];
+      if (hasAudio && await rawAudio.exists()) {
+        args
+          ..addAll(<String>['-i', rawAudio.path])
+          ..addAll(<String>['-map', '0:v', '-map', '1:a']);
+      }
+      args
+        ..addAll(<String>['-c', 'copy', '-movflags', '+faststart'])
+        ..add(outputFile.path);
+      await _runFfmpeg(args);
+    } finally {
+      if (await listFile.exists()) await listFile.delete();
+      if (await rawAudio.exists()) await rawAudio.delete();
     }
   }
 
@@ -218,6 +234,25 @@ class MobileFfmpeg {
       if (await rawAudio.exists()) {
         await rawAudio.delete();
       }
+    }
+  }
+
+  /// Binary-concatenate segment files without an init segment.
+  /// Used for demuxed AAC audio renditions in non-CMAF HLS streams.
+  Future<void> _concatBinaryNoInit({
+    required List<FileSystemEntity> segmentFiles,
+    required File outputFile,
+  }) async {
+    if (segmentFiles.isEmpty) {
+      throw ApiException('No audio segments available.');
+    }
+    final sink = outputFile.openWrite();
+    try {
+      for (final entity in segmentFiles) {
+        sink.add(await File(entity.path).readAsBytes());
+      }
+    } finally {
+      await sink.close();
     }
   }
 

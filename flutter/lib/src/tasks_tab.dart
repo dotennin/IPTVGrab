@@ -384,7 +384,7 @@ class TasksTab extends StatelessWidget {
                             localFileName: task.output!,
                           ),
                           icon: const Icon(Icons.play_circle_fill),
-                          label: const Text('Watch file'),
+                          label: const Text('Watch'),
                         ),
                       if (task.output != null)
                         OutlinedButton.icon(
