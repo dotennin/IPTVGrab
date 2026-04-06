@@ -179,8 +179,8 @@ impl Downloader {
             .fetch_init_segment(&client, &media_playlist, &base_url, tmpdir, cmaf)
             .await?;
 
-        // Setup audio directory
-        let audio_tmpdir: Option<PathBuf> = if cmaf && audio_url.is_some() {
+        // Setup audio directory — needed for both CMAF and demuxed TS+AAC streams.
+        let audio_tmpdir: Option<PathBuf> = if audio_url.is_some() {
             let d = tmpdir.join("audio");
             tokio::fs::create_dir_all(&d).await?;
             Some(d)
@@ -847,6 +847,8 @@ impl Downloader {
                 tmpdir,
                 total,
                 &output_path,
+                audio_tmpdir.as_deref(),
+                audio_total,
                 total_secs,
                 progress_cb,
                 self.cancelled.clone(),

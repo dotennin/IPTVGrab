@@ -17,6 +17,8 @@ fn map_ffmpeg_spawn_error(error: std::io::Error) -> DownloadError {
 }
 
 /// Merge MPEG-TS segments into an MP4 using ffmpeg concat demuxer.
+/// If `audio_tmpdir` is provided, binary-concatenates the audio segments and
+/// muxes them as a separate audio track (handles demuxed TS-video + AAC-audio HLS).
 /// Yields progress percentage (0–98) via the provided callback.
 /// If `cancelled` becomes true while ffmpeg is running, ffmpeg is killed and
 /// `DownloadError::Cancelled` is returned.
@@ -24,6 +26,8 @@ pub async fn merge_ts<F>(
     tmpdir: &Path,
     total: usize,
     output_path: &Path,
+    audio_tmpdir: Option<&Path>,
+    audio_total: usize,
     total_secs: f64,
     mut progress_cb: F,
     cancelled: Arc<AtomicBool>,
@@ -42,25 +46,43 @@ where
     }
     tokio::fs::write(&list_file, list_content).await?;
 
-    let proc = Command::new("ffmpeg")
-        .args([
-            "-y",
-            "-f",
-            "concat",
-            "-safe",
-            "0",
-            "-i",
-            list_file.to_str().unwrap(),
-            "-c",
-            "copy",
-            "-movflags",
-            "+faststart",
-            output_path.to_str().unwrap(),
-        ])
+    // Binary-concat audio segments into a single AAC file when a separate
+    // audio rendition was downloaded (demuxed TS-video + AAC-audio HLS streams).
+    let merged_audio = if let (Some(audio_dir), true) = (audio_tmpdir, audio_total > 0) {
+        let path = audio_dir.join("merged_audio.aac");
+        let mut buf: Vec<u8> = Vec::new();
+        for i in 0..audio_total {
+            let seg = audio_dir.join(format!("seg_{i:06}.ts"));
+            if seg.exists() {
+                buf.extend_from_slice(&tokio::fs::read(&seg).await?);
+            }
+        }
+        if buf.is_empty() {
+            None
+        } else {
+            tokio::fs::write(&path, &buf).await?;
+            Some(path)
+        }
+    } else {
+        None
+    };
+
+    let mut cmd = Command::new("ffmpeg");
+    cmd.args(["-y", "-f", "concat", "-safe", "0", "-i"])
+        .arg(list_file.to_str().unwrap());
+
+    if let Some(ref audio_path) = merged_audio {
+        cmd.arg("-i")
+            .arg(audio_path.to_str().unwrap())
+            .args(["-map", "0:v", "-map", "1:a"]);
+    }
+
+    cmd.args(["-c", "copy", "-movflags", "+faststart"])
+        .arg(output_path.to_str().unwrap())
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .map_err(map_ffmpeg_spawn_error)?;
+        .stderr(std::process::Stdio::piped());
+
+    let proc = cmd.spawn().map_err(map_ffmpeg_spawn_error)?;
 
     wait_ffmpeg(proc, total_secs, &mut progress_cb, cancelled).await
 }
