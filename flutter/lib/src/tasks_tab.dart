@@ -93,8 +93,7 @@ class TasksTab extends StatelessWidget {
                       ),
                       const SizedBox(width: 8),
                       Chip(
-                        avatar:
-                            Icon(Icons.circle, size: 12, color: color),
+                        avatar: Icon(Icons.circle, size: 12, color: color),
                         label: Text(label),
                       ),
                     ],
@@ -153,9 +152,8 @@ class TasksTab extends StatelessWidget {
                             .withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(
-                          color:
-                              (task.needsLocalMerge ? appWarning : appDanger)
-                                  .withValues(alpha: 0.28),
+                          color: (task.needsLocalMerge ? appWarning : appDanger)
+                              .withValues(alpha: 0.28),
                         ),
                       ),
                       child: Row(
@@ -230,7 +228,7 @@ class TasksTab extends StatelessWidget {
                         label: Text(autoFinalizing
                             ? 'Saving...'
                             : task.isRecording
-                                ? 'Stop & finalize'
+                                ? 'Stop'
                                 : task.isStopping
                                     ? 'Stopping...'
                                     : task.isTerminal
@@ -247,8 +245,8 @@ class TasksTab extends StatelessWidget {
                                     if (!context.mounted) {
                                       return;
                                     }
-                                    showMessage(
-                                        context, 'Paused — segments preserved.');
+                                    showMessage(context,
+                                        'Paused — segments preserved.');
                                   } on ApiException catch (error) {
                                     if (!context.mounted) {
                                       return;
@@ -304,30 +302,6 @@ class TasksTab extends StatelessWidget {
                           icon: const Icon(Icons.restart_alt),
                           label: const Text('Restart'),
                         ),
-                      if (task.canForkRecording)
-                        FilledButton.icon(
-                          onPressed: controller.isBusy
-                              ? null
-                              : () async {
-                                  try {
-                                    final newTaskId =
-                                        await controller.forkRecording(task.id);
-                                    if (!context.mounted) {
-                                      return;
-                                    }
-                                    showMessage(context,
-                                        'Stopped the current capture and started a new one (${shortId(newTaskId)}).');
-                                  } on ApiException catch (error) {
-                                    if (!context.mounted) {
-                                      return;
-                                    }
-                                    showMessage(context, error.message,
-                                        error: true);
-                                  }
-                                },
-                          icon: const Icon(Icons.call_split),
-                          label: const Text('Stop & new'),
-                        ),
                       if (task.canRestartRecording)
                         OutlinedButton.icon(
                           onPressed: controller.isBusy
@@ -350,7 +324,7 @@ class TasksTab extends StatelessWidget {
                                   }
                                 },
                           icon: const Icon(Icons.replay_circle_filled_outlined),
-                          label: const Text('Restart rec'),
+                          label: const Text('Restart'),
                         ),
                       if (task.needsLocalMerge)
                         FilledButton.tonalIcon(
@@ -394,8 +368,7 @@ class TasksTab extends StatelessWidget {
                         OutlinedButton.icon(
                           onPressed: controller.isBusy
                               ? null
-                              : () =>
-                                  showClipDialog(context, controller, task),
+                              : () => showClipDialog(context, controller, task),
                           icon: const Icon(Icons.content_cut),
                           label: const Text('Clip'),
                         ),
@@ -425,8 +398,7 @@ class TasksTab extends StatelessWidget {
                         ),
                       if (task.output != null)
                         OutlinedButton.icon(
-                          onPressed: () =>
-                              saveLocalMediaToPhotosFromController(
+                          onPressed: () => saveLocalMediaToPhotosFromController(
                             context,
                             controller,
                             task.output!,
@@ -446,18 +418,7 @@ class TasksTab extends StatelessWidget {
                           icon: const Icon(Icons.live_tv),
                           label: Text(treatedAsStopped
                               ? 'Open closing preview'
-                              : 'Open preview'),
-                        ),
-                      if (task.canPreview)
-                        OutlinedButton.icon(
-                          onPressed: () => copyToClipboard(
-                            context,
-                            controller.previewUri(task.id).toString(),
-                            label:
-                                'Preview URL copied. It still requires the active session cookie when auth is enabled.',
-                          ),
-                          icon: const Icon(Icons.live_tv),
-                          label: const Text('Copy preview URL'),
+                              : 'Preview'),
                         ),
                     ],
                   ),
