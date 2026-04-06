@@ -3,7 +3,7 @@
 面向**个人媒体归档、离线访问与自有源管理**的工具套件，适用于你自己控制、自己维护，或已获得授权访问的 HLS/M3U8 媒体源。它包含：
 - **Rust 核心库** (`crates/m3u8-core`) — 媒体分片抓取、AES-128 解密、CMAF/MPEG-TS 合并与本地归档能力
 - **Axum Web 服务器** (`crates/server`) — 替代原 Python/FastAPI 版本，复用同一前端，提供本地 API / WebSocket 工作流
-- **Flutter 移动客户端** (`mobile/flutter`) — 在设备本地拉起 Rust server，把手机本身变成一个个人媒体工作区
+- **Flutter 移动客户端** (`flutter/`) — 在设备本地拉起 Rust server，把手机本身变成一个个人媒体工作区
 - **C FFI 绑定层** (`crates/mobile-ffi`) — Flutter 本地 server 启停桥接
 
 它更适合被理解为：
@@ -104,7 +104,7 @@ Flutter 客户端是 **on-device 模式**：
 **iOS 说明：**
 - Flutter iOS 构建还需要本机安装 CocoaPods（例如 `brew install cocoapods`）
 - 当前移动端 FFmpeg 方案基于 `ffmpeg_kit_flutter_new_min`，iOS 最低部署版本需要 `14.0+`
-- `make flutter-rust-ios` 会把 `MobileFfi.xcframework` 复制到 `mobile/flutter/ios/Frameworks/`
+- `make flutter-rust-ios` 会把 `MobileFfi.xcframework` 复制到 `flutter/ios/Frameworks/`
 - Flutter Runner 工程已内置 `MobileFfi.xcframework` 链接和符号强制引用，不再需要手工把它拖进 Xcode
 
 ---

@@ -201,7 +201,7 @@ make test-rust
 
 # Run only Flutter tests
 make test-flutter
-# equivalent: cd mobile/flutter && flutter test
+# equivalent: cd flutter && flutter test
 ```
 
 After any server-side change, also verify compilation and the API integration tests:
@@ -221,8 +221,8 @@ cd /Users/dotennin-mac14/projects/m3u8-downloader-rs && ./tests/test_api.sh
 |-------|---------|-------|
 | Rust unit (m3u8-core) | `cargo test -p m3u8-core` | `crates/m3u8-core/src/{parser,aes,downloader,merge}.rs` |
 | Rust unit (server) | `cargo test -p server` | `crates/server/src/lib.rs` |
-| Flutter unit | `flutter test` in `mobile/flutter` | `test/utils_test.dart`, `test/models_test.dart`, `test/task_helpers_test.dart`, `test/theme_test.dart` |
-| Flutter widget | `flutter test` in `mobile/flutter` | `test/widgets_test.dart` |
+| Flutter unit | `flutter test` in `flutter/` | `test/utils_test.dart`, `test/models_test.dart`, `test/task_helpers_test.dart`, `test/theme_test.dart` |
+| Flutter widget | `flutter test` in `flutter/` | `test/widgets_test.dart` |
 | API integration | `./tests/test_api.sh` | `tests/test_api.sh` |
 
 ## Mobile build commands

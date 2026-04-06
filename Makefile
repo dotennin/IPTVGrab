@@ -5,7 +5,7 @@ RUSTUP_TOOLCHAIN ?= stable
 RUSTC := $(shell rustup which rustc --toolchain $(RUSTUP_TOOLCHAIN))
 CARGO := env RUSTC="$(RUSTC)" rustup run $(RUSTUP_TOOLCHAIN) cargo
 FLUTTER ?= flutter
-FLUTTER_APP ?= mobile/flutter
+FLUTTER_APP ?= flutter
 FLUTTER_PROJECT_NAME ?= iptvgrab
 FLUTTER_ORG ?= com.iptvgrab
 IOS_XCFRAMEWORK ?= target/MobileFfi.xcframework
