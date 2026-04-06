@@ -793,7 +793,10 @@ class _MediaPlayerPageState extends State<MediaPlayerPage> {
       opacity: !_isFullscreen || _showControls ? 1 : 0,
       child: IgnorePointer(
         ignoring: _isFullscreen && !_showControls,
-        child: Container(
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: (_isFullscreen && _showControls) ? _toggleControls : null,
+          child: Container(
           decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topCenter,
@@ -832,13 +835,42 @@ class _MediaPlayerPageState extends State<MediaPlayerPage> {
                 ),
               const Spacer(),
               if (_playerInitialized && _isFullscreen)
-                IconButton.filled(
-                  style: IconButton.styleFrom(
-                    backgroundColor: Colors.black.withValues(alpha: 0.55),
-                    foregroundColor: Colors.white,
-                  ),
-                  onPressed: _togglePlayback,
-                  icon: Icon(_playerIsPlaying ? Icons.pause : Icons.play_arrow),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: <Widget>[
+                    IconButton.filled(
+                      style: IconButton.styleFrom(
+                        backgroundColor: Colors.black.withValues(alpha: 0.55),
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size(52, 52),
+                      ),
+                      onPressed: () => _seekRelative(-10),
+                      icon: const Icon(Icons.replay_10, size: 28),
+                    ),
+                    const SizedBox(width: 28),
+                    IconButton.filled(
+                      style: IconButton.styleFrom(
+                        backgroundColor: Colors.black.withValues(alpha: 0.55),
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size(64, 64),
+                      ),
+                      onPressed: _togglePlayback,
+                      icon: Icon(
+                        _playerIsPlaying ? Icons.pause : Icons.play_arrow,
+                        size: 36,
+                      ),
+                    ),
+                    const SizedBox(width: 28),
+                    IconButton.filled(
+                      style: IconButton.styleFrom(
+                        backgroundColor: Colors.black.withValues(alpha: 0.55),
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size(52, 52),
+                      ),
+                      onPressed: () => _seekRelative(10),
+                      icon: const Icon(Icons.forward_10, size: 28),
+                    ),
+                  ],
                 ),
               const Spacer(),
               Container(
@@ -947,6 +979,7 @@ class _MediaPlayerPageState extends State<MediaPlayerPage> {
               ),
             ],
           ),
+        ),
         ),
       ),
     );
