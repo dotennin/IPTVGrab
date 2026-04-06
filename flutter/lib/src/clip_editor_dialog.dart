@@ -288,19 +288,12 @@ class _ClipEditorDialogState extends State<ClipEditorDialog> {
 
     return AlertDialog(
       title: const Text('Create clip'),
+      contentPadding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            Text(
-              'Preview the media, scrub to the right frame, then set the clip start/end from the current playback position.',
-              style: Theme.of(context)
-                  .textTheme
-                  .bodySmall
-                  ?.copyWith(color: appTextMuted),
-            ),
-            const SizedBox(height: 12),
             AspectRatio(
               aspectRatio: previewAspect,
               child: DecoratedBox(
@@ -367,33 +360,50 @@ class _ClipEditorDialogState extends State<ClipEditorDialog> {
                   ),
                 ],
               ),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
+              Column(
                 children: <Widget>[
-                  OutlinedButton.icon(
-                    onPressed: () => _setRange(start: currentPreview),
-                    icon: const Icon(Icons.flag_outlined),
-                    label: const Text('Set start here'),
+                  Row(
+                    children: <Widget>[
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () => _setRange(start: currentPreview),
+                          icon: const Icon(Icons.flag_outlined, size: 18),
+                          label: const Text('Set start'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () => _setRange(end: currentPreview),
+                          icon: const Icon(Icons.outlined_flag, size: 18),
+                          label: const Text('Set end'),
+                        ),
+                      ),
+                    ],
                   ),
-                  OutlinedButton.icon(
-                    onPressed: () => _setRange(end: currentPreview),
-                    icon: const Icon(Icons.outlined_flag),
-                    label: const Text('Set end here'),
-                  ),
-                  OutlinedButton.icon(
-                    onPressed: () => unawaited(_seekTo(_clipStart)),
-                    icon: const Icon(Icons.first_page),
-                    label: const Text('Jump to start'),
-                  ),
-                  OutlinedButton.icon(
-                    onPressed: () => unawaited(_seekTo(_clipEnd)),
-                    icon: const Icon(Icons.last_page),
-                    label: const Text('Jump to end'),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: <Widget>[
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () => unawaited(_seekTo(_clipStart)),
+                          icon: const Icon(Icons.first_page, size: 18),
+                          label: const Text('Jump to start'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () => unawaited(_seekTo(_clipEnd)),
+                          icon: const Icon(Icons.last_page, size: 18),
+                          label: const Text('Jump to end'),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 10),
             ],
             if (_hasRangeSlider) ...<Widget>[
               Row(
@@ -452,36 +462,48 @@ class _ClipEditorDialogState extends State<ClipEditorDialog> {
               ),
               const SizedBox(height: 12),
             ],
-            TextField(
-              controller: _startController,
-              keyboardType:
-                  const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(
-                labelText: 'Start (seconds)',
-              ),
-              onChanged: (value) {
-                final parsed = double.tryParse(value.trim());
-                if (parsed == null) {
-                  return;
-                }
-                _setRange(start: parsed, syncTextFields: false);
-              },
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _endController,
-              keyboardType:
-                  const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(
-                labelText: 'End (seconds)',
-              ),
-              onChanged: (value) {
-                final parsed = double.tryParse(value.trim());
-                if (parsed == null) {
-                  return;
-                }
-                _setRange(end: parsed, syncTextFields: false);
-              },
+            const SizedBox(height: 8),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Expanded(
+                  child: TextField(
+                    controller: _startController,
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(
+                      labelText: 'Start (s)',
+                      isDense: true,
+                    ),
+                    onChanged: (value) {
+                      final parsed = double.tryParse(value.trim());
+                      if (parsed == null) {
+                        return;
+                      }
+                      _setRange(start: parsed, syncTextFields: false);
+                    },
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: TextField(
+                    controller: _endController,
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(
+                      labelText: 'End (s)',
+                      isDense: true,
+                    ),
+                    onChanged: (value) {
+                      final parsed = double.tryParse(value.trim());
+                      if (parsed == null) {
+                        return;
+                      }
+                      _setRange(end: parsed, syncTextFields: false);
+                    },
+                  ),
+                ),
+              ],
             ),
           ],
         ),
