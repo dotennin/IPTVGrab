@@ -10,9 +10,7 @@ import 'controller.dart';
 import 'media_player_page.dart';
 import 'media_utils.dart';
 import 'models.dart';
-import 'theme.dart';
 import 'utils.dart';
-import 'widgets.dart';
 
 class ClipSelection {
   const ClipSelection({
@@ -92,9 +90,6 @@ class ClipEditorDialog extends StatefulWidget {
 class _ClipEditorDialogState extends State<ClipEditorDialog> {
   static const double _minimumClipLength = 0.5;
 
-  late final TextEditingController _startController;
-  late final TextEditingController _endController;
-
   VideoPlayerController? _previewController;
   String? _previewError;
   bool _previewReady = false;
@@ -110,8 +105,6 @@ class _ClipEditorDialogState extends State<ClipEditorDialog> {
             ? 30.0
             : widget.task.durationSec ?? 10.0;
     _clipEnd = math.max(_minimumClipLength, initialEnd);
-    _startController = TextEditingController(text: '0.0');
-    _endController = TextEditingController(text: _clipEnd.toStringAsFixed(1));
     unawaited(_initializePreview());
   }
 
@@ -119,8 +112,6 @@ class _ClipEditorDialogState extends State<ClipEditorDialog> {
   void dispose() {
     _previewController?.removeListener(_handlePreviewUpdate);
     _previewController?.dispose();
-    _startController.dispose();
-    _endController.dispose();
     super.dispose();
   }
 
@@ -174,11 +165,7 @@ class _ClipEditorDialogState extends State<ClipEditorDialog> {
       }
       setState(() {
         _previewReady = true;
-        _applyRangeState(
-          start: _clipStart,
-          end: _clipEnd,
-          syncTextFields: true,
-        );
+        _applyRangeState(start: _clipStart, end: _clipEnd);
       });
     } catch (error) {
       if (!mounted) {
@@ -195,26 +182,7 @@ class _ClipEditorDialogState extends State<ClipEditorDialog> {
     setState(() {});
   }
 
-  void _syncTextFields() {
-    _startController.value = TextEditingValue(
-      text: _clipStart.toStringAsFixed(1),
-      selection: TextSelection.collapsed(
-        offset: _clipStart.toStringAsFixed(1).length,
-      ),
-    );
-    _endController.value = TextEditingValue(
-      text: _clipEnd.toStringAsFixed(1),
-      selection: TextSelection.collapsed(
-        offset: _clipEnd.toStringAsFixed(1).length,
-      ),
-    );
-  }
-
-  void _applyRangeState({
-    required double start,
-    required double end,
-    required bool syncTextFields,
-  }) {
+  void _applyRangeState({required double start, required double end}) {
     final max = _effectiveMaxDuration;
     var nextStart = start.clamp(0.0, max).toDouble();
     var nextEnd = end.clamp(0.0, max).toDouble();
@@ -228,21 +196,13 @@ class _ClipEditorDialogState extends State<ClipEditorDialog> {
 
     _clipStart = nextStart;
     _clipEnd = nextEnd;
-    if (syncTextFields) {
-      _syncTextFields();
-    }
   }
 
-  void _setRange({
-    double? start,
-    double? end,
-    bool syncTextFields = true,
-  }) {
+  void _setRange({double? start, double? end}) {
     setState(() {
       _applyRangeState(
         start: start ?? _clipStart,
         end: end ?? _clipEnd,
-        syncTextFields: syncTextFields,
       );
     });
   }
@@ -259,10 +219,6 @@ class _ClipEditorDialogState extends State<ClipEditorDialog> {
     await controller.seekTo(Duration(milliseconds: (clamped * 1000).round()));
   }
 
-  Future<void> _seekRelative(double seconds) async {
-    await _seekTo(_currentPreviewSeconds + seconds);
-  }
-
   Future<void> _togglePreviewPlayback() async {
     final controller = _previewController;
     if (controller == null || !controller.value.isInitialized) {
@@ -275,253 +231,267 @@ class _ClipEditorDialogState extends State<ClipEditorDialog> {
     await controller.play();
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final previewController = _previewController;
-    final previewAspect = previewController != null &&
-            previewController.value.isInitialized &&
-            previewController.value.aspectRatio > 0
-        ? previewController.value.aspectRatio
-        : 16 / 9;
-    final playerDuration = _playerDurationSeconds;
-    final currentPreview = _currentPreviewSeconds;
+  Widget _buildVideoArea(
+    BuildContext context,
+    VideoPlayerController? previewController,
+  ) {
+    return GestureDetector(
+      onTap: _togglePreviewPlayback,
+      child: Container(
+        color: Colors.black,
+        alignment: Alignment.center,
+        child: _previewError != null
+            ? Padding(
+                padding: const EdgeInsets.all(24),
+                child: Text(
+                  _previewError!,
+                  style: TextStyle(
+                      color: Theme.of(context).colorScheme.error),
+                  textAlign: TextAlign.center,
+                ),
+              )
+            : !_previewReady || previewController == null
+                ? const CircularProgressIndicator()
+                : AspectRatio(
+                    aspectRatio: previewController.value.aspectRatio > 0
+                        ? previewController.value.aspectRatio
+                        : 16 / 9,
+                    child: VideoPlayer(previewController),
+                  ),
+      ),
+    );
+  }
 
-    return AlertDialog(
-      title: const Text('Create clip'),
-      contentPadding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            AspectRatio(
-              aspectRatio: previewAspect,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: Colors.black,
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(16),
-                  child: _previewError != null
-                      ? Center(
-                          child: Padding(
-                            padding: const EdgeInsets.all(16),
-                            child: Text(
-                              _previewError!,
-                              style: TextStyle(
-                                color: Theme.of(context).colorScheme.error,
-                              ),
-                            ),
-                          ),
-                        )
-                      : !_previewReady || previewController == null
-                          ? const Center(child: CircularProgressIndicator())
-                          : VideoPlayer(previewController),
-                ),
+  Widget _buildPlaybackBar(
+    BuildContext context,
+    VideoPlayerController? previewController,
+    double currentPreview,
+    double playerDuration,
+    bool isPlaying,
+  ) {
+    return Container(
+      color: const Color(0xFF1E1E2E),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          if (_previewReady && playerDuration > 0)
+            SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                trackHeight: 3,
+                thumbShape:
+                    const RoundSliderThumbShape(enabledThumbRadius: 6),
+                overlayShape:
+                    const RoundSliderOverlayShape(overlayRadius: 12),
+              ),
+              child: Slider(
+                value: currentPreview.clamp(0.0, playerDuration),
+                min: 0,
+                max: playerDuration,
+                onChanged: (v) => unawaited(_seekTo(v)),
               ),
             ),
-            const SizedBox(height: 12),
-            if (_previewReady && previewController != null) ...<Widget>[
-              if (playerDuration > 0)
-                Slider(
-                  value: currentPreview.clamp(0.0, playerDuration),
-                  min: 0,
-                  max: playerDuration,
-                  onChanged: (value) => unawaited(_seekTo(value)),
-                ),
-              Row(
-                children: <Widget>[
-                  Text(
-                    playerDuration > 0
-                        ? '${formatSeconds(currentPreview)} / ${formatSeconds(playerDuration)}'
-                        : 'Current: ${formatSeconds(currentPreview)}',
-                    style: Theme.of(context)
-                        .textTheme
-                        .bodySmall
-                        ?.copyWith(color: appTextMuted),
-                  ),
-                  const Spacer(),
-                  IconButton(
-                    onPressed: () => unawaited(_seekRelative(-5)),
-                    icon: const Icon(Icons.replay_5),
-                  ),
-                  IconButton(
-                    onPressed: _togglePreviewPlayback,
-                    icon: Icon(
-                      previewController.value.isPlaying
-                          ? Icons.pause
-                          : Icons.play_arrow,
-                    ),
-                  ),
-                  IconButton(
-                    onPressed: () => unawaited(_seekRelative(5)),
-                    icon: const Icon(Icons.forward_5),
-                  ),
-                ],
-              ),
-              Column(
-                children: <Widget>[
-                  Row(
-                    children: <Widget>[
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: () => _setRange(start: currentPreview),
-                          icon: const Icon(Icons.flag_outlined, size: 18),
-                          label: const Text('Set start'),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: () => _setRange(end: currentPreview),
-                          icon: const Icon(Icons.outlined_flag, size: 18),
-                          label: const Text('Set end'),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  Row(
-                    children: <Widget>[
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: () => unawaited(_seekTo(_clipStart)),
-                          icon: const Icon(Icons.first_page, size: 18),
-                          label: const Text('Jump to start'),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: () => unawaited(_seekTo(_clipEnd)),
-                          icon: const Icon(Icons.last_page, size: 18),
-                          label: const Text('Jump to end'),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-            ],
-            if (_hasRangeSlider) ...<Widget>[
-              Row(
-                children: <Widget>[
-                  Expanded(
-                    child: InfoChip(
-                      label: 'Start',
-                      value: formatSeconds(_clipStart),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: InfoChip(
-                      label: 'End',
-                      value: formatSeconds(_clipEnd),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: InfoChip(
-                      label: 'Length',
-                      value: formatSeconds(_clipEnd - _clipStart),
-                    ),
-                  ),
-                ],
-              ),
-              RangeSlider(
-                values: RangeValues(_clipStart, _clipEnd),
-                min: 0,
-                max: _effectiveMaxDuration,
-                divisions:
-                    math.max(1, math.min(600, _effectiveMaxDuration.round())),
-                labels: RangeLabels(
-                  formatSeconds(_clipStart),
-                  formatSeconds(_clipEnd),
-                ),
-                onChanged: (values) => _setRange(
-                  start: values.start,
-                  end: values.end,
-                ),
-              ),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: <Widget>[
-                  for (final preset in <double>[15, 30, 60])
-                    if (_effectiveMaxDuration >= preset)
-                      OutlinedButton(
-                        onPressed: () => _setRange(
-                          end: math.min(
-                              _clipStart + preset, _effectiveMaxDuration),
-                        ),
-                        child: Text('${preset.toInt()}s'),
-                      ),
-                ],
-              ),
-              const SizedBox(height: 12),
-            ],
-            const SizedBox(height: 8),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+            child: Row(
               children: <Widget>[
-                Expanded(
-                  child: TextField(
-                    controller: _startController,
-                    keyboardType:
-                        const TextInputType.numberWithOptions(decimal: true),
-                    decoration: const InputDecoration(
-                      labelText: 'Start (s)',
-                      isDense: true,
-                    ),
-                    onChanged: (value) {
-                      final parsed = double.tryParse(value.trim());
-                      if (parsed == null) {
-                        return;
-                      }
-                      _setRange(start: parsed, syncTextFields: false);
-                    },
-                  ),
+                IconButton(
+                  onPressed: _togglePreviewPlayback,
+                  icon: Icon(isPlaying ? Icons.pause : Icons.play_arrow),
+                  iconSize: 28,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                  color: Colors.white,
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: TextField(
-                    controller: _endController,
-                    keyboardType:
-                        const TextInputType.numberWithOptions(decimal: true),
-                    decoration: const InputDecoration(
-                      labelText: 'End (s)',
-                      isDense: true,
-                    ),
-                    onChanged: (value) {
-                      final parsed = double.tryParse(value.trim());
-                      if (parsed == null) {
-                        return;
-                      }
-                      _setRange(end: parsed, syncTextFields: false);
-                    },
-                  ),
+                const SizedBox(width: 8),
+                Text(
+                  playerDuration > 0
+                      ? '${formatSeconds(currentPreview)} / ${formatSeconds(playerDuration)}'
+                      : formatSeconds(currentPreview),
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(color: Colors.white70),
                 ),
               ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
-      actions: <Widget>[
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: (_clipEnd - _clipStart) < _minimumClipLength
-              ? null
-              : () => Navigator.of(context).pop(
-                    ClipSelection(start: _clipStart, end: _clipEnd),
+    );
+  }
+
+  Widget _buildClipControls(BuildContext context) {
+    return Container(
+      color: const Color(0xFF161622),
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          if (_hasRangeSlider) ...<Widget>[
+            Row(
+              children: <Widget>[
+                const Icon(Icons.play_arrow, color: Colors.orange, size: 16),
+                const SizedBox(width: 4),
+                Text(
+                  formatSeconds(_clipStart),
+                  style:
+                      const TextStyle(color: Colors.orange, fontSize: 13),
+                ),
+                const Spacer(),
+                Text(
+                  'Clip: ${formatSeconds(_clipEnd - _clipStart)}',
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(color: Colors.white70),
+                ),
+                const Spacer(),
+                Container(width: 10, height: 10, color: Colors.red),
+                const SizedBox(width: 4),
+                Text(
+                  formatSeconds(_clipEnd),
+                  style:
+                      const TextStyle(color: Colors.red, fontSize: 13),
+                ),
+              ],
+            ),
+            RangeSlider(
+              values: RangeValues(_clipStart, _clipEnd),
+              min: 0,
+              max: _effectiveMaxDuration,
+              divisions: math.max(
+                  1, math.min(600, _effectiveMaxDuration.round())),
+              labels: RangeLabels(
+                formatSeconds(_clipStart),
+                formatSeconds(_clipEnd),
+              ),
+              onChanged: (values) {
+                final prevStart = _clipStart;
+                final prevEnd = _clipEnd;
+                _setRange(start: values.start, end: values.end);
+                if ((values.start - prevStart).abs() > 0.01) {
+                  unawaited(_seekTo(values.start));
+                } else if ((values.end - prevEnd).abs() > 0.01) {
+                  unawaited(_seekTo(values.end));
+                }
+              },
+            ),
+            const SizedBox(height: 4),
+          ],
+          Row(
+            children: <Widget>[
+              FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: Colors.green.shade700,
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: (_clipEnd - _clipStart) < _minimumClipLength
+                    ? null
+                    : () => Navigator.of(context).pop(
+                          ClipSelection(
+                              start: _clipStart, end: _clipEnd),
+                        ),
+                icon: const Icon(Icons.content_cut, size: 16),
+                label: const Text('Clip'),
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Cancel'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final previewController = _previewController;
+    final playerDuration = _playerDurationSeconds;
+    final currentPreview = _currentPreviewSeconds;
+    final isPlaying = previewController?.value.isPlaying ?? false;
+    final isLandscape =
+        MediaQuery.of(context).orientation == Orientation.landscape;
+
+    final header = Container(
+      color: const Color(0xFF1E1E2E),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      child: Row(
+        children: <Widget>[
+          const Icon(Icons.play_circle_filled,
+              color: Colors.blueAccent, size: 20),
+          const SizedBox(width: 8),
+          Text(
+            'Preview',
+            style: Theme.of(context)
+                .textTheme
+                .titleMedium
+                ?.copyWith(fontWeight: FontWeight.w600),
+          ),
+          const Spacer(),
+          IconButton(
+            onPressed: () => Navigator.of(context).pop(),
+            icon: const Icon(Icons.close),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+            iconSize: 22,
+          ),
+        ],
+      ),
+    );
+
+    final videoArea =
+        _buildVideoArea(context, previewController);
+    final playbackBar = _buildPlaybackBar(
+        context, previewController, currentPreview, playerDuration, isPlaying);
+    final clipControls = _buildClipControls(context);
+
+    return Dialog(
+      insetPadding: EdgeInsets.zero,
+      backgroundColor: Colors.black,
+      shape: const RoundedRectangleBorder(),
+      child: SafeArea(
+        child: isLandscape
+            // ── Landscape: video left | controls right ──────────
+            ? Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  header,
+                  Expanded(
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: <Widget>[
+                        Expanded(child: videoArea),
+                        SizedBox(
+                          width: 280,
+                          child: SingleChildScrollView(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: <Widget>[
+                                playbackBar,
+                                clipControls,
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-          child: const Text('Clip'),
-        ),
-      ],
+                ],
+              )
+            // ── Portrait: stacked column ─────────────────────────
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  header,
+                  Expanded(child: videoArea),
+                  playbackBar,
+                  clipControls,
+                ],
+              ),
+      ),
     );
   }
 }
