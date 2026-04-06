@@ -800,8 +800,10 @@ class _MediaPlayerPageState extends State<MediaPlayerPage> {
   Widget _buildControls(BuildContext context) {
     final current = _playerPosition;
     final total = _playerDuration;
-    final hasTimeline =
-        _playerInitialized && !widget.isLive && total > Duration.zero;
+    // Show timeline/seek controls whenever there's a known duration, even for
+    // live-flagged streams like task preview (which IS a finite VOD playlist).
+    // Truly live streams report duration = 0, so hasTimeline stays false.
+    final hasTimeline = _playerInitialized && total > Duration.zero;
     return AnimatedOpacity(
       duration: const Duration(milliseconds: 180),
       opacity: !_isFullscreen || _showControls ? 1 : 0,
@@ -933,13 +935,13 @@ class _MediaPlayerPageState extends State<MediaPlayerPage> {
                               ),
                             ),
                           ),
-                        const Spacer(),
                         Text(
-                          widget.isLive
+                          widget.isLive && !hasTimeline
                               ? 'Live'
                               : '${formatDurationLabel(current)} / ${formatDurationLabel(total)}',
                           style: const TextStyle(color: Colors.white70),
                         ),
+                        const Spacer(),
                         IconButton(
                           onPressed: _playerInitialized
                               ? () => _setMuted(!_muted)
