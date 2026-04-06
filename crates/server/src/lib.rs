@@ -1482,11 +1482,16 @@ async fn preview_playlist(
         return preview_manifest_response(build_preview_master_m3u8(&task_id));
     }
 
+    // Single-rendition: scan sections for discontinuity tags and section-aware tfdt patching.
+    let sections = scan_sections_async(tmpdir.clone(), seg_ext.clone()).await;
+    save_preview_sections(&tmpdir, &sections).await;
+    let first_idx = sections.first().map(|s| s.start_idx).unwrap_or(0);
     preview_manifest_response(build_m3u8(
-        &video_segs,
+        &video_segs[first_idx..],
         target_dur,
         &format!("/api/tasks/{task_id}/seg"),
         preview_map_uri(&task, &tmpdir, &task_id).as_deref(),
+        &sections,
     ))
 }
 
@@ -1506,12 +1511,14 @@ async fn preview_video_playlist(
     };
 
     match build_preview_media_playlist(
-        &tmpdir,
-        &seg_ext,
+        tmpdir.clone(),
+        seg_ext.clone(),
         target_dur,
-        &format!("/api/tasks/{task_id}/seg"),
-        preview_map_uri(&task, &tmpdir, &task_id).as_deref(),
-    ) {
+        format!("/api/tasks/{task_id}/seg"),
+        preview_map_uri(&task, &tmpdir, &task_id),
+    )
+    .await
+    {
         Ok(body) => preview_manifest_response(body),
         Err(error) => error.into_response(),
     }
@@ -1534,12 +1541,14 @@ async fn preview_audio_playlist(
     let audio_dir = preview_audio_dir(&tmpdir);
 
     match build_preview_media_playlist(
-        &audio_dir,
-        &seg_ext,
+        audio_dir.clone(),
+        seg_ext.clone(),
         target_dur,
-        &format!("/api/tasks/{task_id}/audio"),
-        preview_audio_map_uri(&task, &tmpdir, &task_id).as_deref(),
-    ) {
+        format!("/api/tasks/{task_id}/audio"),
+        preview_audio_map_uri(&task, &tmpdir, &task_id),
+    )
+    .await
+    {
         Ok(body) => preview_manifest_response(body),
         Err(error) => error.into_response(),
     }
@@ -2543,22 +2552,26 @@ fn preview_audio_map_uri(task: &Task, tmpdir: &Path, task_id: &str) -> Option<St
     Some(format!("/api/tasks/{task_id}/audio/init.mp4"))
 }
 
-fn build_preview_media_playlist(
-    dir: &Path,
-    seg_ext: &str,
+async fn build_preview_media_playlist(
+    dir: PathBuf,
+    seg_ext: String,
     target_dur: u32,
-    base_url: &str,
-    map_uri: Option<&str>,
+    base_url: String,
+    map_uri: Option<String>,
 ) -> Result<String, (StatusCode, String)> {
-    let segs = contiguous_segments(dir, seg_ext);
+    let segs = contiguous_segments(&dir, &seg_ext);
     if segs.is_empty() {
         return Err((StatusCode::NOT_FOUND, "No segments yet".to_string()));
     }
+    let sections = scan_sections_async(dir.clone(), seg_ext).await;
+    save_preview_sections(&dir, &sections).await;
+    let first_idx = sections.first().map(|s| s.start_idx).unwrap_or(0);
     Ok(build_m3u8(
-        &segs,
+        &segs[first_idx..],
         target_dur,
-        base_url,
-        map_uri,
+        &base_url,
+        map_uri.as_deref(),
+        &sections,
     ))
 }
 
@@ -2586,6 +2599,137 @@ fn build_preview_master_m3u8(task_id: &str) -> String {
 // still advancing the timeline by the segment duration.
 const PREVIEW_MIN_SEGMENT_BYTES: u64 = 8_000;
 
+// ── Preview discontinuity detection ──────────────────────────────────────────
+//
+// Live recordings can span multiple server restarts.  After each restart the
+// downloader clears `seen_uris` but continues appending segments at index N
+// (where N = number of existing files).  The new segments carry a much higher
+// `baseMediaDecodeTime` (broadcast-clock epoch) than the previous session, so
+// the patched timeline jumps by thousands of seconds.  hls.js detects the large
+// DTS discontinuity and loops forever retrying the last segments.
+//
+// Fix: scan all segments once per playlist request, detect timestamp jumps
+// (> 4× the expected per-segment increment), and insert `#EXT-X-DISCONTINUITY`
+// tags at each boundary.  The section's `base_pts` is then used in
+// `serve_preview_file` so every section's first segment decodes at time 0
+// relative to that section (hls.js handles the DTS reset after the tag).
+//
+// Sections are persisted to `preview_sections.json` in the tmpdir so the
+// segment server can look up the right base_pts without re-scanning every file.
+
+const PREVIEW_SECTIONS_FILE: &str = "preview_sections.json";
+
+/// One continuous recording session within a task's tmpdir.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct SectionInfo {
+    /// Absolute segment index (0-based) where this section starts.
+    start_idx: usize,
+    /// Raw `baseMediaDecodeTime` of the first valid segment in this section.
+    base_pts: u64,
+}
+
+/// Extract the zero-based segment index from a filename like `seg_000343.m4s`.
+fn parse_seg_idx(filename: &str) -> Option<usize> {
+    filename
+        .strip_prefix("seg_")
+        .and_then(|s| s.split('.').next())
+        .and_then(|s| s.parse().ok())
+}
+
+/// Scan all segments in `dir` and return a list of discontinuity sections.
+///
+/// Segments below `PREVIEW_MIN_SEGMENT_BYTES` are skipped (degenerate fMP4 init
+/// fragments).  A new section is started whenever the inter-segment `tfdt` gap
+/// exceeds `DISC_JUMP_FACTOR` times the expected increment computed from the
+/// first two valid segments — which catches server-restart boundaries.
+async fn scan_sections_async(dir: PathBuf, ext: String) -> Vec<SectionInfo> {
+    tokio::task::spawn_blocking(move || {
+        let segs = contiguous_segments(&dir, &ext);
+        if segs.is_empty() {
+            return vec![];
+        }
+
+        // Collect (absolute_idx, tfdt) for all valid (≥8 KB) segments by
+        // reading only the first 4 KB of each file (sufficient for moof/tfdt).
+        let valid: Vec<(usize, u64)> = segs
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| {
+                p.metadata().map(|m| m.len()).unwrap_or(0) >= PREVIEW_MIN_SEGMENT_BYTES
+            })
+            .filter_map(|(i, p)| {
+                use std::io::Read;
+                let mut f = std::fs::File::open(p).ok()?;
+                let mut buf = vec![0u8; 4096];
+                let n = f.read(&mut buf).ok()?;
+                buf.truncate(n);
+                find_tfdt_in_mp4(&buf, 0, buf.len()).map(|(_, pts, _)| (i, pts))
+            })
+            .collect();
+
+        if valid.is_empty() {
+            return vec![];
+        }
+
+        // Estimate normal per-segment increment from the first two valid pairs.
+        let expected_inc: u64 = if valid.len() >= 2 {
+            let inc = valid[1].1.saturating_sub(valid[0].1);
+            if inc == 0 { u64::MAX } else { inc }
+        } else {
+            u64::MAX // Only one segment — cannot detect discontinuity.
+        };
+
+        let mut sections = vec![SectionInfo {
+            start_idx: valid[0].0,
+            base_pts: valid[0].1,
+        }];
+
+        if expected_inc == u64::MAX {
+            return sections;
+        }
+
+        // A jump of more than 4× the normal increment is a discontinuity.
+        const DISC_JUMP_FACTOR: u64 = 4;
+        for window in valid.windows(2) {
+            let (_, prev_pts) = window[0];
+            let (idx, pts) = window[1];
+            if pts.saturating_sub(prev_pts) > expected_inc * DISC_JUMP_FACTOR {
+                sections.push(SectionInfo { start_idx: idx, base_pts: pts });
+            }
+        }
+
+        sections
+    })
+    .await
+    .unwrap_or_default()
+}
+
+/// Return the `base_pts` for the section that contains `seg_idx`.
+fn section_base_pts(sections: &[SectionInfo], seg_idx: usize) -> u64 {
+    sections
+        .iter()
+        .rev()
+        .find(|s| s.start_idx <= seg_idx)
+        .map(|s| s.base_pts)
+        .unwrap_or(0)
+}
+
+/// Load persisted section info from `{dir}/preview_sections.json`.
+async fn load_preview_sections(dir: &Path) -> Vec<SectionInfo> {
+    let Ok(bytes) = tokio::fs::read(dir.join(PREVIEW_SECTIONS_FILE)).await else {
+        return vec![];
+    };
+    serde_json::from_slice(&bytes).unwrap_or_default()
+}
+
+/// Persist section info to `{dir}/preview_sections.json` for fast lookup by the
+/// segment server without requiring a full re-scan.
+async fn save_preview_sections(dir: &Path, sections: &[SectionInfo]) {
+    if let Ok(json) = serde_json::to_vec(sections) {
+        let _ = tokio::fs::write(dir.join(PREVIEW_SECTIONS_FILE), json).await;
+    }
+}
+
 // Always emit a VOD-style playlist (ENDLIST, no PLAYLIST-TYPE:EVENT) regardless of
 // whether the task is still downloading.  This matches the Python implementation and
 // fixes two player bugs:
@@ -2600,7 +2744,13 @@ fn build_m3u8(
     target_dur: u32,
     base_url: &str,
     map_uri: Option<&str>,
+    sections: &[SectionInfo],
 ) -> String {
+    let first_abs_idx = sections.first().map(|s| s.start_idx).unwrap_or(0);
+    // Indices where a discontinuity tag must be inserted (all section starts
+    // except the very first segment in the slice — no tag before the first entry).
+    let disc_at: HashSet<usize> = sections.iter().skip(1).map(|s| s.start_idx).collect();
+
     let has_gaps = segs
         .iter()
         .any(|p| p.metadata().map(|m| m.len()).unwrap_or(u64::MAX) < PREVIEW_MIN_SEGMENT_BYTES);
@@ -2609,13 +2759,24 @@ fn build_m3u8(
     let mut lines = vec![
         "#EXTM3U".to_string(),
         format!("#EXT-X-VERSION:{version}"),
+        // Explicitly declare this as a finite VOD snapshot.  Without this tag some
+        // players (hls.js, AVPlayer) may treat the playlist as live and keep polling
+        // even when #EXT-X-ENDLIST is present, causing the same segments to be
+        // fetched in an infinite loop.
+        "#EXT-X-PLAYLIST-TYPE:VOD".to_string(),
         format!("#EXT-X-TARGETDURATION:{target_dur}"),
         "#EXT-X-MEDIA-SEQUENCE:0".to_string(),
     ];
     if let Some(uri) = map_uri {
         lines.push(format!("#EXT-X-MAP:URI=\"{uri}\""));
     }
-    for seg in segs {
+    for (pos, seg) in segs.iter().enumerate() {
+        let abs_idx = first_abs_idx + pos;
+        if disc_at.contains(&abs_idx) {
+            // Timestamp base resets at this section boundary (e.g., server restart).
+            // hls.js resets its DTS expectations and accepts the new timestamps.
+            lines.push("#EXT-X-DISCONTINUITY".to_string());
+        }
         let size = seg.metadata().map(|m| m.len()).unwrap_or(0);
         if size < PREVIEW_MIN_SEGMENT_BYTES {
             // Corrupt/degenerate segment — preserve timeline slot but skip fetching.
@@ -2669,9 +2830,11 @@ fn preview_segment_is_valid(filename: &str) -> bool {
 //   • The seek bar to show thousands of hours
 //   • Scrubbing to produce wildly wrong timestamps
 //
-// Fix: when serving .m4s preview segments, read `seg_000000.m4s` once to get
-// the epoch offset (base_pts), then subtract it from every segment's tfdt so
-// the timeline starts at 0.
+// Fix: `scan_sections_async` detects per-session boundaries; each section has
+// its own `base_pts`.  `serve_preview_file` subtracts the correct base_pts for
+// the segment's section so every section's timestamps start near 0.
+// `#EXT-X-DISCONTINUITY` tags in the playlist tell hls.js to reset its DTS
+// expectations at each boundary.
 
 /// Recursively walk the MP4 box tree looking for a `tfdt` box.
 /// Returns `(byte_offset_of_time_field, baseMediaDecodeTime, version)`.
@@ -2720,21 +2883,6 @@ fn patch_tfdt(data: &mut [u8], base_pts: u64) {
     }
 }
 
-/// Read the `baseMediaDecodeTime` from the first segment in `dir` (seg_000000.m4s).
-/// Only the first 4 KB are needed; returns 0 if the file is missing or has no tfdt.
-async fn read_base_pts(dir: &Path) -> u64 {
-    use tokio::io::AsyncReadExt;
-    let Ok(mut f) = tokio::fs::File::open(dir.join("seg_000000.m4s")).await else {
-        return 0;
-    };
-    let mut buf = vec![0u8; 4096];
-    let n = f.read(&mut buf).await.unwrap_or(0);
-    buf.truncate(n);
-    find_tfdt_in_mp4(&buf, 0, buf.len())
-        .map(|(_, pts, _)| pts)
-        .unwrap_or(0)
-}
-
 async fn serve_preview_file(
     state: AppState,
     task_id: String,
@@ -2747,12 +2895,16 @@ async fn serve_preview_file(
     }
 
     let tasks = state.tasks.read().await;
-    let Some(ref tmpdir) = tasks.get(&task_id).and_then(|task| task.tmpdir.clone()) else {
+    let Some(task) = tasks.get(&task_id).cloned() else {
         return StatusCode::NOT_FOUND.into_response();
     };
+    let Some(ref tmpdir) = task.tmpdir else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let seg_ext = task.seg_ext.clone().unwrap_or_else(|| ".m4s".to_string());
     let mut path = PathBuf::from(tmpdir);
-    if let Some(subdir) = subdir {
-        path = path.join(subdir);
+    if let Some(sd) = subdir {
+        path = path.join(sd);
     }
     let seg_path = path.join(&filename);
     drop(tasks);
@@ -2764,9 +2916,16 @@ async fn serve_preview_file(
     match tokio::fs::read(&seg_path).await {
         Ok(mut bytes) => {
             // Normalize baseMediaDecodeTime for fMP4 segments so the player
-            // timeline starts at 0 instead of the live-stream epoch.
+            // timeline starts at 0 and handles server-restart discontinuities.
             if filename.ends_with(".m4s") {
-                let base_pts = read_base_pts(&path).await;
+                // Use cached sections when available; scan on first access.
+                let mut sections = load_preview_sections(&path).await;
+                if sections.is_empty() {
+                    sections = scan_sections_async(path.clone(), seg_ext).await;
+                    save_preview_sections(&path, &sections).await;
+                }
+                let seg_idx = parse_seg_idx(&filename).unwrap_or(0);
+                let base_pts = section_base_pts(&sections, seg_idx);
                 if base_pts > 0 {
                     patch_tfdt(&mut bytes, base_pts);
                 }
