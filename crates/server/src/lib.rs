@@ -925,12 +925,8 @@ async fn recording_restart(
         dl.cancel();
     }
     cleanup_tmpdir(&state, &task_id).await;
-    state
-        .tasks
-        .write()
-        .await
-        .get_mut(&task_id)
-        .map(|t| t.status = "cancelled".into());
+    state.tasks.write().await.remove(&task_id);
+    state.downloaders.write().await.remove(&task_id);
     state.save_tasks().await;
 
     let now = SystemTime::now()
