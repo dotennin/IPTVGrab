@@ -79,7 +79,7 @@ Future<void> showEditPlaylistDialog(
   }
 }
 
-Future<void> showAddPlaylistDialog(
+Future<String?> showAddPlaylistDialog(
     BuildContext context, AppController controller) async {
   final nameController = TextEditingController();
   final urlController = TextEditingController();
@@ -138,23 +138,25 @@ Future<void> showAddPlaylistDialog(
     );
 
     if (result != true || !context.mounted) {
-      return;
+      return null;
     }
 
-    await controller.addPlaylist(
+    final newId = await controller.addPlaylist(
       name: nameController.text.trim(),
       url: urlController.text.trim().isEmpty ? null : urlController.text.trim(),
       raw: rawController.text.trim().isEmpty ? null : rawController.text.trim(),
     );
     if (!context.mounted) {
-      return;
+      return null;
     }
     showMessage(context, 'Source list added.');
+    return newId;
   } on ApiException catch (error) {
     if (!context.mounted) {
-      return;
+      return null;
     }
     showMessage(context, error.message, error: true);
+    return null;
   } finally {
     nameController.dispose();
     urlController.dispose();

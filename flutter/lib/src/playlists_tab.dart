@@ -239,7 +239,13 @@ class _PlaylistsTabState extends State<PlaylistsTab> {
                 tooltip: 'Add source list',
                 onPressed: controller.isBusy
                     ? null
-                    : () => showAddPlaylistDialog(context, controller),
+                    : () async {
+                        final newId = await showAddPlaylistDialog(
+                            context, controller);
+                        if (newId != null && mounted) {
+                          setState(() => _selectedPlaylistId = newId);
+                        }
+                      },
                 icon: const Icon(Icons.add),
               ),
             ],
@@ -513,16 +519,6 @@ class _PlaylistsTabState extends State<PlaylistsTab> {
                                         },
                                         icon: const Icon(
                                             Icons.download_for_offline),
-                                      ),
-                                      const SizedBox(width: 4),
-                                      IconButton.outlined(
-                                        tooltip: 'Copy source M3U8 URL',
-                                        onPressed: () => copyToClipboard(
-                                          context,
-                                          item.channelUrl,
-                                          label: 'Source URL copied.',
-                                        ),
-                                        icon: const Icon(Icons.copy),
                                       ),
                                     ],
                                   ),

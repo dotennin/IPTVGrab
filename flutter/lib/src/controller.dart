@@ -457,16 +457,17 @@ class AppController extends ChangeNotifier {
     });
   }
 
-  Future<void> addPlaylist({
+  Future<String> addPlaylist({
     required String name,
     String? url,
     String? raw,
   }) async {
     return _runBusy(() async {
-      await api.addPlaylist(name: name, url: url, raw: raw);
+      final newPlaylist = await api.addPlaylist(name: name, url: url, raw: raw);
       await refreshPlaylists();
       await refreshMergedPlaylists();
       await _refreshHealthAfterPlaylistMutation();
+      return newPlaylist.id;
     });
   }
 
