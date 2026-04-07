@@ -2159,7 +2159,7 @@ function renderEditorGroups() {
         <div class="form-check form-switch mb-0">
           <input class="form-check-input editor-group-toggle" type="checkbox" ${g.enabled ? "checked" : ""} data-gid="${g.id}" title="${g.enabled ? "Enabled" : "Disabled"}">
         </div>
-        <button class="btn btn-outline-danger btn-xs editor-delete-group-btn" data-gid="${g.id}" ${g.custom ? "" : "disabled"} title="${g.custom ? "Delete group" : "Source groups cannot be deleted"}">
+        <button class="btn ${g.custom ? "btn-outline-danger" : "btn-outline-secondary"} btn-xs editor-delete-group-btn" data-gid="${g.id}" ${g.custom ? "" : "disabled"} title="${g.custom ? "Delete group" : "Source groups cannot be deleted"}">
           <i class="fas fa-trash-alt"></i>
         </button>
       </span>
@@ -2267,7 +2267,8 @@ function renderEditorChannels() {
           <input class="form-check-input editor-ch-toggle" type="checkbox" ${ch.enabled ? "checked" : ""} data-chid="${ch.id}">
         </div>
         ${ch.custom ? `<button class="btn btn-outline-secondary btn-xs editor-edit-ch-btn" data-chid="${ch.id}" title="Edit"><i class="fas fa-pencil-alt"></i></button>` : ""}
-        <button class="btn btn-outline-danger btn-xs editor-delete-ch-btn" data-chid="${ch.id}" ${ch.custom ? "" : "disabled"} title="${ch.custom ? "Delete" : "Source channels cannot be deleted"}">
+        <button class="btn btn-outline-secondary btn-xs editor-copy-url-btn" data-chid="${ch.id}" title="Copy URL"><i class="fas fa-copy"></i></button>
+        <button class="btn ${ch.custom ? "btn-outline-danger" : "btn-outline-secondary"} btn-xs editor-delete-ch-btn" data-chid="${ch.id}" ${ch.custom ? "" : "disabled"} title="${ch.custom ? "Delete" : "Source channels cannot be deleted"}">
           <i class="fas fa-trash-alt"></i>
         </button>
       </span>
@@ -2312,6 +2313,20 @@ function renderEditorChannels() {
       group.channels = channels.filter((c) => c.id !== chid);
       editorDirty = true;
       renderEditorChannels();
+    });
+  });
+
+  // Copy channel URL
+  list.querySelectorAll(".editor-copy-url-btn").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const ch = channels.find((c) => c.id === btn.dataset.chid);
+      if (!ch?.url) return;
+      navigator.clipboard.writeText(ch.url).then(() => {
+        const icon = btn.querySelector("i");
+        icon.className = "fas fa-check";
+        setTimeout(() => { icon.className = "fas fa-copy"; }, 1500);
+      });
     });
   });
 
