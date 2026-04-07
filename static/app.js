@@ -422,7 +422,8 @@ function showStreamInfo(info) {
   body.querySelector("#watchStreamBtn")?.addEventListener("click", () => {
     if (!currentRequest.url) return;
     const label = document.getElementById("outputName")?.value.trim() || currentRequest.url.split("/").pop().split("?")[0] || "Watch";
-    openHLSPlayer(proxyWatchUrl(currentRequest.url), label);
+    const isLive = currentStreamInfo?.is_live === true;
+    openHLSPlayer(proxyWatchUrl(currentRequest.url), label, isLive);
   });
 }
 
@@ -1181,8 +1182,9 @@ async function forkRecording(taskId) {
   }
 }
 
-// ── Preview / Watch player (hls.js) ──────────────────────────────────────────
+// ── Preview / Watch player (hls.js + flv.js) ─────────────────────────────────
 let hlsInstance = null;
+let flvInstance = null;
 const previewModalEl = document.getElementById("previewModal");
 const previewViewportEl = document.getElementById("previewViewport");
 const previewVideo = document.getElementById("previewVideo");
@@ -1352,6 +1354,50 @@ function _hidePlayerQuality() {
   if (playerQualitySelect) playerQualitySelect.innerHTML = '<option value="-1">Auto</option>';
 }
 
+function _isFlvUrl(url) {
+  try {
+    return new URL(url).pathname.toLowerCase().endsWith(".flv");
+  } catch {
+    return url.toLowerCase().split("?")[0].endsWith(".flv");
+  }
+}
+
+function _destroyPlayers() {
+  if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
+  if (flvInstance) { flvInstance.destroy(); flvInstance = null; }
+}
+
+/** Extracts the original upstream URL from a proxy URL or returns as-is. */
+function _originalUrl(url) {
+  if (url.startsWith("/api/watch/proxy?")) {
+    try {
+      return new URLSearchParams(url.slice("/api/watch/proxy?".length)).get("url") || url;
+    } catch { /* fall through */ }
+  }
+  return url;
+}
+
+/** Returns true if flv.js accepted the URL; false if unsupported. */
+function _startFlvPlayer(url, isLive = false) {
+  if (typeof flvjs === "undefined" || !flvjs.isSupported()) {
+    toast("FLV playback not supported in this browser", "danger");
+    return false;
+  }
+  if (flvInstance) { flvInstance.destroy(); flvInstance = null; }
+  flvInstance = flvjs.createPlayer(
+    { type: "flv", url, isLive },
+    { enableWorker: false, reuseRedirectedURL: true }
+  );
+  flvInstance.attachMediaElement(previewVideo);
+  flvInstance.load();
+  flvInstance.on(flvjs.Events.ERROR, (errType, errDetail) => {
+    console.error("FLV error:", errType, errDetail);
+    toast(`FLV error: ${errType}`, "danger");
+  });
+  previewVideo.play().catch(() => {});
+  return true;
+}
+
 function _setupPlayerQuality() {
   if (!hlsInstance || !playerQualityBar || !playerQualitySelect) return;
   const levels = hlsInstance.levels;
@@ -1379,15 +1425,39 @@ playerQualitySelect.addEventListener("change", () => {
   }
 });
 
-function openHLSPlayer(url, title = "") {
+async function openHLSPlayer(url, title = "", isLive = false) {
   setPreviewTitle(title ? esc(title) : "Watch");
   _currentPreviewTaskId = null;
   // Live channel streams have no associated task; clip is not possible
   if (clipToggleBar) clipToggleBar.classList.add("d-none");
   _hidePlayerQuality();
-  if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
+  _destroyPlayers();
   previewVideo.pause();
   previewVideo.removeAttribute("src");
+  previewModal.show();
+
+  // Direct FLV URL — bypass hls.js entirely
+  if (_isFlvUrl(url)) {
+    _startFlvPlayer(url, isLive);
+    return;
+  }
+
+  // Probe content-type so we pick the right player immediately (avoids the
+  // hls.js error-then-fallback dance for FLV streams like Douyu/Huya).
+  let useFlv = false;
+  try {
+    const probeUrl = "/api/watch/probe?url=" + encodeURIComponent(_originalUrl(url));
+    const probe = await fetch(probeUrl, { signal: AbortSignal.timeout(4000) })
+      .then(r => r.ok ? r.json() : null)
+      .catch(() => null);
+    if (probe?.kind === "flv") useFlv = true;
+  } catch { /* probe timed out or unavailable — fall through to hls.js */ }
+
+  if (useFlv) {
+    _startFlvPlayer(url, isLive);
+    return;
+  }
+
   if (typeof Hls !== "undefined" && Hls.isSupported()) {
     hlsInstance = new Hls({ enableWorker: false });
     hlsInstance.loadSource(url);
@@ -1410,16 +1480,26 @@ function openHLSPlayer(url, title = "") {
       }
     });
     hlsInstance.on(Hls.Events.ERROR, (_evt, data) => {
-      if (data.fatal) toast("Stream error: " + (data.details || "unknown"), "danger");
+      if (!data.fatal) return;
+      // Manifest errors (load or parse) may indicate FLV — try flv.js fallback
+      const isManifestError = data.details === Hls.ErrorDetails.MANIFEST_LOAD_ERROR
+        || data.details === Hls.ErrorDetails.MANIFEST_LOAD_TIMEOUT
+        || data.details === Hls.ErrorDetails.MANIFEST_PARSING_ERROR;
+      if (isManifestError) {
+        hlsInstance.destroy(); hlsInstance = null;
+        if (!_startFlvPlayer(url, isLive)) {
+          toast("Stream error: " + (data.details || "unknown"), "danger");
+        }
+      } else {
+        toast("Stream error: " + (data.details || "unknown"), "danger");
+      }
     });
   } else if (previewVideo.canPlayType("application/vnd.apple.mpegurl")) {
     previewVideo.src = url;
     previewVideo.play().catch(() => {});
   } else {
     toast("HLS playback not supported in this browser", "danger");
-    return;
   }
-  previewModal.show();
 }
 
 function openPreviewDirect(url, taskId = null) {
@@ -1463,7 +1543,7 @@ previewModalEl.addEventListener("hidden.bs.modal", () => {
   setPreviewTitle("Preview");
   resetPreviewChrome();
   _hidePlayerQuality();
-  if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
+  _destroyPlayers();
   previewVideo.pause();
   previewVideo.removeAttribute("src");
   previewVideo.load();
@@ -1972,7 +2052,7 @@ function proxyWatchUrl(url) {
 }
 
 function watchChannel(ch) {
-  openHLSPlayer(proxyWatchUrl(ch.url), ch.name || ch.url);
+  openHLSPlayer(proxyWatchUrl(ch.url), ch.name || ch.url, true);
 }
 
 // ── Playlist event listeners ──────────────────────────────────────────────────

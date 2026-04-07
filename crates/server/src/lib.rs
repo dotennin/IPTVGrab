@@ -1772,6 +1772,60 @@ fn parse_byte_range(range: &str, size: u64) -> Option<(u64, u64)> {
     Some((start, end))
 }
 
+/// Quick content-type probe: follows all redirects (GET, body dropped immediately)
+/// and returns `{"kind":"flv"|"hls"|"unknown","content_type":"..."}`.
+/// Uses the *final* URL after redirects for extension-based inference, so a
+/// 301 → `...stream.flv?token=...` chain is correctly detected as FLV.
+async fn watch_probe(
+    State(state): State<AppState>,
+    Query(query): Query<WatchProxyQuery>,
+) -> impl IntoResponse {
+    if !query.url.starts_with("http://") && !query.url.starts_with("https://") {
+        return Json(serde_json::json!({"kind": "unknown", "content_type": ""}))
+            .into_response();
+    }
+
+    // Use GET (not HEAD) — many live-stream CDNs reject HEAD or return 301
+    // without Content-Type.  reqwest follows all redirects automatically;
+    // we only inspect headers and drop the body immediately.
+    let resp = state
+        .http_client
+        .get(&query.url)
+        .timeout(std::time::Duration::from_secs(5))
+        .send()
+        .await;
+
+    let (ct, final_url) = match resp {
+        Ok(r) => {
+            let final_url = r.url().to_string();
+            let ct = r
+                .headers()
+                .get(header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok())
+                .map(|s| s.to_string())
+                // Fall back to extension-based inference on the *final* URL
+                .unwrap_or_else(|| infer_watch_content_type(&final_url));
+            (ct, final_url)
+        }
+        Err(_) => (infer_watch_content_type(&query.url), query.url.clone()),
+    };
+
+    let orig = query.url.to_lowercase();
+    let fin  = final_url.to_lowercase();
+    let kind = if content_type_is_flv(&ct) || fin.contains(".flv") || orig.contains(".flv") {
+        "flv"
+    } else if ct.contains("mpegurl") || ct.contains("x-mpegurl")
+        || fin.contains(".m3u8") || orig.contains(".m3u8")
+    {
+        "hls"
+    } else {
+        "unknown"
+    };
+
+    Json(serde_json::json!({"kind": kind, "content_type": ct, "final_url": final_url}))
+        .into_response()
+}
+
 async fn watch_proxy(
     State(state): State<AppState>,
     Query(query): Query<WatchProxyQuery>,
@@ -1855,6 +1909,26 @@ async fn watch_proxy(
         .map(|s| s.to_string())
         .unwrap_or_else(|| infer_watch_content_type(&query.url));
 
+    // FLV live streams are infinite — stream with proxy_client (no overall timeout).
+    // The initial request used http_client (20 s hard timeout) only to read headers;
+    // drop it and re-fetch with proxy_client so the stream is never cut short.
+    if content_type_is_flv(&content_type) {
+        if !status.is_success() {
+            return (StatusCode::BAD_GATEWAY, "Upstream FLV error").into_response();
+        }
+        drop(resp); // release the http_client connection
+        let live_resp = match state.proxy_client.get(&query.url).send().await {
+            Ok(r) => r,
+            Err(_) => return (StatusCode::BAD_GATEWAY, "FLV stream fetch failed").into_response(),
+        };
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, content_type)
+            .header(header::CACHE_CONTROL, "no-store")
+            .body(Body::from_stream(live_resp.bytes_stream()))
+            .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
+    }
+
     let Ok(bytes) = resp.bytes().await else {
         return (StatusCode::BAD_GATEWAY, "Upstream body read failed").into_response();
     };
@@ -1925,6 +1999,8 @@ fn infer_watch_content_type(url: &str) -> String {
         "video/mp4".to_string()
     } else if url.contains(".aac") {
         "audio/aac".to_string()
+    } else if url.contains(".flv") {
+        "video/x-flv".to_string()
     } else {
         "application/octet-stream".to_string()
     }
@@ -1949,6 +2025,11 @@ fn url_is_media_segment(url: &str) -> bool {
         || path.ends_with(".mp3")
         || path.ends_with(".key")
         || path.ends_with(".bin")
+        || path.ends_with(".flv")
+}
+
+fn content_type_is_flv(ct: &str) -> bool {
+    ct.contains("x-flv") || ct.contains("video/flv") || ct.eq_ignore_ascii_case("video/flv")
 }
 
 fn rewrite_watch_playlist(text: &str, base_url: &str) -> String {
@@ -3605,6 +3686,7 @@ fn build_api_router() -> Router<AppState> {
         .route("/api/tasks/:id/seg/:filename", get(serve_segment))
         .route("/api/tasks/:id/audio/:filename", get(serve_audio_segment))
         .route("/api/watch/proxy", get(watch_proxy))
+        .route("/api/watch/probe", get(watch_probe))
         .route("/downloads/:filename", get(serve_download))
         .route("/api/playlists", get(list_playlists).post(add_playlist))
         .route(
