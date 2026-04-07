@@ -2268,6 +2268,7 @@ function renderEditorChannels() {
         </div>
         ${ch.custom ? `<button class="btn btn-outline-secondary btn-xs editor-edit-ch-btn" data-chid="${ch.id}" title="Edit"><i class="fas fa-pencil-alt"></i></button>` : ""}
         <button class="btn btn-outline-secondary btn-xs editor-copy-url-btn" data-chid="${ch.id}" title="Copy URL"><i class="fas fa-copy"></i></button>
+        <button class="btn btn-outline-secondary btn-xs editor-move-ch-btn" data-chid="${ch.id}" title="Move to group"><i class="fas fa-exchange-alt"></i></button>
         <button class="btn ${ch.custom ? "btn-outline-danger" : "btn-outline-secondary"} btn-xs editor-delete-ch-btn" data-chid="${ch.id}" ${ch.custom ? "" : "disabled"} title="${ch.custom ? "Delete" : "Source channels cannot be deleted"}">
           <i class="fas fa-trash-alt"></i>
         </button>
@@ -2313,6 +2314,34 @@ function renderEditorChannels() {
       group.channels = channels.filter((c) => c.id !== chid);
       editorDirty = true;
       renderEditorChannels();
+    });
+  });
+
+  // Move channel to group
+  list.querySelectorAll(".editor-move-ch-btn").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const ch = channels.find((c) => c.id === btn.dataset.chid);
+      if (!ch) return;
+
+      // Populate target group select (exclude current group)
+      const select = document.getElementById("moveChannelTargetSelect");
+      select.innerHTML = editorGroups
+        .filter((g) => g.id !== editorSelectedGroupId)
+        .map((g) => `<option value="${esc(g.id)}">${esc(g.name)}</option>`)
+        .join("");
+
+      const info = document.getElementById("moveChannelInfo");
+      const confirmBtn = document.getElementById("confirmMoveChannelBtn");
+      if (ch.custom) {
+        info.textContent = "This channel will be removed from the current group and added to the selected group.";
+        confirmBtn.innerHTML = '<i class="fas fa-exchange-alt mr-1"></i>Move';
+      } else {
+        info.innerHTML = 'The original will remain in this group but be <strong>disabled</strong>. A copy will be added to the selected group.';
+        confirmBtn.innerHTML = '<i class="fas fa-copy mr-1"></i>Copy to Group';
+      }
+      document.getElementById("moveChannelIdInput").value = ch.id;
+      new bootstrap.Modal(document.getElementById("moveChannelModal")).show();
     });
   });
 
@@ -2484,6 +2513,42 @@ document.getElementById("confirmAddChannelBtn").addEventListener("click", () => 
   });
   editorDirty = true;
   bootstrap.Modal.getInstance(document.getElementById("addChannelModal")).hide();
+  renderEditorChannels();
+});
+
+// Confirm move/copy channel to group
+document.getElementById("confirmMoveChannelBtn").addEventListener("click", () => {
+  const chid = document.getElementById("moveChannelIdInput").value;
+  const targetGid = document.getElementById("moveChannelTargetSelect").value;
+  if (!chid || !targetGid) return;
+
+  const srcGroup = editorGroups.find((g) => g.id === editorSelectedGroupId);
+  const tgtGroup = editorGroups.find((g) => g.id === targetGid);
+  if (!srcGroup || !tgtGroup) return;
+
+  const ch = (srcGroup.channels || []).find((c) => c.id === chid);
+  if (!ch) return;
+
+  if (ch.custom) {
+    // Move: remove from source group, add to target group
+    srcGroup.channels = srcGroup.channels.filter((c) => c.id !== chid);
+    tgtGroup.channels = [...(tgtGroup.channels || []), ch];
+  } else {
+    const copy = {
+      ...ch,
+      id: "cc_" + Math.random().toString(36).slice(2, 10),
+      custom: true,
+      group: tgtGroup.name,
+      source_playlist_id: null,
+      source_playlist_name: null,
+    };
+    tgtGroup.channels = [...(tgtGroup.channels || []), copy];
+    ch.enabled = false; // Disable original in source group
+  }
+
+  editorDirty = true;
+  bootstrap.Modal.getInstance(document.getElementById("moveChannelModal")).hide();
+  renderEditorGroups();
   renderEditorChannels();
 });
 

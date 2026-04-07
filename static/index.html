@@ -540,6 +540,28 @@
     </div>
   </div>
 
+  <!-- Move Channel to Group mini-modal -->
+  <div class="tw-modal hidden" id="moveChannelModal" tabindex="-1" data-bs-backdrop="static">
+    <div class="tw-modal-dialog tw-modal-dialog-sm">
+      <div class="tw-modal-content">
+        <div class="tw-modal-header">
+          <h6 class="tw-modal-title"><i class="fas fa-exchange-alt mr-2 text-gh-blue-light"></i>Move to Group</h6>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="tw-modal-body">
+          <p class="text-gh-muted text-sm mb-2" id="moveChannelInfo"></p>
+          <label class="form-label text-gh-muted text-sm mb-1">Target Group</label>
+          <select class="form-select form-select-sm" id="moveChannelTargetSelect"></select>
+          <input type="hidden" id="moveChannelIdInput" />
+        </div>
+        <div class="tw-modal-footer">
+          <button type="button" class="inline-flex items-center px-3 py-1 bg-gh-surface2 hover:bg-gh-border text-gh-text border border-gh-border rounded text-sm transition-colors" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="inline-flex items-center px-3 py-1 bg-[#1f6feb] hover:bg-gh-blue text-white rounded text-sm transition-colors" id="confirmMoveChannelBtn"><i class="fas fa-exchange-alt mr-1"></i>Move</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Quality Select modal (channel download) -->
   <div class="tw-modal hidden" id="qualitySelectModal" tabindex="-1">
     <div class="tw-modal-dialog">
