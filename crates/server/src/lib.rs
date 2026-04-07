@@ -2403,7 +2403,7 @@ async fn export_m3u(State(state): State<AppState>) -> impl IntoResponse {
     drop(existing);
     drop(playlists);
 
-    let mut lines = vec!["#EXTM3U".to_string()];
+    let mut lines = vec!["#EXTM3U x-tvg-url=\"\"".to_string()];
     for group in groups.iter().filter(|g| g.enabled) {
         for ch in group.channels.iter().filter(|c| c.enabled) {
             let logo = if ch.tvg_logo.is_empty() {
@@ -2411,9 +2411,11 @@ async fn export_m3u(State(state): State<AppState>) -> impl IntoResponse {
             } else {
                 format!(r#" tvg-logo="{}""#, ch.tvg_logo)
             };
+            // Standard IPTV M3U: attributes separated from display name by a comma.
+            // tvg-name is required by most players for EPG/channel matching.
             lines.push(format!(
-                r#"#EXTINF:-1{} group-title="{}">{}"#,
-                logo, group.name, ch.name
+                r#"#EXTINF:-1 tvg-name="{}" tvg-id=""{} group-title="{}",{}"#,
+                ch.name, logo, group.name, ch.name
             ));
             lines.push(ch.url.clone());
         }
