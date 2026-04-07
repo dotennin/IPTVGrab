@@ -41,6 +41,13 @@ struct AppState {
     /// Separate client for streaming media segments — no hard body timeout so
     /// large `.ts` files are streamed through without being cut off.
     proxy_client: reqwest::Client,
+    /// Client for `/api/watch/probe`.  Uses a custom redirect policy that stops
+    /// before redirecting to `.flv` CDN URLs so we can read the signed URL from
+    /// the `Location` header WITHOUT opening a CDN connection.  This is critical
+    /// for Huya/Tengine live CDNs that enforce a per-IP concurrent-connection
+    /// limit — if probe opened a CDN connection, the subsequent watch_proxy
+    /// request from the same IP would be rejected with 403.
+    probe_client: reqwest::Client,
     auth_password: Option<String>,
     sessions: Arc<RwLock<HashSet<String>>>,
     playlists: Arc<RwLock<HashMap<String, SavedPlaylist>>>,
@@ -209,6 +216,11 @@ struct WatchCacheEntry {
 #[derive(Debug, Deserialize)]
 struct WatchProxyQuery {
     url: String,
+    /// Caller may pass `kind=flv` (learned from `/api/watch/probe`) to skip
+    /// the initial content-type detection request.  Skipping it is important
+    /// for CDNs (e.g. Huya/Tengine live) that allow only one concurrent
+    /// connection per token — a second fetch in the detection step causes 403.
+    kind: Option<String>,
 }
 
 // ── Request/Response models ───────────────────────────────────────────────────
@@ -1772,10 +1784,12 @@ fn parse_byte_range(range: &str, size: u64) -> Option<(u64, u64)> {
     Some((start, end))
 }
 
-/// Quick content-type probe: follows all redirects (GET, body dropped immediately)
-/// and returns `{"kind":"flv"|"hls"|"unknown","content_type":"..."}`.
-/// Uses the *final* URL after redirects for extension-based inference, so a
-/// 301 → `...stream.flv?token=...` chain is correctly detected as FLV.
+/// Quick content-type probe: follows redirects but STOPS before connecting to
+/// `.flv` CDN URLs.  For a 301 → CDN-signed-URL chain we return the signed URL
+/// from the `Location` header without opening a CDN connection.  This is
+/// critical for Huya/Tengine live: the CDN enforces a per-IP concurrent
+/// connection limit — if probe opened a CDN stream, the immediately-following
+/// watch_proxy request from the same IP would be blocked with 403.
 async fn watch_probe(
     State(state): State<AppState>,
     Query(query): Query<WatchProxyQuery>,
@@ -1785,27 +1799,40 @@ async fn watch_probe(
             .into_response();
     }
 
-    // Use GET (not HEAD) — many live-stream CDNs reject HEAD or return 301
-    // without Content-Type.  reqwest follows all redirects automatically;
-    // we only inspect headers and drop the body immediately.
+    // probe_client uses a custom redirect policy: it follows redirects normally
+    // UNLESS the destination URL path contains ".flv", in which case it returns
+    // the 3xx response itself (Policy::stop).  We then read the Location header
+    // to get the signed CDN URL without ever opening a connection to the CDN.
     let resp = state
-        .http_client
+        .probe_client
         .get(&query.url)
-        .timeout(std::time::Duration::from_secs(5))
+        .timeout(std::time::Duration::from_secs(8))
         .send()
         .await;
 
     let (ct, final_url) = match resp {
         Ok(r) => {
-            let final_url = r.url().to_string();
-            let ct = r
-                .headers()
-                .get(header::CONTENT_TYPE)
-                .and_then(|v| v.to_str().ok())
-                .map(|s| s.to_string())
-                // Fall back to extension-based inference on the *final* URL
-                .unwrap_or_else(|| infer_watch_content_type(&final_url));
-            (ct, final_url)
+            if r.status().is_redirection() {
+                // Stopped before a .flv CDN URL — read signed URL from Location.
+                let location = r
+                    .headers()
+                    .get(header::LOCATION)
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| query.url.clone());
+                let ct = infer_watch_content_type(&location);
+                (ct, location)
+            } else {
+                // Followed all redirects to a 200 response — inspect headers.
+                let final_url = r.url().to_string();
+                let ct = r
+                    .headers()
+                    .get(header::CONTENT_TYPE)
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| infer_watch_content_type(&final_url));
+                (ct, final_url)
+            }
         }
         Err(_) => (infer_watch_content_type(&query.url), query.url.clone()),
     };
@@ -1872,15 +1899,43 @@ async fn watch_proxy(
             .map(|s| s.to_string());
 
         let stream = resp.bytes_stream();
+        // FLV live streams must not be cached — use no-store for them.
+        let cache_control = if content_type_is_flv(&content_type) { "no-store" } else { "public, max-age=120" };
         let mut builder = Response::builder()
             .status(StatusCode::OK)
             .header(header::CONTENT_TYPE, content_type)
-            .header(header::CACHE_CONTROL, "public, max-age=120");
+            .header(header::CACHE_CONTROL, cache_control);
         if let Some(len) = content_length {
             builder = builder.header(header::CONTENT_LENGTH, len);
         }
         return builder
             .body(Body::from_stream(stream))
+            .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
+    }
+
+    // Fast path: caller already knows this is FLV (from /api/watch/probe).
+    // Skip the detection request entirely — CDNs such as Huya/Tengine live
+    // enforce a one-concurrent-connection-per-token limit, so a second fetch
+    // immediately after the detection one returns 403.
+    if query.kind.as_deref() == Some("flv") || _url_is_flv(&query.url) {
+        let live_resp = match state.proxy_client.get(&query.url).send().await {
+            Ok(r) => r,
+            Err(_) => return (StatusCode::BAD_GATEWAY, "FLV stream fetch failed").into_response(),
+        };
+        if !live_resp.status().is_success() {
+            return (StatusCode::BAD_GATEWAY, "Upstream FLV error").into_response();
+        }
+        let ct = live_resp
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "video/x-flv".to_string());
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, ct)
+            .header(header::CACHE_CONTROL, "no-store")
+            .body(Body::from_stream(live_resp.bytes_stream()))
             .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
     }
 
@@ -1912,6 +1967,7 @@ async fn watch_proxy(
     // FLV live streams are infinite — stream with proxy_client (no overall timeout).
     // The initial request used http_client (20 s hard timeout) only to read headers;
     // drop it and re-fetch with proxy_client so the stream is never cut short.
+    // (This branch handles cases where kind=flv was not passed by the caller.)
     if content_type_is_flv(&content_type) {
         if !status.is_success() {
             return (StatusCode::BAD_GATEWAY, "Upstream FLV error").into_response();
@@ -2030,6 +2086,11 @@ fn url_is_media_segment(url: &str) -> bool {
 
 fn content_type_is_flv(ct: &str) -> bool {
     ct.contains("x-flv") || ct.contains("video/flv") || ct.eq_ignore_ascii_case("video/flv")
+}
+
+fn _url_is_flv(url: &str) -> bool {
+    let path = url.split('?').next().unwrap_or(url);
+    path.ends_with(".flv")
 }
 
 fn rewrite_watch_playlist(text: &str, base_url: &str) -> String {
@@ -3634,11 +3695,37 @@ fn proxy_stream_client() -> anyhow::Result<reqwest::Client> {
         .build()?)
 }
 
+/// Client for `/api/watch/probe`.  Uses a custom redirect policy that STOPS
+/// (returns the 3xx response) before following a redirect whose destination URL
+/// contains ".flv".  This lets us extract the signed CDN URL from the Location
+/// header without actually opening a CDN connection — preventing the per-IP
+/// concurrent-connection limit from being consumed before watch_proxy runs.
+fn probe_client_builder() -> anyhow::Result<reqwest::Client> {
+    Ok(reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .danger_accept_invalid_certs(true)
+        .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36")
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            // If the redirect target looks like a .flv CDN URL, stop here.
+            // watch_proxy will open the only real CDN connection.
+            let url_lower = attempt.url().to_string().to_lowercase();
+            if url_lower.contains(".flv") {
+                attempt.stop()
+            } else if attempt.previous().len() >= 8 {
+                attempt.stop()
+            } else {
+                attempt.follow()
+            }
+        }))
+        .build()?)
+}
+
 fn build_state(
     downloads_dir: PathBuf,
     auth_password: Option<String>,
     http_client: reqwest::Client,
     proxy_client: reqwest::Client,
+    probe_client: reqwest::Client,
 ) -> AppState {
     AppState {
         tasks: Arc::new(RwLock::new(load_tasks(&downloads_dir))),
@@ -3646,6 +3733,7 @@ fn build_state(
         downloads_dir: downloads_dir.clone(),
         http_client,
         proxy_client,
+        probe_client,
         auth_password,
         sessions: Arc::new(RwLock::new(HashSet::new())),
         playlists: Arc::new(RwLock::new(load_playlists(&downloads_dir))),
@@ -3765,6 +3853,7 @@ pub async fn start_embedded_server(config: EmbeddedServerConfig) -> anyhow::Resu
             .filter(|value| !value.is_empty()),
         default_http_client()?,
         proxy_stream_client()?,
+        probe_client_builder()?,
     );
     let app = build_app(state, config.static_dir.clone());
 

@@ -1436,25 +1436,38 @@ async function openHLSPlayer(url, title = "", isLive = false) {
   previewVideo.removeAttribute("src");
   previewModal.show();
 
-  // Direct FLV URL — bypass hls.js entirely
+  // Direct FLV URL — bypass hls.js entirely; append kind=flv so the proxy
+  // skips its detection request (single CDN connection avoids 403 on Tengine live).
   if (_isFlvUrl(url)) {
-    _startFlvPlayer(url, isLive);
+    const flvUrl = url.includes("kind=flv") ? url : url + (url.includes("?") ? "&" : "?") + "kind=flv";
+    _startFlvPlayer(flvUrl, isLive);
     return;
   }
 
   // Probe content-type so we pick the right player immediately (avoids the
   // hls.js error-then-fallback dance for FLV streams like Douyu/Huya).
   let useFlv = false;
+  let proxyFlvUrl = url;
   try {
     const probeUrl = "/api/watch/probe?url=" + encodeURIComponent(_originalUrl(url));
     const probe = await fetch(probeUrl, { signal: AbortSignal.timeout(4000) })
       .then(r => r.ok ? r.json() : null)
       .catch(() => null);
-    if (probe?.kind === "flv") useFlv = true;
+  if (probe?.kind === "flv") {
+      useFlv = true;
+      // Use the signed CDN URL from probe as the proxy target.
+      // probe_client stops BEFORE connecting to the CDN (custom redirect policy),
+      // so probe.final_url is the signed CDN URL obtained from the Location header
+      // — no CDN connection was opened during probe.  This means watch_proxy can
+      // open the ONLY CDN connection, avoiding the per-IP concurrent-connection
+      // limit enforced by Huya/Tengine live CDN.
+      const targetUrl = probe.final_url || _originalUrl(url);
+      proxyFlvUrl = "/api/watch/proxy?url=" + encodeURIComponent(targetUrl) + "&kind=flv";
+    }
   } catch { /* probe timed out or unavailable — fall through to hls.js */ }
 
   if (useFlv) {
-    _startFlvPlayer(url, isLive);
+    _startFlvPlayer(proxyFlvUrl, isLive);
     return;
   }
 
