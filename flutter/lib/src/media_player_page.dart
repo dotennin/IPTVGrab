@@ -937,7 +937,7 @@ class _MediaPlayerPageState extends State<MediaPlayerPage> {
                           ),
                         Text(
                           widget.isLive && !hasTimeline
-                              ? 'Live'
+                              ? ''
                               : '${formatDurationLabel(current)} / ${formatDurationLabel(total)}',
                           style: const TextStyle(color: Colors.white70),
                         ),
