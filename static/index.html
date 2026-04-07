@@ -35,7 +35,7 @@
   <meta name="theme-color" content="#0b1220" />
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet" />
   <link href="/compat.css" rel="stylesheet" />
-  <link href="/styles.css?v=31" rel="stylesheet" />
+  <link href="/styles.css?v=32" rel="stylesheet" />
 </head>
 <body class="bg-gh-bg text-gh-text min-h-screen">
 
@@ -45,6 +45,9 @@
       <i class="fas fa-satellite-dish mr-2 text-gh-blue-light"></i>Media Nest
     </span>
     <div class="flex items-center gap-3">
+      <button class="inline-flex items-center px-2 py-1 border border-[#444c56] text-gh-muted hover:bg-gh-surface2 hover:text-gh-text rounded text-sm transition-colors" id="settingsBtn" type="button" title="Settings">
+        <i class="fas fa-cog"></i>
+      </button>
       <button class="d-none inline-flex items-center px-2 py-1 border border-[#444c56] text-gh-muted hover:bg-gh-surface2 hover:text-gh-text rounded text-sm transition-colors" id="logoutBtn" type="button" title="Sign out">
         <i class="fas fa-sign-out-alt mr-1"></i>Sign out
       </button>
@@ -553,6 +556,39 @@
           <button type="button" class="inline-flex items-center px-3 py-1 bg-[#1f6feb] hover:bg-gh-blue text-white rounded text-sm transition-colors" id="qualitySelectConfirmBtn">
             <i class="fas fa-download mr-1"></i>Download
           </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- Settings modal -->
+  <div class="tw-modal hidden" id="settingsModal" tabindex="-1">
+    <div class="tw-modal-dialog tw-modal-dialog-md">
+      <div class="tw-modal-content">
+        <div class="tw-modal-header">
+          <h6 class="tw-modal-title"><i class="fas fa-cog mr-2 text-gh-blue-light"></i>Settings</h6>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="tw-modal-body" style="overflow-y:auto">
+
+          <!-- Section: Playback -->
+          <div class="settings-section">
+            <div class="settings-section-title">
+              <i class="fas fa-play-circle mr-2"></i>Playback
+            </div>
+
+            <div class="settings-row">
+              <div class="settings-row-info">
+                <div class="settings-row-label">Route channel playback through server proxy</div>
+                <div class="settings-row-desc">Fixes mixed-content and CORS errors when the browser cannot reach the stream directly. The server fetches and relays the HLS stream on your behalf.</div>
+              </div>
+              <div class="form-check form-switch mb-0">
+                <input class="form-check-input" type="checkbox" role="switch" id="settingUseProxy" />
+              </div>
+            </div>
+          </div>
+
         </div>
       </div>
     </div>

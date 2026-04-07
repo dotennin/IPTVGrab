@@ -1,6 +1,24 @@
 /* globals Bootstrap */
 "use strict";
 
+// ── Settings ──────────────────────────────────────────────────────────────────
+const SETTINGS_KEY = "mn_settings";
+const DEFAULT_SETTINGS = { useProxy: true };
+let settings = { ...DEFAULT_SETTINGS };
+
+function loadSettings() {
+  try {
+    const saved = localStorage.getItem(SETTINGS_KEY);
+    if (saved) settings = { ...DEFAULT_SETTINGS, ...JSON.parse(saved) };
+  } catch { /* ignore */ }
+}
+
+function saveSettings() {
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch { /* ignore */ }
+}
+
+loadSettings();
+
 // ── State ────────────────────────────────────────────────────────────────────
 let currentRequest = { url: "", headers: {} };
 let currentStreamInfo = null;
@@ -53,6 +71,25 @@ document.getElementById("logoutBtn")?.addEventListener("click", async () => {
   await fetch("/api/logout", { method: "POST" }).catch(() => {});
   window.location.replace("/login");
 });
+
+// ── Settings modal ────────────────────────────────────────────────────────────
+(function initSettingsModal() {
+  const settingsModalEl = document.getElementById("settingsModal");
+  if (!settingsModalEl) return;
+  const settingsModal = bootstrap.Modal.getOrCreateInstance(settingsModalEl);
+
+  document.getElementById("settingsBtn")?.addEventListener("click", () => {
+    // Sync toggle to current settings before opening
+    const toggle = document.getElementById("settingUseProxy");
+    if (toggle) toggle.checked = settings.useProxy;
+    settingsModal.show();
+  });
+
+  document.getElementById("settingUseProxy")?.addEventListener("change", (e) => {
+    settings.useProxy = e.target.checked;
+    saveSettings();
+  });
+})();
 
 initAuth();
 
@@ -1918,6 +1955,7 @@ function pickQuality(ch, streamInfo) {
 }
 
 function proxyWatchUrl(url) {
+  if (!settings.useProxy) return url;
   return "/api/watch/proxy?url=" + encodeURIComponent(url);
 }
 

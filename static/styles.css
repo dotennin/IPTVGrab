@@ -221,6 +221,10 @@ textarea.form-control {
   max-width: 340px;
 }
 
+.tw-modal-dialog-md {
+  max-width: 640px;
+}
+
 .tw-modal-dialog-xl {
   max-width: 900px;
 }
@@ -1249,4 +1253,56 @@ textarea.form-control {
 
 .clip-range-input::-moz-range-track {
   background: transparent;
+}
+
+/* ── Settings modal ────────────────────────────────────────────────────────── */
+
+.settings-section {
+  margin-bottom: 1.5rem;
+}
+
+.settings-section:last-child {
+  margin-bottom: 0;
+}
+
+.settings-section-title {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #8b949e;
+  padding-bottom: 0.5rem;
+  margin-bottom: 0.25rem;
+  border-bottom: 1px solid #30363d;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid #21262d;
+}
+
+.settings-row:last-child {
+  border-bottom: none;
+}
+
+.settings-row-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-row-label {
+  font-size: 0.875rem;
+  color: #e6edf3;
+  font-weight: 500;
+  margin-bottom: 0.2rem;
+}
+
+.settings-row-desc {
+  font-size: 0.78rem;
+  color: #8b949e;
+  line-height: 1.4;
 }
