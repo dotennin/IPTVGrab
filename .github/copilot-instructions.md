@@ -249,3 +249,4 @@ make server         # Release server binary
 - Using `Flutter`, `Rust` skills for best practices in Rust API design, error handling, async patterns, and FFI for mobile integration.
 - Adding comments and documentation for clarity, especially around complex async flows and shared state management in the server.
 - Adding unit tests for core library functions (e.g. M3U8 parsing, AES decryption) and integration tests for server API endpoints.
+- Adding new app.js version when making UI changes in app.js`<script src="/app.js?v="></script>`
