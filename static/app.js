@@ -315,7 +315,7 @@ document.getElementById("parseBtn").addEventListener("click", async () => {
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || "Parse failed");
 
-    currentRequest = { url: data.url, headers: data.headers || headers };
+    currentRequest = { url: url, headers: data.headers || headers };
     currentStreamInfo = data;
 
     // Auto-fill URL tab
