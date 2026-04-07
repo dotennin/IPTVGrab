@@ -2266,9 +2266,9 @@ function renderEditorChannels() {
         <div class="form-check form-switch mb-0">
           <input class="form-check-input editor-ch-toggle" type="checkbox" ${ch.enabled ? "checked" : ""} data-chid="${ch.id}">
         </div>
-        ${ch.custom ? `<button class="btn btn-outline-secondary btn-xs editor-edit-ch-btn" data-chid="${ch.id}" title="Edit"><i class="fas fa-pencil-alt"></i></button>` : ""}
-        <button class="btn btn-outline-secondary btn-xs editor-copy-url-btn" data-chid="${ch.id}" title="Copy URL"><i class="fas fa-copy"></i></button>
-        <button class="btn btn-outline-secondary btn-xs editor-move-ch-btn" data-chid="${ch.id}" title="Move to group"><i class="fas fa-exchange-alt"></i></button>
+        ${ch.custom ? `<button class="btn btn-outline-primary btn-xs editor-edit-ch-btn" data-chid="${ch.id}" title="Edit"><i class="fas fa-pencil-alt"></i></button>` : ""}
+        <button class="btn btn-outline-info btn-xs editor-copy-url-btn" data-chid="${ch.id}" title="Copy URL"><i class="fas fa-copy"></i></button>
+        <button class="btn btn-outline-warning btn-xs editor-move-ch-btn" data-chid="${ch.id}" title="Move to group"><i class="fas fa-exchange-alt"></i></button>
         <button class="btn ${ch.custom ? "btn-outline-danger" : "btn-outline-secondary"} btn-xs editor-delete-ch-btn" data-chid="${ch.id}" ${ch.custom ? "" : "disabled"} title="${ch.custom ? "Delete" : "Source channels cannot be deleted"}">
           <i class="fas fa-trash-alt"></i>
         </button>

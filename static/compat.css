@@ -125,7 +125,7 @@
 .btn-outline-primary:hover  { background-color: rgba(56,139,253,0.1); }
 .btn-outline-secondary       { border-color: #444c56; color: #8b949e; }
 .btn-outline-secondary:hover { background-color: #21262d; color: #e6edf3; }
-.btn-outline-info            { border-color: #388bfd; color: #58a6ff; }
+.btn-outline-info            { border-color: #998bfd; color: #a8a6ff; }
 .btn-outline-info:hover      { background-color: rgba(56,139,253,0.1); }
 .btn-outline-danger          { border-color: #da3633; color: #f85149; }
 .btn-outline-danger:hover    { background-color: rgba(248,81,73,0.1); }
