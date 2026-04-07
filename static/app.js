@@ -30,6 +30,19 @@ async function initAuth() {
     if (data.auth_required) {
       const btn = document.getElementById("logoutBtn");
       if (btn) btn.classList.remove("d-none");
+      // Inject HMAC token into the Export M3U link so it works without a session cookie
+      try {
+        const tr = await fetch("/api/auth/export-token");
+        if (tr.ok) {
+          const { token } = await tr.json();
+          if (token) {
+            const exportBtn = document.getElementById("editorExportBtn");
+            if (exportBtn) {
+              exportBtn.href = `/api/all-playlists/export.m3u?token=${encodeURIComponent(token)}`;
+            }
+          }
+        }
+      } catch { /* ignore — link still works for logged-in users */ }
     }
   } catch {
     // ignore

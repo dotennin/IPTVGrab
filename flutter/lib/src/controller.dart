@@ -531,7 +531,10 @@ class AppController extends ChangeNotifier {
 
   Uri watchProxyUri(String streamUrl) => api.watchProxyUri(streamUrl);
 
-  Uri mergedExportUri() => api.mergedExportUri();
+  Future<Uri> mergedExportUri() async {
+    final token = await api.getExportToken();
+    return api.mergedExportUri(token: token);
+  }
 
   HealthCheckEntry? healthForUrl(String url) => healthCache[url];
 

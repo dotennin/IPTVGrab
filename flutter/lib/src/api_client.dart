@@ -241,6 +241,17 @@ class ApiClient {
     return _requestText('GET', '/api/all-playlists/export.m3u');
   }
 
+  /// Returns the HMAC-derived export token for embedding in shareable URLs.
+  /// Returns null when auth is disabled.
+  Future<String?> getExportToken() async {
+    try {
+      final data = await _requestJson('GET', '/api/auth/export-token');
+      return data['token'] as String?;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<bool> probeBaseUrl(String baseUrl) async {
     final uri =
         Uri.parse(normalizeBaseUrl(baseUrl)).resolve('/api/auth/status');
@@ -290,7 +301,10 @@ class ApiClient {
         queryParameters: {'url': streamUrl},
       );
 
-  Uri mergedExportUri() => _buildUri('/api/all-playlists/export.m3u');
+  Uri mergedExportUri({String? token}) => _buildUri(
+        '/api/all-playlists/export.m3u',
+        queryParameters: token != null ? {'token': token} : null,
+      );
 
   Future<dynamic> _requestJson(
     String method,

@@ -18,6 +18,7 @@ use m3u8_core::{
     parser::resolve, DownloadConfig, DownloadError, Downloader, ProgressEvent,
     Quality,
 };
+use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
@@ -280,6 +281,19 @@ struct LocalMergeCompleteRequest {
     duration_sec: Option<f64>,
 }
 
+// ── Auth helpers ─────────────────────────────────────────────────────────────
+
+/// Derives a stable, non-reversible export token from the auth password using
+/// HMAC-SHA256.  The token is safe to share in URLs (it cannot be used to
+/// recover the original password).
+fn derive_export_token(password: &str) -> String {
+    type HmacSha256 = Hmac<Sha256>;
+    let mut mac = HmacSha256::new_from_slice(password.as_bytes())
+        .expect("HMAC accepts any key length");
+    mac.update(b"media-nest-export-v1");
+    hex::encode(mac.finalize().into_bytes())
+}
+
 // ── Auth middleware ───────────────────────────────────────────────────────────
 
 async fn auth_middleware(
@@ -287,7 +301,7 @@ async fn auth_middleware(
     req: Request<Body>,
     next: Next,
 ) -> Response {
-    let _password = match &state.auth_password {
+    let password = match &state.auth_password {
         None => return next.run(req).await,
         Some(p) => p.clone(),
     };
@@ -299,6 +313,22 @@ async fn auth_middleware(
         || path.ends_with(".ico")
         || path.ends_with(".png")
     {
+        return next.run(req).await;
+    }
+
+    // Allow ?token=<hmac_token> in the URL for direct-link sharing (e.g. export.m3u).
+    // The token is derived via HMAC-SHA256 so the raw password is never exposed.
+    let query_token = req
+        .uri()
+        .query()
+        .and_then(|q| {
+            q.split('&').find_map(|part| {
+                part.strip_prefix("token=")
+                    .map(|v| urlencoding_decode(v))
+            })
+        })
+        .unwrap_or_default();
+    if !query_token.is_empty() && query_token == derive_export_token(&password) {
         return next.run(req).await;
     }
 
@@ -332,6 +362,29 @@ async fn auth_middleware(
     } else {
         axum::response::Redirect::to("/login").into_response()
     }
+}
+
+/// Percent-decode a query-string value (replaces `+` with space then decodes `%XX`).
+fn urlencoding_decode(s: &str) -> String {
+    let s = s.replace('+', " ");
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let (Some(hi), Some(lo)) = (
+                (bytes[i + 1] as char).to_digit(16),
+                (bytes[i + 2] as char).to_digit(16),
+            ) {
+                out.push(((hi << 4) | lo) as u8);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
@@ -388,6 +441,15 @@ async fn auth_status(State(state): State<AppState>) -> impl IntoResponse {
     Json(serde_json::json!({
         "auth_required": state.auth_password.is_some()
     }))
+}
+
+/// Returns the HMAC-derived export token for use in shareable export URLs.
+/// Requires session auth (enforced by middleware).
+async fn get_export_token(State(state): State<AppState>) -> impl IntoResponse {
+    match &state.auth_password {
+        Some(pw) => Json(serde_json::json!({ "token": derive_export_token(pw) })).into_response(),
+        None => Json(serde_json::json!({ "token": null })).into_response(),
+    }
 }
 
 async fn parse_stream(
@@ -3358,6 +3420,7 @@ fn build_state(
 fn build_api_router() -> Router<AppState> {
     Router::new()
         .route("/api/auth/status", get(auth_status))
+        .route("/api/auth/export-token", get(get_export_token))
         .route("/api/login", post(api_login))
         .route("/api/logout", post(api_logout))
         .route("/api/parse", post(parse_stream))
