@@ -1956,13 +1956,19 @@ async fn watch_proxy(
         return (StatusCode::BAD_GATEWAY, "Upstream request failed").into_response();
     };
 
+    // Capture the final URL *after* all redirects — reqwest follows them
+    // transparently.  Relative segment paths in the M3U8 must be resolved
+    // against this URL, not the original query.url, otherwise a 302 to a
+    // different host/path (e.g. gslb → CDN) produces wrong segment URLs → 404.
+    let effective_url = resp.url().to_string();
+
     let status = StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
     let content_type = resp
         .headers()
         .get(header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string())
-        .unwrap_or_else(|| infer_watch_content_type(&query.url));
+        .unwrap_or_else(|| infer_watch_content_type(&effective_url));
 
     // FLV live streams are infinite — stream with proxy_client (no overall timeout).
     // The initial request used http_client (20 s hard timeout) only to read headers;
@@ -2001,7 +2007,7 @@ async fn watch_proxy(
         if is_watch_playlist(&query.url, &content_type, &bytes) {
             let text = String::from_utf8_lossy(&bytes);
             (
-                rewrite_watch_playlist(&text, &query.url).into_bytes(),
+                rewrite_watch_playlist(&text, &effective_url).into_bytes(),
                 "application/vnd.apple.mpegurl".to_string(),
                 "no-store".to_string(),
                 1.0,
