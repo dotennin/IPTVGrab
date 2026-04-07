@@ -2250,10 +2250,19 @@ fn build_merged_view(
     playlists: &HashMap<String, SavedPlaylist>,
     existing: &MergedConfig,
 ) -> Vec<MergedGroup> {
-    // Collect sourced channels by group name AND by stable ID (for origin sync)
+    // Collect sourced channels by group name AND by stable ID (for origin sync).
+    // Use a Vec to track the first-seen order of each group name so the resulting
+    // group list matches the order channels appear in the M3U file(s).
+    // Playlists are iterated in creation order so that multi-playlist ordering
+    // is also deterministic.
     let mut sourced: HashMap<String, Vec<MergedChannel>> = HashMap::new();
+    let mut sourced_order: Vec<String> = Vec::new(); // first-seen group order
     let mut sourced_by_id: HashMap<String, MergedChannel> = HashMap::new();
-    for pl in playlists.values() {
+
+    let mut sorted_playlists: Vec<&SavedPlaylist> = playlists.values().collect();
+    sorted_playlists.sort_by(|a, b| a.created_at.partial_cmp(&b.created_at).unwrap_or(std::cmp::Ordering::Equal));
+
+    for pl in sorted_playlists {
         for ch in &pl.channels {
             let gname = ch.group.clone().unwrap_or_else(|| "Ungrouped".into());
             let cid = channel_stable_id(&pl.id, &ch.url);
@@ -2270,6 +2279,9 @@ fn build_merged_view(
                 origin_id: None,
                 origin_label: None,
             };
+            if !sourced.contains_key(&gname) {
+                sourced_order.push(gname.clone());
+            }
             sourced.entry(gname).or_default().push(mc.clone());
             sourced_by_id.insert(cid, mc);
         }
@@ -2341,14 +2353,16 @@ fn build_merged_view(
             result.push(ng);
         }
     }
-    for (name, chs) in &sourced {
+    // Append groups that are new (not yet in existing config), preserving M3U order.
+    for name in &sourced_order {
         if !known_names.contains(name) {
+            let chs = sourced.get(name).cloned().unwrap_or_default();
             result.push(MergedGroup {
                 id: group_stable_id(name),
                 name: name.clone(),
                 enabled: true,
                 custom: false,
-                channels: chs.clone(),
+                channels: chs,
             });
         }
     }
