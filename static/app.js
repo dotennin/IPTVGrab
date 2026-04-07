@@ -147,6 +147,18 @@ function _healthDotInline(url) {
   return `<span class="health-dot-inline ${cls}" data-health-url="${esc(url)}" title="${title}"></span>`;
 }
 
+function _originLabel(label) {
+  if (!label) {
+    // origin_id exists but label not yet computed (loading state)
+    return `<div class="editor-origin-label editor-origin-unknown"><i class="fas fa-link"></i> Synced from source</div>`;
+  }
+  if (!label.alive) {
+    return `<div class="editor-origin-label editor-origin-dead" title="Source channel no longer found in any playlist"><i class="fas fa-exclamation-triangle"></i> Source removed</div>`;
+  }
+  const parts = [label.group_name, label.source_playlist_name].filter(Boolean).join(" · ");
+  return `<div class="editor-origin-label editor-origin-alive" title="Auto-synced from: ${esc(label.group_name)} (${esc(label.source_playlist_name)})"><i class="fas fa-link"></i> ${esc(parts)}</div>`;
+}
+
 function updateHealthDots() {
   document.querySelectorAll("[data-health-url]").forEach((el) => {
     const url = el.dataset.healthUrl;
@@ -2280,6 +2292,7 @@ function renderEditorChannels() {
         <div class="editor-item-name" title="${esc(ch.name)}">${esc(ch.name || ch.url)} ${_healthDotInline(ch.url)}</div>
         <div class="editor-channel-url" title="${esc(ch.url)}">${esc(ch.url)}</div>
         ${ch.source_playlist_name ? `<div class="editor-channel-source">${esc(ch.source_playlist_name)}</div>` : ""}
+        ${ch.origin_id ? _originLabel(ch.origin_label) : ""}
       </div>
       <span class="editor-item-actions">
         <div class="form-check form-switch mb-0">

@@ -147,6 +147,14 @@ struct MergedGroup {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+struct OriginLabel {
+    group_name: String,
+    channel_name: String,
+    source_playlist_name: String,
+    alive: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct MergedChannel {
     id: String,
     name: String,
@@ -167,6 +175,10 @@ struct MergedChannel {
     /// When set, name/url/tvg_logo are synced from the live source on every rebuild.
     #[serde(default)]
     origin_id: Option<String>,
+    /// Computed at runtime by build_merged_view — describes the sync origin for the UI.
+    /// Not meaningful when persisted; always recomputed on next GET.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    origin_label: Option<OriginLabel>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -2188,20 +2200,35 @@ fn build_merged_view(
                 source_playlist_id: Some(pl.id.clone()),
                 source_playlist_name: Some(pl.name.clone()),
                 origin_id: None,
+                origin_label: None,
             };
             sourced.entry(gname).or_default().push(mc.clone());
             sourced_by_id.insert(cid, mc);
         }
     }
 
-    // Sync a custom channel's metadata from its origin source channel (if still available)
+    // Sync a custom channel's metadata from its origin source channel (if still available),
+    // and populate origin_label so the UI can display sync provenance.
     let sync_origin = |c: &mut MergedChannel| {
-        if let Some(ref oid) = c.origin_id.clone() {
-            if let Some(src) = sourced_by_id.get(oid) {
-                c.name = src.name.clone();
-                c.url = src.url.clone();
-                c.tvg_logo = src.tvg_logo.clone();
-            }
+        let Some(ref oid) = c.origin_id.clone() else { return };
+        if let Some(src) = sourced_by_id.get(oid) {
+            c.name = src.name.clone();
+            c.url = src.url.clone();
+            c.tvg_logo = src.tvg_logo.clone();
+            c.origin_label = Some(OriginLabel {
+                group_name: src.group.clone(),
+                channel_name: src.name.clone(),
+                source_playlist_name: src.source_playlist_name.clone().unwrap_or_default(),
+                alive: true,
+            });
+        } else {
+            // Origin no longer in any playlist — keep current values, mark as dead
+            c.origin_label = Some(OriginLabel {
+                group_name: String::new(),
+                channel_name: c.name.clone(),
+                source_playlist_name: String::new(),
+                alive: false,
+            });
         }
     };
 
@@ -2364,6 +2391,7 @@ async fn add_custom_channel(
         source_playlist_id: None,
         source_playlist_name: None,
         origin_id: None,
+        origin_label: None,
     };
     group.channels.push(ch.clone());
     drop(mc);

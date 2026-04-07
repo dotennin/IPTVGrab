@@ -1064,6 +1064,26 @@ textarea.form-control {
   color: #58a6ff;
 }
 
+.editor-origin-label {
+  font-size: 0.64rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-top: 1px;
+}
+
+.editor-origin-alive {
+  color: #3fb950;
+}
+
+.editor-origin-dead {
+  color: #e3b341;
+}
+
+.editor-origin-unknown {
+  color: #8b949e;
+}
+
 .btn-xs {
   font-size: 0.72rem;
   padding: 2px 8px;
