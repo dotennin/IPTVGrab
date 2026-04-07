@@ -2194,22 +2194,32 @@ fn build_merged_view(
         if eg.custom {
             result.push(eg.clone());
         } else if let Some(fresh) = sourced.get(&eg.name) {
-            let en_map: HashMap<_, _> = eg
+            let fresh_map: HashMap<_, _> = fresh.iter().map(|c| (c.id.clone(), c)).collect();
+            let mut ng = eg.clone();
+            // Preserve user ordering: refresh source channels, keep custom channels in place
+            let mut seen_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+            ng.channels = eg
                 .channels
                 .iter()
-                .map(|c| (c.id.clone(), c.enabled))
-                .collect();
-            let mut ng = eg.clone();
-            ng.channels = fresh
-                .iter()
-                .map(|c| {
-                    let mut nc = c.clone();
-                    if let Some(&en) = en_map.get(&c.id) {
-                        nc.enabled = en;
+                .filter_map(|c| {
+                    seen_ids.insert(c.id.clone());
+                    if c.custom {
+                        Some(c.clone())
+                    } else if let Some(fresh_ch) = fresh_map.get(&c.id) {
+                        let mut nc = (*fresh_ch).clone();
+                        nc.enabled = c.enabled;
+                        Some(nc)
+                    } else {
+                        None // no longer in source
                     }
-                    nc
                 })
                 .collect();
+            // Append newly sourced channels not yet in the list
+            for fresh_ch in fresh {
+                if !seen_ids.contains(&fresh_ch.id) {
+                    ng.channels.push(fresh_ch.clone());
+                }
+            }
             result.push(ng);
         }
     }
