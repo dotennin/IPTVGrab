@@ -2159,6 +2159,7 @@ function renderEditorGroups() {
         <div class="form-check form-switch mb-0">
           <input class="form-check-input editor-group-toggle" type="checkbox" ${g.enabled ? "checked" : ""} data-gid="${g.id}" title="${g.enabled ? "Enabled" : "Disabled"}">
         </div>
+        ${g.custom ? `<button class="btn btn-outline-primary btn-xs editor-rename-group-btn" data-gid="${g.id}" title="Rename group"><i class="fas fa-pencil-alt"></i></button>` : ""}
         <button class="btn ${g.custom ? "btn-outline-danger" : "btn-outline-secondary"} btn-xs editor-delete-group-btn" data-gid="${g.id}" ${g.custom ? "" : "disabled"} title="${g.custom ? "Delete group" : "Source groups cannot be deleted"}">
           <i class="fas fa-trash-alt"></i>
         </button>
@@ -2187,6 +2188,24 @@ function renderEditorGroups() {
         editorDirty = true;
         renderEditorGroups();
       }
+    });
+  });
+
+  // Rename custom group
+  list.querySelectorAll(".editor-rename-group-btn").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const g = editorGroups.find((g) => g.id === btn.dataset.gid);
+      if (!g?.custom) return;
+      document.getElementById("renameGroupNameInput").value = g.name;
+      document.getElementById("renameGroupIdInput").value = g.id;
+      const modal = new bootstrap.Modal(document.getElementById("renameGroupModal"));
+      modal.show();
+      setTimeout(() => {
+        const input = document.getElementById("renameGroupNameInput");
+        input.focus();
+        input.select();
+      }, 50);
     });
   });
 
@@ -2482,6 +2501,31 @@ document.getElementById("confirmAddGroupBtn").addEventListener("click", () => {
   renderEditorGroups();
 });
 
+// Rename custom group confirm
+document.getElementById("confirmRenameGroupBtn").addEventListener("click", () => {
+  const gid = document.getElementById("renameGroupIdInput").value;
+  const newName = document.getElementById("renameGroupNameInput").value.trim();
+  if (!newName) { toast("Group name is required", "danger"); return; }
+  const g = editorGroups.find((g) => g.id === gid);
+  if (!g?.custom) return;
+  if (editorGroups.some((og) => og.id !== gid && og.name === newName)) {
+    toast("A group with that name already exists", "danger");
+    return;
+  }
+  g.name = newName;
+  // Keep channel group field in sync
+  (g.channels || []).forEach((ch) => { if (ch.custom) ch.group = newName; });
+  editorDirty = true;
+  bootstrap.Modal.getInstance(document.getElementById("renameGroupModal")).hide();
+  renderEditorGroups();
+  renderEditorChannels();
+});
+
+// Enter key submits rename
+document.getElementById("renameGroupNameInput").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") document.getElementById("confirmRenameGroupBtn").click();
+});
+
 // Add custom channel
 document.getElementById("editorAddChannelBtn").addEventListener("click", () => {
   document.getElementById("newChannelNameInput").value = "";
@@ -2534,6 +2578,7 @@ document.getElementById("confirmMoveChannelBtn").addEventListener("click", () =>
     srcGroup.channels = srcGroup.channels.filter((c) => c.id !== chid);
     tgtGroup.channels = [...(tgtGroup.channels || []), ch];
   } else {
+    // Copy: disable original, create a custom copy that tracks the source via origin_id
     const copy = {
       ...ch,
       id: "cc_" + Math.random().toString(36).slice(2, 10),
@@ -2541,6 +2586,7 @@ document.getElementById("confirmMoveChannelBtn").addEventListener("click", () =>
       group: tgtGroup.name,
       source_playlist_id: null,
       source_playlist_name: null,
+      origin_id: ch.id, // links back to the stable source ID for auto-sync
     };
     tgtGroup.channels = [...(tgtGroup.channels || []), copy];
     ch.enabled = false; // Disable original in source group

@@ -163,6 +163,10 @@ struct MergedChannel {
     source_playlist_id: Option<String>,
     #[serde(default)]
     source_playlist_name: Option<String>,
+    /// For custom copies created from a sourced channel: the stable ID of the origin channel.
+    /// When set, name/url/tvg_logo are synced from the live source on every rebuild.
+    #[serde(default)]
+    origin_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -2166,33 +2170,50 @@ fn build_merged_view(
     playlists: &HashMap<String, SavedPlaylist>,
     existing: &MergedConfig,
 ) -> Vec<MergedGroup> {
-    // Collect sourced channels by group name
+    // Collect sourced channels by group name AND by stable ID (for origin sync)
     let mut sourced: HashMap<String, Vec<MergedChannel>> = HashMap::new();
+    let mut sourced_by_id: HashMap<String, MergedChannel> = HashMap::new();
     for pl in playlists.values() {
         for ch in &pl.channels {
             let gname = ch.group.clone().unwrap_or_else(|| "Ungrouped".into());
             let cid = channel_stable_id(&pl.id, &ch.url);
-            sourced
-                .entry(gname.clone())
-                .or_default()
-                .push(MergedChannel {
-                    id: cid,
-                    name: ch.name.clone(),
-                    url: ch.url.clone(),
-                    enabled: true,
-                    custom: false,
-                    group: gname,
-                    tvg_logo: ch.logo.clone().unwrap_or_default(),
-                    source_playlist_id: Some(pl.id.clone()),
-                    source_playlist_name: Some(pl.name.clone()),
-                });
+            let mc = MergedChannel {
+                id: cid.clone(),
+                name: ch.name.clone(),
+                url: ch.url.clone(),
+                enabled: true,
+                custom: false,
+                group: gname.clone(),
+                tvg_logo: ch.logo.clone().unwrap_or_default(),
+                source_playlist_id: Some(pl.id.clone()),
+                source_playlist_name: Some(pl.name.clone()),
+                origin_id: None,
+            };
+            sourced.entry(gname).or_default().push(mc.clone());
+            sourced_by_id.insert(cid, mc);
         }
     }
+
+    // Sync a custom channel's metadata from its origin source channel (if still available)
+    let sync_origin = |c: &mut MergedChannel| {
+        if let Some(ref oid) = c.origin_id.clone() {
+            if let Some(src) = sourced_by_id.get(oid) {
+                c.name = src.name.clone();
+                c.url = src.url.clone();
+                c.tvg_logo = src.tvg_logo.clone();
+            }
+        }
+    };
+
     let known_names: HashSet<_> = existing.groups.iter().map(|g| g.name.clone()).collect();
     let mut result = Vec::new();
     for eg in &existing.groups {
         if eg.custom {
-            result.push(eg.clone());
+            let mut g = eg.clone();
+            for ch in g.channels.iter_mut() {
+                sync_origin(ch);
+            }
+            result.push(g);
         } else if let Some(fresh) = sourced.get(&eg.name) {
             let fresh_map: HashMap<_, _> = fresh.iter().map(|c| (c.id.clone(), c)).collect();
             let mut ng = eg.clone();
@@ -2204,7 +2225,9 @@ fn build_merged_view(
                 .filter_map(|c| {
                     seen_ids.insert(c.id.clone());
                     if c.custom {
-                        Some(c.clone())
+                        let mut nc = c.clone();
+                        sync_origin(&mut nc);
+                        Some(nc)
                     } else if let Some(fresh_ch) = fresh_map.get(&c.id) {
                         let mut nc = (*fresh_ch).clone();
                         nc.enabled = c.enabled;
@@ -2340,6 +2363,7 @@ async fn add_custom_channel(
         tvg_logo: body.tvg_logo,
         source_playlist_id: None,
         source_playlist_name: None,
+        origin_id: None,
     };
     group.channels.push(ch.clone());
     drop(mc);
