@@ -373,7 +373,7 @@ function showStreamInfo(info) {
   body.querySelector("#watchStreamBtn")?.addEventListener("click", () => {
     if (!currentRequest.url) return;
     const label = document.getElementById("outputName")?.value.trim() || currentRequest.url.split("/").pop().split("?")[0] || "Watch";
-    openHLSPlayer(currentRequest.url, label);
+    openHLSPlayer(proxyWatchUrl(currentRequest.url), label);
   });
 }
 
@@ -1917,8 +1917,12 @@ function pickQuality(ch, streamInfo) {
   });
 }
 
+function proxyWatchUrl(url) {
+  return "/api/watch/proxy?url=" + encodeURIComponent(url);
+}
+
 function watchChannel(ch) {
-  openHLSPlayer(ch.url, ch.name || ch.url);
+  openHLSPlayer(proxyWatchUrl(ch.url), ch.name || ch.url);
 }
 
 // ── Playlist event listeners ──────────────────────────────────────────────────
