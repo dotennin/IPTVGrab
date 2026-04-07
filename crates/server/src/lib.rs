@@ -2003,6 +2003,47 @@ async fn watch_proxy(
             .unwrap_or_else(|_| StatusCode::BAD_GATEWAY.into_response());
     }
 
+    // Nested-master resolution: some streams use a 2-level master hierarchy
+    // (e.g. epg.pw → live.264788.xyz → shcm.../index.m3u8 → 8000_hls.m3u8).
+    // HLS.js expects variant URLs in a master to be *media* playlists; returning
+    // another master causes MANIFEST_PARSING_ERROR.  When we detect the fetched
+    // response is a "pure master" (EXT-X-STREAM-INF but no EXTINF segments) we
+    // transparently follow the best variant one level deeper so the caller always
+    // receives a media playlist.  Tokens are refreshed on every poll because the
+    // watch_cache TTL for playlists is 1 s (no-store).
+    let (bytes, effective_url, content_type) = {
+        let text_cow = String::from_utf8_lossy(&bytes);
+        let should_resolve = is_watch_playlist(&query.url, &content_type, &bytes)
+            && is_master_playlist(&text_cow)
+            && effective_url != query.url; // only resolve when a redirect was followed
+        let variant_url = if should_resolve {
+            pick_best_variant_url(&text_cow, &effective_url)
+        } else {
+            None
+        };
+        drop(text_cow);
+        if let Some(vurl) = variant_url {
+            match state.http_client.get(&vurl).send().await {
+                Ok(vresp) if vresp.status().is_success() => {
+                    let ve = vresp.url().to_string();
+                    let vct = vresp
+                        .headers()
+                        .get(header::CONTENT_TYPE)
+                        .and_then(|v| v.to_str().ok())
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| infer_watch_content_type(&ve));
+                    match vresp.bytes().await {
+                        Ok(vb) => (vb, ve, vct),
+                        Err(_) => (bytes, effective_url, content_type),
+                    }
+                }
+                _ => (bytes, effective_url, content_type),
+            }
+        } else {
+            (bytes, effective_url, content_type)
+        }
+    };
+
     let (body, final_content_type, cache_control, ttl_secs) =
         if is_watch_playlist(&query.url, &content_type, &bytes) {
             let text = String::from_utf8_lossy(&bytes);
@@ -2073,6 +2114,41 @@ fn is_watch_playlist(url: &str, content_type: &str, body: &[u8]) -> bool {
         || content_type.contains("mpegurl")
         || content_type.contains("x-mpegurl")
         || body.starts_with(b"#EXTM3U")
+}
+
+/// Returns true if the M3U8 text is a pure master playlist — has
+/// `#EXT-X-STREAM-INF` variants but no `#EXTINF` segment entries.
+/// HLS.js cannot handle receiving a master playlist where it expects a media
+/// playlist (variant), so watch_proxy detects this and follows one more level.
+fn is_master_playlist(text: &str) -> bool {
+    text.contains("#EXT-X-STREAM-INF") && !text.contains("#EXTINF")
+}
+
+/// Pick the absolute URL of the highest-bandwidth variant in a master playlist.
+/// Falls back to the first variant if no BANDWIDTH attribute is present.
+fn pick_best_variant_url(text: &str, base_url: &str) -> Option<String> {
+    let mut best: Option<(u64, String)> = None;
+    let mut pending_bw: u64 = 0;
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("#EXT-X-STREAM-INF") {
+            pending_bw = trimmed
+                .split("BANDWIDTH=")
+                .nth(1)
+                .and_then(|s| s.split([',', '\n', '\r']).next())
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0);
+        } else if !trimmed.is_empty() && !trimmed.starts_with('#') {
+            let url = resolve(trimmed, base_url);
+            let bw = std::mem::take(&mut pending_bw);
+            match &best {
+                None => best = Some((bw, url)),
+                Some((b, _)) if bw > *b => best = Some((bw, url)),
+                _ => {}
+            }
+        }
+    }
+    best.map(|(_, url)| url)
 }
 
 /// Returns true for URLs that are clearly media segments or key files that
@@ -3445,6 +3521,32 @@ mod tests {
     }
 
     // ── rewrite_watch_playlist ────────────────────────────────────────────────
+
+    #[test]
+    fn is_master_playlist_detects_stream_inf_without_extinf() {
+        let master = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=4000000\nhttps://cdn.example.com/hi/index.m3u8";
+        assert!(is_master_playlist(master));
+    }
+
+    #[test]
+    fn is_master_playlist_returns_false_for_media_playlist() {
+        let media = "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:6.0,\nseg0.ts";
+        assert!(!is_master_playlist(media));
+    }
+
+    #[test]
+    fn pick_best_variant_url_chooses_highest_bandwidth() {
+        let master = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000\nlow.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=4000000\nhigh.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=2000000\nmid.m3u8";
+        let best = pick_best_variant_url(master, "https://cdn.example.com/live/index.m3u8");
+        assert_eq!(best, Some("https://cdn.example.com/live/high.m3u8".to_string()));
+    }
+
+    #[test]
+    fn pick_best_variant_url_falls_back_to_first_when_no_bandwidth() {
+        let master = "#EXTM3U\n#EXT-X-STREAM-INF:PROGRAM-ID=1\nstream.m3u8";
+        let best = pick_best_variant_url(master, "https://cdn.example.com/live/index.m3u8");
+        assert_eq!(best, Some("https://cdn.example.com/live/stream.m3u8".to_string()));
+    }
 
     #[test]
     fn rewrite_watch_playlist_proxies_lines_and_uri_attrs() {
