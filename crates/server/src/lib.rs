@@ -38,6 +38,9 @@ struct AppState {
     downloaders: Arc<RwLock<HashMap<String, Arc<Downloader>>>>,
     downloads_dir: PathBuf,
     http_client: reqwest::Client,
+    /// Separate client for streaming media segments — no hard body timeout so
+    /// large `.ts` files are streamed through without being cut off.
+    proxy_client: reqwest::Client,
     auth_password: Option<String>,
     sessions: Arc<RwLock<HashSet<String>>>,
     playlists: Arc<RwLock<HashMap<String, SavedPlaylist>>>,
@@ -1777,6 +1780,57 @@ async fn watch_proxy(
         return (StatusCode::BAD_REQUEST, "Invalid watch URL").into_response();
     }
 
+    // Media segments (.ts, .m4s, .mp4, .aac, .key, .bin …) must be streamed
+    // directly — buffering them with resp.bytes().await causes the browser to
+    // sit in "pending" until the entire file (often 5-20 MB) is downloaded,
+    // which looks like a hang and eventually gets cancelled by hls.js.
+    if url_is_media_segment(&query.url) {
+        let resp = match state
+            .proxy_client
+            .get(&query.url)
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(_) => return (StatusCode::BAD_GATEWAY, "Upstream request failed").into_response(),
+        };
+
+        let status =
+            StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+        if !status.is_success() {
+            return Response::builder()
+                .status(status)
+                .header(header::CACHE_CONTROL, "no-store")
+                .body(Body::empty())
+                .unwrap_or_else(|_| StatusCode::BAD_GATEWAY.into_response());
+        }
+
+        let content_type = resp
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| infer_watch_content_type(&query.url));
+        let content_length = resp
+            .headers()
+            .get(header::CONTENT_LENGTH)
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
+
+        let stream = resp.bytes_stream();
+        let mut builder = Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, content_type)
+            .header(header::CACHE_CONTROL, "public, max-age=120");
+        if let Some(len) = content_length {
+            builder = builder.header(header::CONTENT_LENGTH, len);
+        }
+        return builder
+            .body(Body::from_stream(stream))
+            .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
+    }
+
+    // Playlist path: check cache, buffer, rewrite segment URLs, cache result.
     let now = unix_now_secs();
     if let Some(entry) = state.watch_cache.read().await.get(&query.url).cloned() {
         if entry.expires_at > now {
@@ -1881,6 +1935,20 @@ fn is_watch_playlist(url: &str, content_type: &str, body: &[u8]) -> bool {
         || content_type.contains("mpegurl")
         || content_type.contains("x-mpegurl")
         || body.starts_with(b"#EXTM3U")
+}
+
+/// Returns true for URLs that are clearly media segments or key files that
+/// should be streamed through without buffering.
+fn url_is_media_segment(url: &str) -> bool {
+    let path = url.split('?').next().unwrap_or(url).to_lowercase();
+    path.ends_with(".ts")
+        || path.ends_with(".m4s")
+        || path.ends_with(".mp4")
+        || path.ends_with(".m4v")
+        || path.ends_with(".aac")
+        || path.ends_with(".mp3")
+        || path.ends_with(".key")
+        || path.ends_with(".bin")
 }
 
 fn rewrite_watch_playlist(text: &str, base_url: &str) -> String {
@@ -3460,16 +3528,29 @@ fn default_http_client() -> anyhow::Result<reqwest::Client> {
         .build()?)
 }
 
+/// HTTP client for streaming media segments through the watch proxy.
+/// Uses only a connect timeout — no hard body-read deadline — so large .ts
+/// files are streamed to the browser without being cut off mid-transfer.
+fn proxy_stream_client() -> anyhow::Result<reqwest::Client> {
+    Ok(reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .danger_accept_invalid_certs(true)
+        .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36")
+        .build()?)
+}
+
 fn build_state(
     downloads_dir: PathBuf,
     auth_password: Option<String>,
     http_client: reqwest::Client,
+    proxy_client: reqwest::Client,
 ) -> AppState {
     AppState {
         tasks: Arc::new(RwLock::new(load_tasks(&downloads_dir))),
         downloaders: Arc::new(RwLock::new(HashMap::new())),
         downloads_dir: downloads_dir.clone(),
         http_client,
+        proxy_client,
         auth_password,
         sessions: Arc::new(RwLock::new(HashSet::new())),
         playlists: Arc::new(RwLock::new(load_playlists(&downloads_dir))),
@@ -3587,6 +3668,7 @@ pub async fn start_embedded_server(config: EmbeddedServerConfig) -> anyhow::Resu
             .clone()
             .filter(|value| !value.is_empty()),
         default_http_client()?,
+        proxy_stream_client()?,
     );
     let app = build_app(state, config.static_dir.clone());
 
