@@ -304,7 +304,7 @@ function showStreamInfo(info) {
   const badge = document.getElementById("streamTypeBadge");
   const body = document.getElementById("streamInfoBody");
 
-  if (info.type === "master") {
+  if (info.kind === "master") {
     badge.innerHTML = `<span class="badge bg-info">Master playlist</span>`;
     let html = `<p class="text-muted small mb-3">
       <i class="fas fa-layer-group me-1"></i>${info.streams.length} quality option(s). Select a stream to download:
@@ -395,7 +395,7 @@ async function startDownload() {
   const concurrency = parseInt(document.getElementById("concurrency").value, 10);
 
   let quality = "best";
-  if (currentStreamInfo?.type === "master") {
+  if (currentStreamInfo?.kind === "master") {
     const sel = document.querySelector('input[name="quality"]:checked');
     if (sel) quality = sel.value;
   }
@@ -1126,6 +1126,8 @@ const previewViewportEl = document.getElementById("previewViewport");
 const previewVideo = document.getElementById("previewVideo");
 const previewTitleEl = document.getElementById("previewModalTitle");
 const previewModal = bootstrap.Modal.getOrCreateInstance(previewModalEl);
+const playerQualityBar = document.getElementById("playerQualityBar");
+const playerQualitySelect = document.getElementById("playerQualitySelect");
 const PREVIEW_IDLE_DELAY_MS = 1800;
 let previewIdleTimer = null;
 
@@ -1283,11 +1285,44 @@ document.addEventListener("webkitfullscreenchange", handlePreviewActivity);
 previewVideo.addEventListener("webkitbeginfullscreen", handlePreviewActivity);
 previewVideo.addEventListener("webkitendfullscreen", handlePreviewActivity);
 
+function _hidePlayerQuality() {
+  if (playerQualityBar) playerQualityBar.classList.add("d-none");
+  if (playerQualitySelect) playerQualitySelect.innerHTML = '<option value="-1">Auto</option>';
+}
+
+function _setupPlayerQuality() {
+  if (!hlsInstance || !playerQualityBar || !playerQualitySelect) return;
+  const levels = hlsInstance.levels;
+  if (!levels || levels.length <= 1) return;
+
+  let opts = '<option value="-1">Auto</option>';
+  levels.forEach((lvl, i) => {
+    const res = lvl.height ? `${lvl.height}p` : "";
+    const bw  = lvl.bitrate ? ` · ${Math.round(lvl.bitrate / 1000)} kbps` : "";
+    opts += `<option value="${i}">${res ? res + bw : `Level ${i + 1}${bw}`}</option>`;
+  });
+  playerQualitySelect.innerHTML = opts;
+  playerQualitySelect.value = "-1";
+  playerQualityBar.classList.remove("d-none");
+}
+
+playerQualitySelect.addEventListener("change", () => {
+  if (!hlsInstance) return;
+  const val = parseInt(playerQualitySelect.value, 10);
+  hlsInstance.currentLevel = val;
+  // Reset "Auto" label when switching back to auto
+  if (val === -1) {
+    const autoOpt = playerQualitySelect.querySelector('option[value="-1"]');
+    if (autoOpt) autoOpt.textContent = "Auto";
+  }
+});
+
 function openHLSPlayer(url, title = "") {
   setPreviewTitle(title ? esc(title) : "Watch");
   _currentPreviewTaskId = null;
   // Live channel streams have no associated task; clip is not possible
   if (clipToggleBar) clipToggleBar.classList.add("d-none");
+  _hidePlayerQuality();
   if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
   previewVideo.pause();
   previewVideo.removeAttribute("src");
@@ -1295,7 +1330,23 @@ function openHLSPlayer(url, title = "") {
     hlsInstance = new Hls({ enableWorker: false });
     hlsInstance.loadSource(url);
     hlsInstance.attachMedia(previewVideo);
-    hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => previewVideo.play().catch(() => {}));
+    hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
+      previewVideo.play().catch(() => {});
+      _setupPlayerQuality();
+    });
+    hlsInstance.on(Hls.Events.LEVEL_SWITCHED, (_evt, data) => {
+      if (!hlsInstance || !playerQualitySelect) return;
+      if (hlsInstance.autoLevelEnabled) {
+        const autoOpt = playerQualitySelect.querySelector('option[value="-1"]');
+        if (autoOpt && hlsInstance.levels[data.level]) {
+          const lvl = hlsInstance.levels[data.level];
+          const res = lvl.height ? `${lvl.height}p` : `Level ${data.level + 1}`;
+          autoOpt.textContent = `Auto (${res})`;
+        }
+      } else {
+        playerQualitySelect.value = String(data.level);
+      }
+    });
     hlsInstance.on(Hls.Events.ERROR, (_evt, data) => {
       if (data.fatal) toast("Stream error: " + (data.details || "unknown"), "danger");
     });
@@ -1313,6 +1364,7 @@ function openPreviewDirect(url, taskId = null) {
   setPreviewTitle("Preview");
   _currentPreviewTaskId = taskId;
   if (clipToggleBar) clipToggleBar.classList.toggle("d-none", !taskId);
+  _hidePlayerQuality();
   if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
   previewVideo.pause();
   previewVideo.src = url;
@@ -1324,6 +1376,7 @@ function openPreview(taskId) {
   setPreviewTitle("Preview");
   _currentPreviewTaskId = taskId;
   if (clipToggleBar) clipToggleBar.classList.toggle("d-none", !taskId);
+  _hidePlayerQuality();
   if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
   previewVideo.pause();
   previewVideo.removeAttribute("src");
@@ -1347,6 +1400,7 @@ function openPreview(taskId) {
 previewModalEl.addEventListener("hidden.bs.modal", () => {
   setPreviewTitle("Preview");
   resetPreviewChrome();
+  _hidePlayerQuality();
   if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
   previewVideo.pause();
   previewVideo.removeAttribute("src");
@@ -1733,7 +1787,7 @@ function renderChannels(channels) {
   grid.querySelectorAll(".channel-dl-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
       const idx = parseInt(btn.dataset.chIdx, 10);
-      downloadChannel(channels[idx]);
+      downloadChannel(channels[idx], btn);
     });
   });
   grid.querySelectorAll(".channel-watch-btn").forEach((btn) => {
@@ -1744,12 +1798,29 @@ function renderChannels(channels) {
   });
 }
 
-async function downloadChannel(ch) {
+async function downloadChannel(ch, triggerBtn = null) {
+  if (triggerBtn) {
+    triggerBtn.disabled = true;
+    triggerBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+  }
   try {
+    // Parse first to detect quality variants
+    const parseRes = await apiFetch("/api/parse", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: ch.url, headers: {} }),
+    });
+    const streamInfo = parseRes.ok ? await parseRes.json() : null;
+
+    let quality = "best";
+    if (streamInfo && streamInfo.kind === "master" && streamInfo.streams.length > 0) {
+      quality = await pickQuality(ch, streamInfo);
+    }
+
     const res = await apiFetch("/api/download", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: ch.url, output_name: ch.name || null, quality: "best", concurrency: 8 }),
+      body: JSON.stringify({ url: ch.url, output_name: ch.name || null, quality, concurrency: 8 }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || "Failed to start download");
@@ -1764,8 +1835,73 @@ async function downloadChannel(ch) {
     document.getElementById("downloadsList").scrollIntoView({ behavior: "smooth" });
     toast(`Started: ${ch.name || ch.url}`, "success");
   } catch (e) {
-    toast(e.message, "danger");
+    if (e.message !== "cancelled") toast(e.message, "danger");
+  } finally {
+    if (triggerBtn) {
+      triggerBtn.disabled = false;
+      triggerBtn.innerHTML = '<i class="fas fa-download"></i>';
+    }
   }
+}
+
+function pickQuality(ch, streamInfo) {
+  return new Promise((resolve, reject) => {
+    const modalEl = document.getElementById("qualitySelectModal");
+    const body    = document.getElementById("qualitySelectBody");
+    const titleEl = modalEl.querySelector(".tw-modal-title");
+    titleEl.innerHTML = `<i class="fas fa-layer-group mr-2 text-gh-blue-light"></i>${esc(ch.name || "Select Quality")}`;
+
+    let html = `<p class="text-gh-muted text-sm mb-3">
+      <i class="fas fa-layer-group mr-1"></i>${streamInfo.streams.length} quality option(s) — choose one to download:
+    </p>`;
+    streamInfo.streams.forEach((s, i) => {
+      const checked = i === 0 ? "checked" : "";
+      html += `
+        <label class="quality-option d-flex align-items-center gap-3 w-100">
+          <input type="radio" name="qs-quality" value="${i}" ${checked} class="flex-shrink-0" />
+          <div class="flex-grow-1">
+            <div class="fw-semibold">${esc(s.label)}</div>
+            <div class="text-muted small">
+              ${s.resolution ? `${esc(s.resolution)} · ` : ""}
+              ${Math.round(s.bandwidth / 1000)} kbps
+              ${s.codecs ? ` · ${esc(s.codecs)}` : ""}
+            </div>
+          </div>
+          ${i === 0 ? '<span class="badge bg-success">Best</span>' : ""}
+        </label>`;
+    });
+    body.innerHTML = html;
+
+    body.querySelectorAll(".quality-option").forEach((label) => {
+      label.addEventListener("click", () => {
+        const radio = label.querySelector("input[type=radio]");
+        if (radio) radio.checked = true;
+      });
+    });
+
+    const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+    const confirmBtn = document.getElementById("qualitySelectConfirmBtn");
+
+    function cleanup() {
+      confirmBtn.removeEventListener("click", onConfirm);
+      modalEl.removeEventListener("hidden.bs.modal", onCancel);
+    }
+    function onConfirm() {
+      const sel = body.querySelector('input[name="qs-quality"]:checked');
+      const quality = sel ? sel.value : "0";
+      cleanup();
+      modal.hide();
+      resolve(quality);
+    }
+    function onCancel() {
+      cleanup();
+      reject(new Error("cancelled"));
+    }
+
+    confirmBtn.addEventListener("click", onConfirm);
+    modalEl.addEventListener("hidden.bs.modal", onCancel);
+    modal.show();
+  });
 }
 
 function watchChannel(ch) {
