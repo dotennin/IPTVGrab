@@ -12,12 +12,26 @@ use uuid::Uuid;
 
 use crate::aes::decrypt_aes128;
 use crate::error::DownloadError;
-use crate::merge::{merge_cmaf, merge_ts};
+use crate::merge::{merge_cmaf, merge_flv, merge_ts};
 use crate::parser::{
     fetch_bytes_retry, fetch_text_retry, find_audio_playlist, is_cmaf, parse_playlist,
     pick_quality, prefetch_keys, resolve,
 };
 use crate::types::*;
+
+// ── FLV detection helpers ─────────────────────────────────────────────────────
+
+fn is_flv_type(content_type: &str) -> bool {
+    content_type.contains("x-flv") || content_type.contains("video/flv")
+}
+
+fn is_flv_url(url: &str) -> bool {
+    url.to_lowercase()
+        .split('?')
+        .next()
+        .unwrap_or("")
+        .ends_with(".flv")
+}
 
 // ── Downloader ────────────────────────────────────────────────────────────────
 
@@ -85,7 +99,51 @@ impl Downloader {
 
     pub async fn parse(&self) -> Result<StreamInfo, DownloadError> {
         let client = self.make_client()?;
-        let content = fetch_text_retry(&client, &self.config.url, self.config.retry).await?;
+        // Read response headers first; FLV live streams are infinite — calling
+        // .bytes() on them would hang forever.
+        let resp = client
+            .get(&self.config.url)
+            .send()
+            .await
+            .map_err(|e| DownloadError::Network(e.to_string()))?
+            .error_for_status()
+            .map_err(|e| DownloadError::Network(e.to_string()))?;
+        let final_url = resp.url().to_string();
+        let ct = resp
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+
+        if is_flv_type(&ct) || is_flv_url(&final_url) || is_flv_url(&self.config.url) {
+            return Ok(StreamInfo {
+                kind: StreamKind::Media,
+                streams: vec![],
+                segments: 0,
+                duration: 0.0,
+                encrypted: false,
+                is_live: true,
+            });
+        }
+
+        let bytes = resp
+            .bytes()
+            .await
+            .map_err(|e| DownloadError::Network(e.to_string()))?;
+        if bytes.starts_with(b"FLV") {
+            return Ok(StreamInfo {
+                kind: StreamKind::Media,
+                streams: vec![],
+                segments: 0,
+                duration: 0.0,
+                encrypted: false,
+                is_live: true,
+            });
+        }
+
+        let content =
+            String::from_utf8(bytes.to_vec()).map_err(|e| DownloadError::Parse(e.to_string()))?;
         let playlist = parse_playlist(&content)?;
         Ok(crate::parser::playlist_to_info(
             &playlist,
@@ -134,7 +192,40 @@ impl Downloader {
         tmpdir: &Path,
     ) -> Result<(), DownloadError> {
         let client = self.make_client()?;
-        let content = fetch_text_retry(&client, &self.config.url, self.config.retry).await?;
+
+        // Probe response headers before reading the body — FLV live streams are
+        // infinite and would cause .bytes() / String::from_utf8 to hang/fail.
+        let probe = client
+            .get(&self.config.url)
+            .send()
+            .await
+            .map_err(|e| DownloadError::Network(e.to_string()))?
+            .error_for_status()
+            .map_err(|e| DownloadError::Network(e.to_string()))?;
+        let final_url = probe.url().to_string();
+        let ct = probe
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+
+        if is_flv_type(&ct) || is_flv_url(&final_url) || is_flv_url(&self.config.url) {
+            drop(probe);
+            return self.run_flv_recording(tx, tmpdir).await;
+        }
+
+        // Read body from the existing connection (avoids a redundant request)
+        let bytes = probe
+            .bytes()
+            .await
+            .map_err(|e| DownloadError::Network(e.to_string()))?;
+        if bytes.starts_with(b"FLV") {
+            return self.run_flv_recording(tx, tmpdir).await;
+        }
+
+        let content =
+            String::from_utf8(bytes.to_vec()).map_err(|e| DownloadError::Parse(e.to_string()))?;
         let top_playlist = parse_playlist(&content)?;
 
         // If master, pick quality variant
@@ -236,6 +327,133 @@ impl Downloader {
             )
             .await?;
         }
+
+        Ok(())
+    }
+
+    // ── HTTP-FLV live recording ───────────────────────────────────────────────
+
+    /// Record an HTTP-FLV live stream: stream bytes → temp `.flv`, then remux
+    /// to `.mp4` with ffmpeg.  Supports cancel / stop-recording.
+    async fn run_flv_recording(
+        &self,
+        tx: &mpsc::Sender<ProgressEvent>,
+        tmpdir: &Path,
+    ) -> Result<(), DownloadError> {
+        use futures::StreamExt;
+        use tokio::io::AsyncWriteExt;
+
+        let flv_path = tmpdir.join("recording.flv");
+        let mut file = tokio::fs::File::create(&flv_path).await?;
+
+        let client = self.make_client()?;
+        let resp = client
+            .get(&self.config.url)
+            .send()
+            .await
+            .map_err(|e| DownloadError::Network(e.to_string()))?
+            .error_for_status()
+            .map_err(|e| DownloadError::Network(e.to_string()))?;
+        let mut stream = resp.bytes_stream();
+
+        let mut bytes_downloaded: u64 = 0;
+        let start = Instant::now();
+
+        loop {
+            if self.should_stop_live() {
+                break;
+            }
+            if self.is_paused() {
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                continue;
+            }
+
+            // 15 s per-chunk timeout to detect a dead/stalled stream
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(15),
+                stream.next(),
+            )
+            .await
+            {
+                Ok(Some(Ok(chunk))) => {
+                    file.write_all(&chunk).await?;
+                    bytes_downloaded += chunk.len() as u64;
+
+                    let elapsed = start.elapsed().as_secs();
+                    let speed = if elapsed > 0 {
+                        bytes_downloaded as f64 / elapsed as f64 / 1_000_000.0
+                    } else {
+                        0.0
+                    };
+                    let _ = tx
+                        .send(ProgressEvent::Recording {
+                            recorded_segments: 0,
+                            bytes_downloaded,
+                            speed_mbps: speed,
+                            elapsed_sec: elapsed,
+                            tmpdir: tmpdir.to_string_lossy().into_owned(),
+                            is_cmaf: false,
+                            seg_ext: ".flv".to_string(),
+                            target_duration: 0.0,
+                        })
+                        .await;
+                }
+                Ok(Some(Err(e))) => {
+                    warn!("FLV stream error: {e}");
+                    break;
+                }
+                Ok(None) => break, // stream ended (VOD FLV)
+                Err(_) => {
+                    warn!("FLV stream read timeout");
+                    break;
+                }
+            }
+        }
+
+        if self.is_cancelled() {
+            return Err(DownloadError::Cancelled);
+        }
+
+        file.flush().await?;
+        drop(file);
+
+        let output_name = self
+            .config
+            .output_name
+            .as_deref()
+            .unwrap_or("recording")
+            .to_string();
+        let output_path = self.config.output_dir.join(format!("{}.mp4", output_name));
+        let elapsed_secs = start.elapsed().as_secs_f64();
+
+        let _ = tx.send(ProgressEvent::Merging { progress: 0 }).await;
+
+        let tx2 = tx.clone();
+        merge_flv(
+            &flv_path,
+            &output_path,
+            move |p| {
+                let _ = tx2.try_send(ProgressEvent::Merging { progress: p });
+            },
+            self.cancelled.clone(),
+        )
+        .await?;
+
+        let size = tokio::fs::metadata(&output_path)
+            .await
+            .map(|m| m.len())
+            .unwrap_or(0);
+        let _ = tx
+            .send(ProgressEvent::Completed {
+                output: output_path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned(),
+                size,
+                duration_sec: elapsed_secs,
+            })
+            .await;
 
         Ok(())
     }

@@ -156,6 +156,31 @@ where
     wait_ffmpeg(proc, total_secs, &mut progress_cb, cancelled).await
 }
 
+/// Remux a raw FLV recording to MP4 using ffmpeg (stream copy, faststart).
+/// Used after an HTTP-FLV live stream recording completes or is stopped.
+pub async fn merge_flv<F>(
+    flv_path: &Path,
+    output_path: &Path,
+    mut progress_cb: F,
+    cancelled: Arc<AtomicBool>,
+) -> Result<(), DownloadError>
+where
+    F: FnMut(u8),
+{
+    let mut cmd = Command::new("ffmpeg");
+    cmd.arg("-y")
+        .arg("-i")
+        .arg(flv_path.to_str().unwrap_or_default())
+        .args(["-c", "copy", "-movflags", "+faststart"])
+        .arg(output_path.to_str().unwrap_or_default())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped());
+
+    let proc = cmd.spawn().map_err(map_ffmpeg_spawn_error)?;
+    // total_secs=0 → no progress percentage, just cancel support
+    wait_ffmpeg(proc, 0.0, &mut progress_cb, cancelled).await
+}
+
 async fn wait_ffmpeg<F>(
     mut child: tokio::process::Child,
     total_secs: f64,
