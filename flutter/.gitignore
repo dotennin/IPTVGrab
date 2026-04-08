@@ -11,3 +11,41 @@ ios/Flutter/ephemeral/
 ios/Pods/
 android/.gradle/
 
+.dart_tool/
+build/
+.packages
+.flutter-plugins
+.flutter-plugins-dependencies
+coverage/
+!pubspec.lock
+
+# Dart code generation
+lib/**/*.g.dart
+lib/**/*.freezed.dart
+
+# ─────────────────────────────────────────────
+# Flutter – iOS
+# ─────────────────────────────────────────────
+ios/Pods/
+!flutter/ios/Podfile.lock
+ios/.symlinks/
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+ios/Flutter/FlutterPluginRegistrant.*
+ios/Runner.xcworkspace/
+ios/Frameworks/
+
+# ─────────────────────────────────────────────
+# Flutter – Android
+# ─────────────────────────────────────────────
+android/.gradle/
+android/captures/
+android/local.properties
+android/.idea/
+android/build/
+android/.classpath
+android/.project
+android/key.properties
+android/**/*.keystore
+android/**/*.jks
+android/app/src/main/jniLibs/**/*.so

@@ -61,46 +61,5 @@ yarn-error.log*
 /crates/mobile-ffi/src/mobile_ffiFFI.kt
 /crates/mobile-ffi/src/mobile_ffi.swift
 
-# ─────────────────────────────────────────────
-# Flutter (project root)
-# ─────────────────────────────────────────────
-flutter/.dart_tool/
-flutter/build/
-flutter/.packages
-flutter/.flutter-plugins
-flutter/.flutter-plugins-dependencies
-flutter/coverage/
-!flutter/pubspec.lock
-
-# Dart code generation
-/mobile/flutter/lib/**/*.g.dart
-/mobile/flutter/lib/**/*.freezed.dart
-
-# ─────────────────────────────────────────────
-# Flutter – iOS
-# ─────────────────────────────────────────────
-flutter/ios/Pods/
-!flutter/ios/Podfile.lock
-flutter/ios/.symlinks/
-flutter/ios/Flutter/Flutter.framework
-flutter/ios/Flutter/Flutter.podspec
-flutter/ios/Flutter/FlutterPluginRegistrant.*
-flutter/ios/Runner.xcworkspace/
-flutter/ios/Frameworks/
-
-# ─────────────────────────────────────────────
-# Flutter – Android
-# ─────────────────────────────────────────────
-flutter/android/.gradle/
-flutter/android/captures/
-flutter/android/local.properties
-flutter/android/.idea/
-flutter/android/build/
-flutter/android/.classpath
-flutter/android/.project
-flutter/android/key.properties
-flutter/android/**/*.keystore
-flutter/android/**/*.jks
-
 # python
 __pycache__/
