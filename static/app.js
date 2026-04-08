@@ -1182,9 +1182,9 @@ async function forkRecording(taskId) {
   }
 }
 
-// ── Preview / Watch player (hls.js + flv.js) ─────────────────────────────────
+// ── Preview / Watch player (hls.js) ──────────────────────────────────────────
 let hlsInstance = null;
-let flvInstance = null;
+let _transcodeSessionId = null;  // active FLV→HLS transcode session ID
 const previewModalEl = document.getElementById("previewModal");
 const previewViewportEl = document.getElementById("previewViewport");
 const previewVideo = document.getElementById("previewVideo");
@@ -1364,7 +1364,6 @@ function _isFlvUrl(url) {
 
 function _destroyPlayers() {
   if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
-  if (flvInstance) { flvInstance.destroy(); flvInstance = null; }
 }
 
 /** Extracts the original upstream URL from a proxy URL or returns as-is. */
@@ -1377,25 +1376,13 @@ function _originalUrl(url) {
   return url;
 }
 
-/** Returns true if flv.js accepted the URL; false if unsupported. */
-function _startFlvPlayer(url, isLive = false) {
-  if (typeof flvjs === "undefined" || !flvjs.isSupported()) {
-    toast("FLV playback not supported in this browser", "danger");
-    return false;
+/** Stop any active transcode session on the server (fire-and-forget). */
+function _stopTranscodeSession() {
+  if (_transcodeSessionId) {
+    const id = _transcodeSessionId;
+    _transcodeSessionId = null;
+    fetch(`/api/watch/transcode/${id}`, { method: "DELETE" }).catch(() => {});
   }
-  if (flvInstance) { flvInstance.destroy(); flvInstance = null; }
-  flvInstance = flvjs.createPlayer(
-    { type: "flv", url, isLive },
-    { enableWorker: false, reuseRedirectedURL: true }
-  );
-  flvInstance.attachMediaElement(previewVideo);
-  flvInstance.load();
-  flvInstance.on(flvjs.Events.ERROR, (errType, errDetail) => {
-    console.error("FLV error:", errType, errDetail);
-    toast(`FLV error: ${errType}`, "danger");
-  });
-  previewVideo.play().catch(() => {});
-  return true;
 }
 
 function _setupPlayerQuality() {
@@ -1432,47 +1419,60 @@ async function openHLSPlayer(url, title = "", isLive = false) {
   if (clipToggleBar) clipToggleBar.classList.add("d-none");
   _hidePlayerQuality();
   _destroyPlayers();
+  _stopTranscodeSession();
   previewVideo.pause();
   previewVideo.removeAttribute("src");
   previewModal.show();
 
-  // Direct FLV URL — bypass hls.js entirely; append kind=flv so the proxy
-  // skips its detection request (single CDN connection avoids 403 on Tengine live).
-  if (_isFlvUrl(url)) {
-    const flvUrl = url.includes("kind=flv") ? url : url + (url.includes("?") ? "&" : "?") + "kind=flv";
-    _startFlvPlayer(flvUrl, isLive);
-    return;
-  }
-
-  // Probe content-type so we pick the right player immediately (avoids the
-  // hls.js error-then-fallback dance for FLV streams like Douyu/Huya).
-  let useFlv = false;
-  let proxyFlvUrl = url;
+  // Probe content-type so we start a transcode session for FLV streams instead
+  // of trying to play them directly (iOS/Safari doesn't support FLV at all).
+  let hlsPlaylistUrl = url;
   try {
     const probeUrl = "/api/watch/probe?url=" + encodeURIComponent(_originalUrl(url));
-    const probe = await fetch(probeUrl, { signal: AbortSignal.timeout(4000) })
+    const probe = await fetch(probeUrl, { signal: AbortSignal.timeout(5000) })
       .then(r => r.ok ? r.json() : null)
       .catch(() => null);
-  if (probe?.kind === "flv") {
-      useFlv = true;
-      // Use the signed CDN URL from probe as the proxy target.
+
+    if (probe?.kind === "flv") {
+      // Use the signed CDN URL from probe.final_url as the transcode source.
       // probe_client stops BEFORE connecting to the CDN (custom redirect policy),
-      // so probe.final_url is the signed CDN URL obtained from the Location header
-      // — no CDN connection was opened during probe.  This means watch_proxy can
-      // open the ONLY CDN connection, avoiding the per-IP concurrent-connection
-      // limit enforced by Huya/Tengine live CDN.
-      const targetUrl = probe.final_url || _originalUrl(url);
-      proxyFlvUrl = "/api/watch/proxy?url=" + encodeURIComponent(targetUrl) + "&kind=flv";
+      // so no CDN connection was opened during probe — FFmpeg will open the ONLY
+      // CDN connection, satisfying Huya/Tengine's per-IP concurrent-connection limit.
+      const srcUrl = probe.final_url || _originalUrl(url);
+      setPreviewTitle((title ? esc(title) : "Watch") + " <small class=\"text-muted\">(transcoding…)</small>");
+      try {
+        const resp = await fetch("/api/watch/transcode", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: srcUrl }),
+          signal: AbortSignal.timeout(8000),
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          _transcodeSessionId = data.id;
+          hlsPlaylistUrl = data.playlist;
+          setPreviewTitle(title ? esc(title) : "Watch");
+        } else {
+          toast("Transcode start failed", "danger");
+          return;
+        }
+      } catch (e) {
+        toast("Transcode error: " + e.message, "danger");
+        return;
+      }
     }
-  } catch { /* probe timed out or unavailable — fall through to hls.js */ }
+  } catch { /* probe timed out — fall through to direct HLS */ }
 
-  if (useFlv) {
-    _startFlvPlayer(proxyFlvUrl, isLive);
-    return;
-  }
+  _loadHlsPlayer(hlsPlaylistUrl, isLive);
+}
 
+function _loadHlsPlayer(url, isLive = false) {
   if (typeof Hls !== "undefined" && Hls.isSupported()) {
-    hlsInstance = new Hls({ enableWorker: false });
+    hlsInstance = new Hls({
+      enableWorker: false,
+      // For transcoded live streams poll the playlist frequently
+      liveSyncDurationCount: 3,
+    });
     hlsInstance.loadSource(url);
     hlsInstance.attachMedia(previewVideo);
     hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
@@ -1494,20 +1494,10 @@ async function openHLSPlayer(url, title = "", isLive = false) {
     });
     hlsInstance.on(Hls.Events.ERROR, (_evt, data) => {
       if (!data.fatal) return;
-      // Manifest errors (load or parse) may indicate FLV — try flv.js fallback
-      const isManifestError = data.details === Hls.ErrorDetails.MANIFEST_LOAD_ERROR
-        || data.details === Hls.ErrorDetails.MANIFEST_LOAD_TIMEOUT
-        || data.details === Hls.ErrorDetails.MANIFEST_PARSING_ERROR;
-      if (isManifestError) {
-        hlsInstance.destroy(); hlsInstance = null;
-        if (!_startFlvPlayer(url, isLive)) {
-          toast("Stream error: " + (data.details || "unknown"), "danger");
-        }
-      } else {
-        toast("Stream error: " + (data.details || "unknown"), "danger");
-      }
+      toast("Stream error: " + (data.details || "unknown"), "danger");
     });
   } else if (previewVideo.canPlayType("application/vnd.apple.mpegurl")) {
+    // Native HLS (Safari / iOS) — works for both regular HLS and transcoded streams.
     previewVideo.src = url;
     previewVideo.play().catch(() => {});
   } else {
@@ -1557,6 +1547,7 @@ previewModalEl.addEventListener("hidden.bs.modal", () => {
   resetPreviewChrome();
   _hidePlayerQuality();
   _destroyPlayers();
+  _stopTranscodeSession();
   previewVideo.pause();
   previewVideo.removeAttribute("src");
   previewVideo.load();
