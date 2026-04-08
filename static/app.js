@@ -1368,15 +1368,6 @@ function _destroyPlayers() {
   if (mpegtsPlayer) { mpegtsPlayer.destroy(); mpegtsPlayer = null; }
 }
 
-/** Returns true when running on iOS/iPadOS Safari (no MSE FLV support). */
-function _isIosSafari() {
-  const ua = navigator.userAgent;
-  const isIos = /iPhone|iPad|iPod/.test(ua) ||
-    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-  const isSafari = /Safari\//.test(ua) && !/Chrome\/|CriOS\/|FxiOS\//.test(ua);
-  return isIos && isSafari;
-}
-
 /** Extracts the original upstream URL from a proxy URL or returns as-is. */
 function _originalUrl(url) {
   if (url.startsWith("/api/watch/proxy?")) {
@@ -1447,31 +1438,32 @@ async function openHLSPlayer(url, title = "", isLive = false) {
   } catch { /* probe timed out — fall through */ }
 
   if (isFLV) {
-    if (_isIosSafari()) {
+    // mpegts 1.8 now supports FLV playback in iOS Safari via Media Source Extensions, but if we wanted to transcode to HLS for broader compatibility (e.g. older iOS versions) we would do it here.  For now, just play FLV directly in all browsers that support it.
+    if (false) {
       // iOS Safari has no MSE support for FLV — transcode to HLS on the server.
-      const srcUrl = probeResult?.final_url || _originalUrl(url);
-      setPreviewTitle((title ? esc(title) : "Watch") + " <small class=\"text-muted\">(transcoding…)</small>");
-      try {
-        const resp = await fetch("/api/watch/transcode", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url: srcUrl }),
-          signal: AbortSignal.timeout(8000),
-        });
-        if (resp.ok) {
-          const data = await resp.json();
-          _transcodeSessionId = data.id;
-          setPreviewTitle(title ? esc(title) : "Watch");
-          _loadHlsPlayer(data.playlist, isLive);
-        } else {
-          toast("Transcode start failed", "danger");
-        }
-      } catch (e) {
-        toast("Transcode error: " + e.message, "danger");
-      }
+      // const srcUrl = probeResult?.final_url || _originalUrl(url);
+      // setPreviewTitle((title ? esc(title) : "Watch") + " <small class=\"text-muted\">(transcoding…)</small>");
+      // try {
+      //   const resp = await fetch("/api/watch/transcode", {
+      //     method: "POST",
+      //     headers: { "Content-Type": "application/json" },
+      //     body: JSON.stringify({ url: srcUrl }),
+      //     signal: AbortSignal.timeout(8000),
+      //   });
+      //   if (resp.ok) {
+      //     const data = await resp.json();
+      //     _transcodeSessionId = data.id;
+      //     setPreviewTitle(title ? esc(title) : "Watch");
+      //     _loadHlsPlayer(data.playlist, isLive);
+      //   } else {
+      //     toast("Transcode start failed", "danger");
+      //   }
+      // } catch (e) {
+      //   toast("Transcode error: " + e.message, "danger");
+      // }
     } else {
       // All other browsers: play FLV directly via mpegts.js.
-      _loadMpegtsPlayer(url, isLive);
+      _loadMpegtsPlayer(probeResult.final_url, isLive);
     }
   } else {
     _loadHlsPlayer(url, isLive);
@@ -1483,16 +1475,55 @@ function _loadMpegtsPlayer(url, isLive = false) {
     toast("FLV playback not supported in this browser", "danger");
     return;
   }
-  mpegtsPlayer = mpegts.createPlayer(
-    { type: "flv", isLive, url },
-    { enableWorker: false, lazyLoadMaxDuration: 3 * 60 },
-  );
-  mpegtsPlayer.attachMediaElement(previewVideo);
-  mpegtsPlayer.load();
-  previewVideo.play().catch(() => {});
-  mpegtsPlayer.on(mpegts.Events.ERROR, (_errorType, errorDetail) => {
-    toast("Stream error: " + (errorDetail || "unknown"), "danger");
-  });
+  // Suppress verbose internal logs; only surface real errors to the console.
+  mpegts.LoggingControl.enableAll = false;
+  mpegts.LoggingControl.enableError = true;
+
+  // Mirror flv.js reconnect behaviour: live streams close their HTTP connection
+  // periodically (CDN auth token rotation / keepalive limit).  Destroy and
+  // recreate the player to open a fresh connection — the proxy will obtain a
+  // new signed CDN URL on each attempt.
+  let _reconnectTimer = null;
+
+  function _createInstance() {
+    // Guard: don't reconnect if the player modal has been closed.
+    if (!isPreviewVisible()) return;
+
+    if (mpegtsPlayer) {
+      try { mpegtsPlayer.destroy(); } catch (_) {}
+      mpegtsPlayer = null;
+    }
+    if (_reconnectTimer) { clearTimeout(_reconnectTimer); _reconnectTimer = null; }
+
+    mpegtsPlayer = mpegts.createPlayer(
+      { type: "flv", isLive, url },
+      {
+        enableWorker: false,
+        enableStashBuffer: true,
+        stashInitialSize: 128 * 1024,
+        lazyLoadMaxDuration: 3 * 60,
+      },
+    );
+    mpegtsPlayer.attachMediaElement(previewVideo);
+    mpegtsPlayer.load();
+    previewVideo.play().catch(() => {});
+
+    mpegtsPlayer.on(mpegts.Events.ERROR, (errorType, errorDetail, errorInfo) => {
+      // NetworkUnrecoverableEarlyEof = upstream closed the connection.
+      // For live streams, schedule a reconnect (same as flv.js reconnectIntervalMs).
+      const isEarlyEof = errorDetail === "NetworkUnrecoverableEarlyEof" ||
+        (typeof mpegts.ErrorDetails !== "undefined" &&
+          errorDetail === mpegts.ErrorDetails.NETWORK_UNRECOVERABLE_EARLY_EOF);
+      if (isLive && isEarlyEof) {
+        _reconnectTimer = setTimeout(_createInstance, 1000);
+      } else {
+        const msg = (errorInfo && errorInfo.msg) || errorDetail || errorType || "unknown";
+        toast("Stream error: " + msg, "danger");
+      }
+    });
+  }
+
+  _createInstance();
 }
 
 function _loadHlsPlayer(url, isLive = false) {
