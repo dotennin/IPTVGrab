@@ -5,6 +5,10 @@ PODS:
   - ffmpeg_kit_flutter_new_min/min (7.1.1):
     - Flutter
   - Flutter (1.0.0)
+  - flutter_vlc_player (3.0.3):
+    - Flutter
+    - MobileVLCKit (~> 3.6.1b1)
+  - MobileVLCKit (3.6.1b1)
   - photo_manager (3.9.0):
     - Flutter
     - FlutterMacOS
@@ -19,16 +23,23 @@ PODS:
 DEPENDENCIES:
   - ffmpeg_kit_flutter_new_min (from `.symlinks/plugins/ffmpeg_kit_flutter_new_min/ios`)
   - Flutter (from `Flutter`)
+  - flutter_vlc_player (from `.symlinks/plugins/flutter_vlc_player/ios`)
   - photo_manager (from `.symlinks/plugins/photo_manager/darwin`)
   - sensors_plus (from `.symlinks/plugins/sensors_plus/ios`)
   - share_plus (from `.symlinks/plugins/share_plus/ios`)
   - video_player_avfoundation (from `.symlinks/plugins/video_player_avfoundation/darwin`)
+
+SPEC REPOS:
+  trunk:
+    - MobileVLCKit
 
 EXTERNAL SOURCES:
   ffmpeg_kit_flutter_new_min:
     :path: ".symlinks/plugins/ffmpeg_kit_flutter_new_min/ios"
   Flutter:
     :path: Flutter
+  flutter_vlc_player:
+    :path: ".symlinks/plugins/flutter_vlc_player/ios"
   photo_manager:
     :path: ".symlinks/plugins/photo_manager/darwin"
   sensors_plus:
@@ -41,6 +52,8 @@ EXTERNAL SOURCES:
 SPEC CHECKSUMS:
   ffmpeg_kit_flutter_new_min: 85493896be79f45e846b5c9b23a3bf73eb284c4a
   Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
+  flutter_vlc_player: 5464f594a9338e080d240bbe7b10ffe30c7bc8bc
+  MobileVLCKit: 2d9c7c373393ae43086aeeff890bf0b1afc15c5c
   photo_manager: 25fd77df14f4f0ba5ef99e2c61814dde77e2bceb
   sensors_plus: 1c5f0a01ce21c609a4df404c4e6879d62bce287f
   share_plus: 50da8cb520a8f0f65671c6c6a99b3617ed10a58a

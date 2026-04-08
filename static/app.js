@@ -1182,9 +1182,10 @@ async function forkRecording(taskId) {
   }
 }
 
-// ── Preview / Watch player (hls.js) ──────────────────────────────────────────
+// ── Preview / Watch player (hls.js + mpegts.js) ──────────────────────────────
 let hlsInstance = null;
-let _transcodeSessionId = null;  // active FLV→HLS transcode session ID
+let mpegtsPlayer = null;
+let _transcodeSessionId = null;  // active FLV→HLS transcode session ID (iOS Safari)
 const previewModalEl = document.getElementById("previewModal");
 const previewViewportEl = document.getElementById("previewViewport");
 const previewVideo = document.getElementById("previewVideo");
@@ -1364,6 +1365,16 @@ function _isFlvUrl(url) {
 
 function _destroyPlayers() {
   if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
+  if (mpegtsPlayer) { mpegtsPlayer.destroy(); mpegtsPlayer = null; }
+}
+
+/** Returns true when running on iOS/iPadOS Safari (no MSE FLV support). */
+function _isIosSafari() {
+  const ua = navigator.userAgent;
+  const isIos = /iPhone|iPad|iPod/.test(ua) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  const isSafari = /Safari\//.test(ua) && !/Chrome\/|CriOS\/|FxiOS\//.test(ua);
+  return isIos && isSafari;
 }
 
 /** Extracts the original upstream URL from a proxy URL or returns as-is. */
@@ -1424,21 +1435,21 @@ async function openHLSPlayer(url, title = "", isLive = false) {
   previewVideo.removeAttribute("src");
   previewModal.show();
 
-  // Probe content-type so we start a transcode session for FLV streams instead
-  // of trying to play them directly (iOS/Safari doesn't support FLV at all).
-  let hlsPlaylistUrl = url;
+  // Probe content-type to detect FLV streams.
+  let isFLV = false;
+  let probeResult = null;
   try {
     const probeUrl = "/api/watch/probe?url=" + encodeURIComponent(_originalUrl(url));
-    const probe = await fetch(probeUrl, { signal: AbortSignal.timeout(5000) })
+    probeResult = await fetch(probeUrl, { signal: AbortSignal.timeout(5000) })
       .then(r => r.ok ? r.json() : null)
       .catch(() => null);
+    isFLV = probeResult?.kind === "flv";
+  } catch { /* probe timed out — fall through */ }
 
-    if (probe?.kind === "flv") {
-      // Use the signed CDN URL from probe.final_url as the transcode source.
-      // probe_client stops BEFORE connecting to the CDN (custom redirect policy),
-      // so no CDN connection was opened during probe — FFmpeg will open the ONLY
-      // CDN connection, satisfying Huya/Tengine's per-IP concurrent-connection limit.
-      const srcUrl = probe.final_url || _originalUrl(url);
+  if (isFLV) {
+    if (_isIosSafari()) {
+      // iOS Safari has no MSE support for FLV — transcode to HLS on the server.
+      const srcUrl = probeResult?.final_url || _originalUrl(url);
       setPreviewTitle((title ? esc(title) : "Watch") + " <small class=\"text-muted\">(transcoding…)</small>");
       try {
         const resp = await fetch("/api/watch/transcode", {
@@ -1450,20 +1461,38 @@ async function openHLSPlayer(url, title = "", isLive = false) {
         if (resp.ok) {
           const data = await resp.json();
           _transcodeSessionId = data.id;
-          hlsPlaylistUrl = data.playlist;
           setPreviewTitle(title ? esc(title) : "Watch");
+          _loadHlsPlayer(data.playlist, isLive);
         } else {
           toast("Transcode start failed", "danger");
-          return;
         }
       } catch (e) {
         toast("Transcode error: " + e.message, "danger");
-        return;
       }
+    } else {
+      // All other browsers: play FLV directly via mpegts.js.
+      _loadMpegtsPlayer(url, isLive);
     }
-  } catch { /* probe timed out — fall through to direct HLS */ }
+  } else {
+    _loadHlsPlayer(url, isLive);
+  }
+}
 
-  _loadHlsPlayer(hlsPlaylistUrl, isLive);
+function _loadMpegtsPlayer(url, isLive = false) {
+  if (typeof mpegts === "undefined" || !mpegts.isSupported()) {
+    toast("FLV playback not supported in this browser", "danger");
+    return;
+  }
+  mpegtsPlayer = mpegts.createPlayer(
+    { type: "flv", isLive, url },
+    { enableWorker: false, lazyLoadMaxDuration: 3 * 60 },
+  );
+  mpegtsPlayer.attachMediaElement(previewVideo);
+  mpegtsPlayer.load();
+  previewVideo.play().catch(() => {});
+  mpegtsPlayer.on(mpegts.Events.ERROR, (_errorType, errorDetail) => {
+    toast("Stream error: " + (errorDetail || "unknown"), "danger");
+  });
 }
 
 function _loadHlsPlayer(url, isLive = false) {

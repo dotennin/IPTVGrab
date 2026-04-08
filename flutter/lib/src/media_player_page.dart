@@ -3,8 +3,10 @@ import 'dart:io';
 import 'dart:math' as math;
 
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_vlc_player/flutter_vlc_player.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:sensors_plus/sensors_plus.dart';
 import 'package:share_plus/share_plus.dart';
@@ -12,7 +14,6 @@ import 'package:video_player/video_player.dart';
 
 import 'background_execution_bridge.dart';
 import 'models.dart';
-import 'native_ios_player.dart';
 import 'theme.dart';
 import 'utils.dart';
 
@@ -82,10 +83,13 @@ class MediaPlayerPage extends StatefulWidget {
 }
 
 class _MediaPlayerPageState extends State<MediaPlayerPage> {
-  VideoPlayerController? _controller;
-  NativeIosPlayerController? _iosController;
+  // VLC player used on all native platforms (iOS, Android, macOS …).
+  VlcPlayerController? _vlcController;
+  // video_player fallback used only on the web build.
+  VideoPlayerController? _webController;
+
   String? _error;
-  bool _initialized = false;
+  bool _initialized = false;   // tracks VideoPlayerController init on web
   bool _isFullscreen = false;
   bool _showControls = true;
   bool _muted = false;
@@ -102,93 +106,116 @@ class _MediaPlayerPageState extends State<MediaPlayerPage> {
   bool _fetchingVariants = false;
   bool _variantsLoaded = false;
   int _selectedVariantIndex = -1;
-  int _iosPlayerVersion = 0;
+  // Incremented to force a new VlcPlayer widget when the source changes.
+  int _vlcPlayerVersion = 0;
 
   Offset? _doubleTapPos;
   int _seekFeedback = 0;
   Timer? _seekFeedbackTimer;
 
-  bool get _usesNativeIosPlayer => !kIsWeb && Platform.isIOS;
+  // True when running on a native platform where VLC is available.
+  bool get _usesVlcPlayer => !kIsWeb;
 
-  bool get _playerInitialized => _usesNativeIosPlayer
-      ? (_iosController?.initialized ?? false)
+  bool get _playerInitialized => _usesVlcPlayer
+      ? (_vlcController?.value.isInitialized ?? false)
       : _initialized;
 
-  bool get _playerIsPlaying => _usesNativeIosPlayer
-      ? (_iosController?.isPlaying ?? false)
-      : _controller!.value.isPlaying;
+  bool get _playerIsPlaying => _usesVlcPlayer
+      ? (_vlcController?.value.isPlaying ?? false)
+      : (_webController?.value.isPlaying ?? false);
 
-  Duration get _playerPosition => _usesNativeIosPlayer
-      ? (_iosController?.position ?? Duration.zero)
-      : _controller!.value.position;
+  Duration get _playerPosition => _usesVlcPlayer
+      ? (_vlcController?.value.position ?? Duration.zero)
+      : (_webController?.value.position ?? Duration.zero);
 
-  Duration get _playerDuration => _usesNativeIosPlayer
-      ? (_iosController?.duration ?? Duration.zero)
-      : _controller!.value.duration;
+  Duration get _playerDuration => _usesVlcPlayer
+      ? (_vlcController?.value.duration ?? Duration.zero)
+      : (_webController?.value.duration ?? Duration.zero);
 
   double get _playerAspectRatio {
-    if (_usesNativeIosPlayer) {
-      final aspectRatio = _iosController?.aspectRatio ?? 16 / 9;
-      return aspectRatio > 0 ? aspectRatio : 16 / 9;
+    if (_usesVlcPlayer) {
+      final size = _vlcController?.value.size;
+      if (size != null && size.width > 0 && size.height > 0) {
+        return size.width / size.height;
+      }
+      return 16 / 9;
     }
-    final controller = _controller!;
-    return controller.value.isInitialized && controller.value.aspectRatio > 0
-        ? controller.value.aspectRatio
+    final ctrl = _webController;
+    return (ctrl != null && ctrl.value.isInitialized && ctrl.value.aspectRatio > 0)
+        ? ctrl.value.aspectRatio
         : 16 / 9;
   }
 
-  String? get _playerError =>
-      _usesNativeIosPlayer ? (_iosController?.error ?? _error) : _error;
-
-  List<String> get _pictureInPictureDiagnostics {
-    final reasons = <String>[
-      ...(_iosController?.diagnostics ?? const <String>[]),
-      ..._pictureInPictureReasons,
-    ];
-    if (_usesNativeIosPlayer &&
-        !(_iosController?.isPictureInPictureSupported ?? false)) {
-      reasons.add(
-        'This iPhone or iOS build reports that Picture in Picture is not supported.',
-      );
+  String? get _playerError {
+    if (_usesVlcPlayer) {
+      final ctrl = _vlcController;
+      if (ctrl != null && ctrl.value.hasError) {
+        return ctrl.value.errorDescription.isEmpty
+            ? 'Playback error'
+            : ctrl.value.errorDescription;
+      }
+      return _error;
     }
-    if (_usesNativeIosPlayer &&
-        _playerInitialized &&
-        !(_iosController?.isPictureInPicturePossible ?? false)) {
-      reasons.add(
-        'The native AVPictureInPictureController still reports that Picture in Picture is not currently possible for this stream.',
-      );
-    }
-    if (_usesNativeIosPlayer && !_playerInitialized) {
-      reasons.add(
-        'The native player is still initializing, so Picture in Picture is not ready yet.',
-      );
-    }
-    if (_playerError != null) {
-      reasons.add('Playback error: $_playerError');
-    }
-    return dedupeMessages(reasons);
+    return _error;
   }
+
+  List<String> get _pictureInPictureDiagnostics => _pictureInPictureReasons;
+
+  // Only Android PiP is supported with VLC (iOS PiP requires native AVPlayer).
+  bool get _canUsePictureInPicture =>
+      widget.allowPictureInPicture && !kIsWeb && Platform.isAndroid;
 
   @override
   void initState() {
     super.initState();
-    if (_usesNativeIosPlayer) {
-      _iosController = NativeIosPlayerController(
-        uri: widget.uri,
-        httpHeaders: widget.httpHeaders,
-        isLive: widget.isLive,
+    if (_usesVlcPlayer) {
+      _vlcController = VlcPlayerController.network(
+        widget.uri.toString(),
+        hwAcc: HwAcc.full,
+        autoPlay: true,
+        options: _buildVlcOptions(widget.httpHeaders),
       )..addListener(_handleControllerUpdate);
     } else {
-      _controller = VideoPlayerController.networkUrl(
+      _webController = VideoPlayerController.networkUrl(
         widget.uri,
         httpHeaders: widget.httpHeaders,
       );
-      _controller!.addListener(_handleControllerUpdate);
-      unawaited(_initialize());
+      _webController!.addListener(_handleControllerUpdate);
+      unawaited(_initializeWeb());
     }
     _accelSub = accelerometerEventStream(
       samplingPeriod: SensorInterval.normalInterval,
     ).listen(_onAccelerometer);
+  }
+
+  VlcPlayerOptions _buildVlcOptions(Map<String, String> headers) {
+    if (headers.isEmpty) return VlcPlayerOptions();
+    String? userAgent;
+    String? referrer;
+    final extraLines = <String>[];
+    headers.forEach((key, value) {
+      switch (key.toLowerCase()) {
+        case 'user-agent':
+          userAgent = value;
+        case 'referer':
+        case 'referrer':
+          referrer = value;
+        default:
+          extraLines.add('$key: $value');
+      }
+    });
+    final httpOpts = <String>[
+      if (userAgent != null) VlcHttpOptions.httpUserAgent(userAgent!),
+      if (referrer != null) VlcHttpOptions.httpReferrer(referrer!),
+    ];
+    final extras = <String>[
+      if (extraLines.isNotEmpty)
+        ':http-extra-headers=${extraLines.join('\r\n')}\r\n',
+    ];
+    return VlcPlayerOptions(
+      http: httpOpts.isNotEmpty ? VlcHttpOptions(httpOpts) : null,
+      extras: extras.isNotEmpty ? extras : null,
+    );
   }
 
   void _onAccelerometer(AccelerometerEvent event) {
@@ -210,33 +237,27 @@ class _MediaPlayerPageState extends State<MediaPlayerPage> {
     }
   }
 
-  Future<void> _initialize() async {
+  Future<void> _initializeWeb() async {
     try {
-      final controller = _controller!;
+      final controller = _webController!;
       await controller.initialize();
       await controller.setLooping(!widget.isLive);
       await controller.setVolume(_muted ? 0 : 1);
       await controller.play();
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
       setState(() => _initialized = true);
       _scheduleControlsHide();
       unawaited(_loadVariants());
     } catch (error) {
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
       setState(() => _error = error.toString());
     }
   }
 
   void _handleControllerUpdate() {
-    if (!mounted) {
-      return;
-    }
+    if (!mounted) return;
     setState(() {});
-    if (_usesNativeIosPlayer && _playerInitialized && !_variantsLoaded) {
+    if (_usesVlcPlayer && _playerInitialized && !_variantsLoaded) {
       _variantsLoaded = true;
       unawaited(_loadVariants());
     }
@@ -244,19 +265,19 @@ class _MediaPlayerPageState extends State<MediaPlayerPage> {
 
   Future<void> _togglePlayback() async {
     if (_playerIsPlaying) {
-      if (_usesNativeIosPlayer) {
-        await _iosController!.pause();
+      if (_usesVlcPlayer) {
+        await _vlcController!.pause();
       } else {
-        await _controller!.pause();
+        await _webController!.pause();
       }
       _controlsTimer?.cancel();
       setState(() => _showControls = true);
       return;
     }
-    if (_usesNativeIosPlayer) {
-      await _iosController!.play();
+    if (_usesVlcPlayer) {
+      await _vlcController!.play();
     } else {
-      await _controller!.play();
+      await _webController!.play();
     }
     _scheduleControlsHide();
   }
@@ -273,22 +294,20 @@ class _MediaPlayerPageState extends State<MediaPlayerPage> {
   }
 
   Future<void> _seekTo(Duration position) async {
-    if (_usesNativeIosPlayer) {
-      await _iosController!.seekTo(position);
+    if (_usesVlcPlayer) {
+      await _vlcController!.seekTo(position);
     } else {
-      await _controller!.seekTo(position);
+      await _webController!.seekTo(position);
     }
   }
 
   Future<void> _setMuted(bool value) async {
-    if (_usesNativeIosPlayer) {
-      await _iosController!.setMuted(value);
+    if (_usesVlcPlayer) {
+      await _vlcController!.setVolume(value ? 0 : 100);
     } else {
-      await _controller!.setVolume(value ? 0 : 1);
+      await _webController!.setVolume(value ? 0 : 1);
     }
-    if (!mounted) {
-      return;
-    }
+    if (!mounted) return;
     setState(() => _muted = value);
     _scheduleControlsHide();
   }
@@ -374,17 +393,20 @@ class _MediaPlayerPageState extends State<MediaPlayerPage> {
     if (index == _selectedVariantIndex) return;
     final variant = _variants[index];
     final uri = Uri.parse(variant.url);
-    if (_usesNativeIosPlayer) {
-      final cap = (index == 0 || variant.bandwidth == 0) ? 0 : variant.bandwidth;
-      await _iosController!.setPreferredBitRate(cap);
-      if (!mounted) return;
+    if (_usesVlcPlayer) {
       setState(() => _selectedVariantIndex = index);
+      await _vlcController!.setMediaFromNetwork(
+        uri.toString(),
+        hwAcc: HwAcc.full,
+        autoPlay: true,
+      );
+      if (mounted) setState(() => _vlcPlayerVersion++);
     } else {
       setState(() {
         _selectedVariantIndex = index;
         _initialized = false;
       });
-      final oldCtrl = _controller;
+      final oldCtrl = _webController;
       oldCtrl?.removeListener(_handleControllerUpdate);
       await oldCtrl?.pause();
       await oldCtrl?.dispose();
@@ -392,7 +414,7 @@ class _MediaPlayerPageState extends State<MediaPlayerPage> {
         uri,
         httpHeaders: widget.httpHeaders,
       );
-      _controller = ctrl;
+      _webController = ctrl;
       ctrl.addListener(_handleControllerUpdate);
       await ctrl.initialize();
       await ctrl.setVolume(_muted ? 0 : 1);
@@ -489,27 +511,16 @@ class _MediaPlayerPageState extends State<MediaPlayerPage> {
       widget.copyLabel ??
       'Media URL copied. It still requires the active session cookie when auth is enabled.';
 
-  bool get _canUsePictureInPicture =>
-      widget.allowPictureInPicture &&
-      !kIsWeb &&
-      (Platform.isAndroid || Platform.isIOS);
-
   Future<void> _enterPictureInPicture() async {
-    if (_enteringPictureInPicture) {
-      return;
-    }
+    if (_enteringPictureInPicture) return;
     setState(() => _enteringPictureInPicture = true);
     try {
-      final entered = _usesNativeIosPlayer
-          ? await _iosController!.enterPictureInPicture()
-          : await BackgroundExecutionBridge.instance.enterPictureInPicture(
-              uri: widget.uri,
-              headers: widget.httpHeaders,
-              position: widget.isLive ? null : await _controller!.position,
-            );
-      if (!mounted) {
-        return;
-      }
+      final entered = await BackgroundExecutionBridge.instance.enterPictureInPicture(
+        uri: widget.uri,
+        headers: widget.httpHeaders,
+        position: widget.isLive ? null : _playerPosition,
+      );
+      if (!mounted) return;
       if (entered) {
         setState(() {
           _pictureInPictureFailure = null;
@@ -521,20 +532,11 @@ class _MediaPlayerPageState extends State<MediaPlayerPage> {
           _pictureInPictureDiagnostics,
         );
       }
-    } on NativeIosPlayerException catch (error) {
-      if (!mounted) {
-        return;
-      }
-      _recordPictureInPictureFailure(error.message, error.details);
     } on BackgroundExecutionBridgeException catch (error) {
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
       showMessage(context, error.message, error: true);
     } finally {
-      if (mounted) {
-        setState(() => _enteringPictureInPicture = false);
-      }
+      if (mounted) setState(() => _enteringPictureInPicture = false);
     }
   }
 
@@ -544,10 +546,10 @@ class _MediaPlayerPageState extends State<MediaPlayerPage> {
     _seekFeedbackTimer?.cancel();
     _accelSub?.cancel();
     _restoreSystemUi();
-    _iosController?.removeListener(_handleControllerUpdate);
-    _controller?.removeListener(_handleControllerUpdate);
-    _controller?.dispose();
-    _iosController?.dispose();
+    _vlcController?.removeListener(_handleControllerUpdate);
+    _webController?.removeListener(_handleControllerUpdate);
+    _webController?.dispose();
+    _vlcController?.dispose();
     super.dispose();
   }
 
@@ -712,8 +714,7 @@ class _MediaPlayerPageState extends State<MediaPlayerPage> {
                         ],
                       ),
                       const SizedBox(height: 12),
-                      if (_usesNativeIosPlayer &&
-                          _canUsePictureInPicture &&
+                      if (_canUsePictureInPicture &&
                           _pictureInPictureFailure != null)
                         Align(
                           alignment: Alignment.centerLeft,
@@ -723,8 +724,7 @@ class _MediaPlayerPageState extends State<MediaPlayerPage> {
                             label: const Text('Show PiP diagnostics'),
                           ),
                         ),
-                      if (_usesNativeIosPlayer &&
-                          _canUsePictureInPicture &&
+                      if (_canUsePictureInPicture &&
                           _pictureInPictureFailure != null)
                         const SizedBox(height: 8),
                       Align(
@@ -1019,13 +1019,15 @@ class _MediaPlayerPageState extends State<MediaPlayerPage> {
             ? const Center(child: CircularProgressIndicator())
             : null;
 
-    if (_usesNativeIosPlayer) {
+    if (_usesVlcPlayer) {
       return Stack(
         children: <Widget>[
           Positioned.fill(
-            child: NativeIosPlayerView(
-              key: ValueKey(_iosPlayerVersion),
-              controller: _iosController!,
+            child: VlcPlayer(
+              key: ValueKey(_vlcPlayerVersion),
+              controller: _vlcController!,
+              aspectRatio: _playerAspectRatio,
+              placeholder: const Center(child: CircularProgressIndicator()),
             ),
           ),
           if (overlay != null) Positioned.fill(child: overlay),
@@ -1033,10 +1035,8 @@ class _MediaPlayerPageState extends State<MediaPlayerPage> {
       );
     }
 
-    if (overlay != null) {
-      return overlay;
-    }
-    return Center(child: VideoPlayer(_controller!));
+    if (overlay != null) return overlay;
+    return Center(child: VideoPlayer(_webController!));
   }
 
   Widget _buildTimeline(
@@ -1044,9 +1044,10 @@ class _MediaPlayerPageState extends State<MediaPlayerPage> {
     Duration current,
     Duration total,
   ) {
-    if (!_usesNativeIosPlayer) {
+    // Use VideoProgressIndicator on web (video_player), Slider on native (VLC).
+    if (!_usesVlcPlayer && _webController != null) {
       return VideoProgressIndicator(
-        _controller!,
+        _webController!,
         allowScrubbing: true,
         padding: const EdgeInsets.symmetric(vertical: 10),
         colors: const VideoProgressColors(
@@ -1082,10 +1083,7 @@ class _MediaPlayerPageState extends State<MediaPlayerPage> {
   Future<void> _showPictureInPictureDiagnosticsDialog() {
     final message =
         _pictureInPictureFailure ?? 'Picture in Picture diagnostics';
-    final mergedReasons = dedupeMessages(<String>[
-      ..._pictureInPictureDiagnostics,
-      ...(_iosController?.diagnostics ?? const <String>[]),
-    ]);
+    final mergedReasons = dedupeMessages(_pictureInPictureDiagnostics);
     return showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
@@ -1124,10 +1122,7 @@ class _MediaPlayerPageState extends State<MediaPlayerPage> {
     String message,
     List<String> reasons,
   ) {
-    final mergedReasons = dedupeMessages(<String>[
-      ...reasons,
-      ...(_iosController?.diagnostics ?? const <String>[]),
-    ]);
+    final mergedReasons = dedupeMessages(reasons);
     setState(() {
       _pictureInPictureFailure = message;
       _pictureInPictureReasons = mergedReasons;
