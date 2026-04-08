@@ -2,15 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 
-<<<<<<< Updated upstream
-||||||| Stash base
-import 'package:ffmpeg_kit_flutter_new_min/ffmpeg_kit.dart';
-import 'package:ffmpeg_kit_flutter_new_min/ffmpeg_session.dart';
-=======
-import 'package:ffmpeg_kit_flutter_new_min/ffmpeg_kit.dart';
-import 'package:ffmpeg_kit_flutter_new_min/ffmpeg_session.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
->>>>>>> Stashed changes
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:photo_manager/photo_manager.dart';
