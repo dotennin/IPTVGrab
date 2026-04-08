@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/services.dart';
 
 /// Drives iOS Live Activities (lock screen + Dynamic Island) for active
@@ -11,7 +12,7 @@ class LiveActivitiesBridge {
 
   static const _channel = MethodChannel('medianest/live-activities');
 
-  bool get isSupported => Platform.isIOS;
+  bool get isSupported => !kIsWeb && Platform.isIOS;
 
   Future<void> startActivity({
     required String taskId,

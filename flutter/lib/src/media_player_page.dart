@@ -2,6 +2,15 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 
+<<<<<<< Updated upstream
+||||||| Stash base
+import 'package:ffmpeg_kit_flutter_new_min/ffmpeg_kit.dart';
+import 'package:ffmpeg_kit_flutter_new_min/ffmpeg_session.dart';
+=======
+import 'package:ffmpeg_kit_flutter_new_min/ffmpeg_kit.dart';
+import 'package:ffmpeg_kit_flutter_new_min/ffmpeg_session.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+>>>>>>> Stashed changes
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:photo_manager/photo_manager.dart';
@@ -107,7 +116,7 @@ class _MediaPlayerPageState extends State<MediaPlayerPage> {
   int _seekFeedback = 0;
   Timer? _seekFeedbackTimer;
 
-  bool get _usesNativeIosPlayer => Platform.isIOS;
+  bool get _usesNativeIosPlayer => !kIsWeb && Platform.isIOS;
 
   bool get _playerInitialized => _usesNativeIosPlayer
       ? (_iosController?.initialized ?? false)
@@ -489,7 +498,9 @@ class _MediaPlayerPageState extends State<MediaPlayerPage> {
       'Media URL copied. It still requires the active session cookie when auth is enabled.';
 
   bool get _canUsePictureInPicture =>
-      widget.allowPictureInPicture && (Platform.isAndroid || Platform.isIOS);
+      widget.allowPictureInPicture &&
+      !kIsWeb &&
+      (Platform.isAndroid || Platform.isIOS);
 
   Future<void> _enterPictureInPicture() async {
     if (_enteringPictureInPicture) {

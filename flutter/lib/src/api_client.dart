@@ -1,5 +1,9 @@
 import 'dart:convert';
-import 'dart:io';
+
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:http/http.dart' as http;
+import 'package:web_socket_channel/io.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'models.dart';
 
@@ -14,7 +18,7 @@ class ApiException implements Exception {
 }
 
 class ApiClient {
-  final HttpClient _httpClient = HttpClient();
+  final http.Client _client = http.Client();
 
   String _baseUrl = '';
   String? _sessionCookie;
@@ -40,7 +44,7 @@ class ApiClient {
     if (!hasSession) {
       return const {};
     }
-    return <String, String>{HttpHeaders.cookieHeader: _sessionCookie!};
+    return <String, String>{'cookie': _sessionCookie!};
   }
 
   Future<bool> fetchAuthStatus() async {
@@ -256,28 +260,30 @@ class ApiClient {
     final uri =
         Uri.parse(normalizeBaseUrl(baseUrl)).resolve('/api/auth/status');
     try {
-      final request =
-          await _httpClient.getUrl(uri).timeout(const Duration(seconds: 2));
-      request.headers.set(HttpHeaders.acceptHeader, 'application/json');
-      if (hasSession) {
-        request.headers.set(HttpHeaders.cookieHeader, _sessionCookie!);
-      }
-      final response =
-          await request.close().timeout(const Duration(seconds: 2));
-      await response.drain<void>();
-      return response.statusCode == HttpStatus.ok;
+      final response = await _client.get(
+        uri,
+        headers: <String, String>{
+          'accept': 'application/json',
+          if (hasSession) 'cookie': _sessionCookie!,
+        },
+      ).timeout(const Duration(seconds: 2));
+      return response.statusCode == 200;
     } on Exception {
       return false;
     }
   }
 
-  Future<WebSocket> connectTaskSocket(String taskId) {
+  WebSocketChannel connectTaskSocket(String taskId) {
     final uri = taskWebSocketUri(taskId);
-    final headers = <String, dynamic>{};
-    if (hasSession) {
-      headers[HttpHeaders.cookieHeader] = _sessionCookie!;
+    // On web, browsers cannot pass custom headers for WebSocket handshakes.
+    // On native, IOWebSocketChannel supports the session cookie header.
+    if (kIsWeb) {
+      return WebSocketChannel.connect(uri);
     }
-    return WebSocket.connect(uri.toString(), headers: headers);
+    return IOWebSocketChannel.connect(
+      uri,
+      headers: hasSession ? <String, dynamic>{'cookie': _sessionCookie!} : null,
+    );
   }
 
   Uri taskWebSocketUri(String taskId) {
@@ -314,21 +320,19 @@ class ApiClient {
   }) async {
     _ensureBaseUrl();
     final uri = _buildUri(path, queryParameters: queryParameters);
-    final request = await _httpClient.openUrl(method, uri);
-    request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+    final headers = <String, String>{
+      'accept': 'application/json',
+      if (body != null) 'content-type': 'application/json',
+      if (hasSession) 'cookie': _sessionCookie!,
+    };
+    final request = http.Request(method, uri)..headers.addAll(headers);
     if (body != null) {
-      request.headers.contentType = ContentType.json;
+      request.body = jsonEncode(body);
     }
-    if (hasSession) {
-      request.headers.set(HttpHeaders.cookieHeader, _sessionCookie!);
-    }
-    if (body != null) {
-      request.write(jsonEncode(body));
-    }
-
-    final response = await request.close();
+    final streamedResponse = await _client.send(request);
+    final response = await http.Response.fromStream(streamedResponse);
     _captureSessionCookie(response);
-    final text = await response.transform(utf8.decoder).join();
+    final text = response.body;
     final payload = text.isEmpty ? null : jsonDecode(text);
     if (response.statusCode >= 400) {
       throw ApiException(_extractMessage(payload) ?? 'Request failed',
@@ -344,20 +348,20 @@ class ApiClient {
   }) async {
     _ensureBaseUrl();
     final uri = _buildUri(path, queryParameters: queryParameters);
-    final request = await _httpClient.openUrl(method, uri);
-    request.headers.set(HttpHeaders.acceptHeader, 'text/plain');
-    if (hasSession) {
-      request.headers.set(HttpHeaders.cookieHeader, _sessionCookie!);
-    }
-
-    final response = await request.close();
+    final headers = <String, String>{
+      'accept': 'text/plain',
+      if (hasSession) 'cookie': _sessionCookie!,
+    };
+    final request = http.Request(method, uri)..headers.addAll(headers);
+    final streamedResponse = await _client.send(request);
+    final response = await http.Response.fromStream(streamedResponse);
     _captureSessionCookie(response);
-    final text = await response.transform(utf8.decoder).join();
     if (response.statusCode >= 400) {
-      throw ApiException(text.isEmpty ? 'Request failed' : text,
+      throw ApiException(
+          response.body.isEmpty ? 'Request failed' : response.body,
           statusCode: response.statusCode);
     }
-    return text;
+    return response.body;
   }
 
   Uri _buildUri(
@@ -376,13 +380,16 @@ class ApiClient {
         : resolved.replace(queryParameters: filteredQuery);
   }
 
-  void _captureSessionCookie(HttpClientResponse response) {
-    final cookies = response.headers[HttpHeaders.setCookieHeader];
-    if (cookies == null) {
+  void _captureSessionCookie(http.Response response) {
+    // The http package may merge multiple Set-Cookie values with ', '.
+    // On web, browsers strip Set-Cookie headers for security — auth via cookie
+    // won't persist across requests in that case.
+    final cookieHeader = response.headers['set-cookie'];
+    if (cookieHeader == null) {
       return;
     }
-    for (final cookie in cookies) {
-      final firstPart = cookie.split(';').first.trim();
+    for (final part in cookieHeader.split(',')) {
+      final firstPart = part.split(';').first.trim();
       if (!firstPart.startsWith('session=')) {
         continue;
       }

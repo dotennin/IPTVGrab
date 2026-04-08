@@ -2,8 +2,10 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/widgets.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'api_client.dart';
 import 'background_execution_bridge.dart';
@@ -34,7 +36,8 @@ class AppController extends ChangeNotifier {
   final ValueNotifier<String?> suggestedUrl = ValueNotifier<String?>(null);
 
   final Map<String, DownloadTask> _tasksById = <String, DownloadTask>{};
-  final Map<String, WebSocket> _taskSockets = <String, WebSocket>{};
+  final Map<String, WebSocketChannel> _taskSockets =
+      <String, WebSocketChannel>{};
   final Set<String> _userRequestedStops = <String>{};
   final Set<String> _autoFinalizeRequested = <String>{};
   final Set<String> _autoFinalizingTasks = <String>{};
@@ -94,6 +97,7 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> bootstrapLocalServer() async {
+    if (kIsWeb) return; // Local FFI server is not available on web.
     try {
       await startLocalServer();
     } on ApiException catch (error) {
@@ -683,9 +687,9 @@ class AppController extends ChangeNotifier {
       return;
     }
     try {
-      final socket = await api.connectTaskSocket(taskId);
+      final socket = api.connectTaskSocket(taskId);
       _taskSockets[taskId] = socket;
-      socket.listen(
+      socket.stream.listen(
         (dynamic message) {
           if (message is! String) {
             return;
@@ -739,7 +743,7 @@ class AppController extends ChangeNotifier {
 
   Future<void> _closeSocket(String taskId) async {
     final socket = _taskSockets.remove(taskId);
-    await socket?.close();
+    await socket?.sink.close();
   }
 
   Future<void> _storeTasks(List<DownloadTask> latest) async {
@@ -826,7 +830,7 @@ class AppController extends ChangeNotifier {
     final sockets = _taskSockets.values.toList();
     _taskSockets.clear();
     for (final socket in sockets) {
-      socket.close();
+      unawaited(socket.sink.close());
     }
   }
 
@@ -958,7 +962,7 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> _recoverLocalServerAfterResume() async {
-    if (_recoveringFromResume || !_shouldKeepLocalServerRunning) {
+    if (kIsWeb || _recoveringFromResume || !_shouldKeepLocalServerRunning) {
       return;
     }
     _recoveringFromResume = true;
