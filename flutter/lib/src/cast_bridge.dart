@@ -49,6 +49,33 @@ class CastBridge {
   /// dismissed.  Pass null to cancel a previously registered callback.
   static void setOnCastPlayerDismissed(VoidCallback? cb) => _onDismissed = cb;
 
+  /// Presents a fullscreen native AVPlayerViewController for the given [url]
+  /// using the platform's built-in player (AVPlayer on iOS, ExoPlayer on
+  /// Android).  Unlike [showCastPicker], the AirPlay/Cast route-picker sheet
+  /// is NOT opened automatically — this is a plain local-playback presentation.
+  Future<void> showNativePlayer({
+    required String url,
+    String title = '',
+    Map<String, String> headers = const {},
+    bool isLive = false,
+  }) async {
+    if (!isCastSupported) return;
+    _activelyCasting = true;
+    _castingUrl = url;
+    try {
+      await _channel.invokeMethod<void>('showNativePlayer', {
+        'url': url,
+        'title': title,
+        'headers': headers,
+        'isLive': isLive,
+      });
+    } catch (_) {
+      _activelyCasting = false;
+      _castingUrl = null;
+      rethrow;
+    }
+  }
+
   /// Shows the platform-native cast picker for [url] and marks the session as
   /// active.  On iOS this presents a fullscreen AVPlayerViewController that
   /// immediately opens the AirPlay route sheet.

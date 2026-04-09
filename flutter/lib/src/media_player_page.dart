@@ -34,11 +34,13 @@ Future<void> openMediaPlayer(
   Future<List<StreamVariant>> Function()? onFetchVariants,
 }) async {
   if (!kIsWeb && !_isFlvUri(uri)) {
-    // Native default: present AVPlayerViewController via CastBridge.
+    // Native default: present AVPlayerViewController directly (no AirPlay
+    // route picker popup). The user can still tap the AirPlay button inside
+    // the native player UI if they want to cast.
     final playUrl = localFilePath != null
         ? 'file://$localFilePath'
         : (copyUrl ?? uri.toString());
-    await CastBridge.instance.showCastPicker(
+    await CastBridge.instance.showNativePlayer(
       url: playUrl,
       title: title,
       headers: httpHeaders,

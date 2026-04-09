@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 
+import 'api_client.dart';
 import 'controller.dart';
 import 'media_player_page.dart';
 import 'models.dart';
 import 'playlists_tab.dart';
 import 'task_helpers.dart';
 import 'theme.dart';
+import 'utils.dart';
 import 'widgets.dart';
 
 /// Full-screen page showing all Channels or Movies with group sections,
@@ -534,13 +536,24 @@ class _ChannelListTile extends StatelessWidget {
         icon: const Icon(Icons.download_for_offline_outlined, size: 20),
         tooltip: 'Grab to library',
         color: appTextMuted,
-        onPressed: () {
-          controller.suggestDownloadUrl(item.channelUrl);
-          onUseChannel();
-        },
+        onPressed: () => _grab(context),
       ),
       onTap: () => _play(context),
     );
+  }
+
+  Future<void> _grab(BuildContext context) async {
+    try {
+      await controller.startDownload(
+        url: item.channelUrl,
+        headers: const {},
+        quality: 'best',
+        concurrency: 8,
+      );
+      if (context.mounted) showMessage(context, 'Recording started for ${item.channelName}.');
+    } on ApiException catch (e) {
+      if (context.mounted) showMessage(context, e.message, error: true);
+    }
   }
 
   void _play(BuildContext context) {
@@ -558,11 +571,6 @@ class _ChannelListTile extends StatelessWidget {
       isLive: true,
       copyUrl: item.channelUrl,
       copyLabel: 'Source URL copied.',
-      onGrabRequested: () {
-        Navigator.of(context).maybePop();
-        controller.suggestDownloadUrl(item.channelUrl);
-        onUseChannel();
-      },
       allowPictureInPicture: true,
       onFetchVariants: () => controller.parseStreamVariants(url: item.channelUrl),
     );
@@ -677,11 +685,6 @@ class _ChannelGridCard extends StatelessWidget {
       isLive: true,
       copyUrl: item.channelUrl,
       copyLabel: 'Source URL copied.',
-      onGrabRequested: () {
-        Navigator.of(context).maybePop();
-        controller.suggestDownloadUrl(item.channelUrl);
-        onUseChannel();
-      },
       allowPictureInPicture: true,
       onFetchVariants: () => controller.parseStreamVariants(url: item.channelUrl),
     );

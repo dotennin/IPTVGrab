@@ -276,13 +276,20 @@ import UIKit
         return
       }
       switch call.method {
+      case "showNativePlayer":
+        let args = call.arguments as? [String: Any] ?? [:]
+        let url = args["url"] as? String ?? ""
+        let title = args["title"] as? String ?? ""
+        let headers = args["headers"] as? [String: String] ?? [:]
+        let isLive = args["isLive"] as? Bool ?? false
+        self.showAirPlaySession(url: url, title: title, headers: headers, isLive: isLive, showPicker: false, result: result)
       case "showCastPicker":
         let args = call.arguments as? [String: Any] ?? [:]
         let url = args["url"] as? String ?? ""
         let title = args["title"] as? String ?? ""
         let headers = args["headers"] as? [String: String] ?? [:]
         let isLive = args["isLive"] as? Bool ?? false
-        self.showAirPlaySession(url: url, title: title, headers: headers, isLive: isLive, result: result)
+        self.showAirPlaySession(url: url, title: title, headers: headers, isLive: isLive, showPicker: true, result: result)
       case "isCasting":
         result(self.airPlayer?.isExternalPlaybackActive ?? false)
       case "switchCastMedia":
@@ -319,6 +326,7 @@ import UIKit
     title: String,
     headers: [String: String],
     isLive: Bool,
+    showPicker: Bool,
     result: @escaping FlutterResult
   ) {
     // Resolve the current active window's root VC via UIWindowScene (works in
@@ -374,13 +382,11 @@ import UIKit
       rootVC.present(playerVC, animated: true) { [weak playerVC] in
         result(nil)
 
-        // Immediately open the system AirPlay route-picker sheet so the user
-        // can select a device without a second tap.  We attach an invisible
-        // AVRoutePickerView to the playerVC's view (now visible) and trigger
-        // its inner button — this is the same UIKit trick as before, but now
-        // the picker appears over an AVPlayer, so route changes actually route
-        // the video.
-        guard let playerVC else { return }
+        // Only open the AirPlay route-picker sheet automatically when this is
+        // a cast session (showPicker = true).  When the player is opened for
+        // direct local playback the picker is not shown automatically; the
+        // user can still reach it via the AirPlay button inside the player UI.
+        guard showPicker, let playerVC else { return }
         let picker = AVRoutePickerView(frame: .zero)
         picker.isHidden = true
         playerVC.view.addSubview(picker)
