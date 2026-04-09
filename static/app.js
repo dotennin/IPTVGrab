@@ -2002,7 +2002,7 @@ function renderChannels(channels) {
   grid.innerHTML = channels
     .map(
       (ch, i) => `
-    <div class="channel-card">
+    <div class="channel-card" id="channel-${ch.id}">
       ${_healthDot(ch.url)}
       <div class="channel-logo-wrap">
         ${
@@ -2146,7 +2146,9 @@ async function disableChannelInAllPlaylists(ch) {
     toast(`Disabled: ${ch.name || ch.url}`, "success");
     // Refresh the channel grid if currently in __all__ view
     const sel = document.getElementById("playlistSelect");
-    if (sel && sel.value === "__all__") await selectPlaylist("__all__");
+    // just remove the channel from the UI
+    document.getElementById(`channel-${channelId}`)?.remove();
+    // if (sel && sel.value === "__all__") await selectPlaylist("__all__");
   } catch (e) {
     toast(e.message, "danger");
   }
