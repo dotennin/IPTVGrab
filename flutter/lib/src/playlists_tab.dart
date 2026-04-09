@@ -476,33 +476,45 @@ class _PlaylistsTabState extends State<PlaylistsTab> {
                                               vertical: 8,
                                             ),
                                           ),
-                                          onPressed: () => openMediaPlayer(
-                                            context,
-                                            title: item.channelName,
-                                            uri: Uri.parse(item.channelUrl),
-                                            httpHeaders: const {},
-                                            isLive: true,
-                                            copyUrl: item.channelUrl,
-                                            copyLabel: 'Source URL copied.',
-                                            onGrabRequested: () {
-                                              Navigator.of(context).maybePop();
-                                              controller.suggestDownloadUrl(
-                                                item.channelUrl,
-                                              );
-                                              widget.onUseChannel();
-                                            },
-                                            allowPictureInPicture: true,
-                                            onFetchVariants: () =>
-                                                controller.parseStreamVariants(
+                                          onPressed: () {
+                                            controller.addToRecentChannels(
+                                              name: item.channelName,
                                               url: item.channelUrl,
-                                            ),
-                                          ),
+                                              logoUrl: item.logoUrl,
+                                              groupName: item.groupName
+                                                      .isNotEmpty
+                                                  ? item.groupName
+                                                  : null,
+                                            );
+                                            openMediaPlayer(
+                                              context,
+                                              title: item.channelName,
+                                              uri: Uri.parse(item.channelUrl),
+                                              httpHeaders: const {},
+                                              isLive: true,
+                                              copyUrl: item.channelUrl,
+                                              copyLabel: 'Source URL copied.',
+                                              onGrabRequested: () {
+                                                Navigator.of(context)
+                                                    .maybePop();
+                                                controller.suggestDownloadUrl(
+                                                  item.channelUrl,
+                                                );
+                                                widget.onUseChannel();
+                                              },
+                                              allowPictureInPicture: true,
+                                              onFetchVariants: () =>
+                                                  controller.parseStreamVariants(
+                                                url: item.channelUrl,
+                                              ),
+                                            );
+                                          },
                                           icon: const Icon(
                                               Icons.play_circle_fill),
                                           label: const Text(''),
                                         ),
                                       ),
-                                      const SizedBox(width: 8),
+                                      const SizedBox(width: 6),
                                       IconButton.filledTonal(
                                         tooltip:
                                             'Open Library with this source URL',
@@ -597,6 +609,7 @@ class PlaylistBrowserItem {
     required this.groupName,
     required this.logoUrl,
     this.sourcePlaylistName,
+    this.tvgType,
   });
 
   factory PlaylistBrowserItem.fromPlaylist(
@@ -611,6 +624,7 @@ class PlaylistBrowserItem {
       groupName: channel.groupName,
       logoUrl: channel.logo,
       sourcePlaylistName: playlist.name,
+      tvgType: channel.tvgType,
     );
   }
 
@@ -625,8 +639,9 @@ class PlaylistBrowserItem {
       channelName: channel.name,
       channelUrl: channel.url,
       groupName: group.name,
-      logoUrl: channel.tvgLogo,
+      logoUrl: channel.tvgLogo.isEmpty ? null : channel.tvgLogo,
       sourcePlaylistName: channel.sourcePlaylistName,
+      tvgType: channel.tvgType,
     );
   }
 
@@ -637,4 +652,26 @@ class PlaylistBrowserItem {
   final String groupName;
   final String? logoUrl;
   final String? sourcePlaylistName;
+  final String? tvgType;
+
+  /// Returns true if this item is VOD/movie/series content (not a live channel).
+  bool get isVod {
+    // 1. Explicit tvg-type from M3U8 attributes.
+    final t = tvgType?.toLowerCase();
+    if (t != null && t.isNotEmpty && t != 'live') {
+      return true;
+    }
+    // 2. URL file extension heuristic (VOD content typically has a file extension).
+    final path = channelUrl.split('?').first.toLowerCase();
+    return path.endsWith('.mp4') ||
+        path.endsWith('.mkv') ||
+        path.endsWith('.avi') ||
+        path.endsWith('.mov') ||
+        path.endsWith('.wmv') ||
+        path.endsWith('.flv') ||
+        path.endsWith('.webm') ||
+        path.endsWith('.m4v') ||
+        path.endsWith('.mpg') ||
+        path.endsWith('.mpeg');
+  }
 }

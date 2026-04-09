@@ -4,7 +4,8 @@ import 'package:flutter/material.dart';
 
 import 'controller.dart';
 import 'download_tab.dart';
-import 'playlists_tab.dart';
+import 'library_tab.dart';
+import 'settings_tab.dart';
 import 'tasks_tab.dart';
 import 'theme.dart';
 
@@ -50,41 +51,32 @@ class _M3u8FlutterClientAppState extends State<M3u8FlutterClientApp>
         animation: _controller,
         builder: (context, _) {
           return Scaffold(
-            appBar: AppBar(
-              title: const Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Text('Media Nest',
-                      style:
-                          TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                  Text(
-                    'Personal media archive',
-                    style: TextStyle(fontSize: 12, color: appTextMuted),
-                  ),
-                ],
-              ),
-              actions: <Widget>[],
-            ),
             body: IndexedStack(
               index: _index,
               children: <Widget>[
-                PlaylistsTab(
+                // 0 – Library
+                LibraryTab(
                   controller: _controller,
-                  onUseChannel: () => setState(() => _index = 2),
+                  onUseChannel: () => setState(() => _index = 1),
                 ),
+                // 1 – Activity
                 TasksTab(controller: _controller),
+                // 2 – Grab
                 DownloadTab(
                   controller: _controller,
                   onOpenTasks: () => setState(() => _index = 1),
                 ),
+                // 3 – Settings
+                SettingsTab(controller: _controller),
               ],
             ),
             bottomNavigationBar: NavigationBar(
               selectedIndex: _index,
               destinations: const <NavigationDestination>[
                 NavigationDestination(
-                  icon: Icon(Icons.playlist_play),
-                  label: 'Sources',
+                  icon: Icon(Icons.video_library_rounded),
+                  selectedIcon: Icon(Icons.video_library_rounded),
+                  label: 'Library',
                 ),
                 NavigationDestination(
                   icon: Icon(Icons.task_alt),
@@ -92,7 +84,12 @@ class _M3u8FlutterClientAppState extends State<M3u8FlutterClientApp>
                 ),
                 NavigationDestination(
                   icon: Icon(Icons.download),
-                  label: 'Library',
+                  label: 'Grab',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.settings_rounded),
+                  selectedIcon: Icon(Icons.settings_rounded),
+                  label: 'Settings',
                 ),
               ],
               onDestinationSelected: (index) => setState(() => _index = index),

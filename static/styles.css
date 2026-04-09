@@ -525,7 +525,8 @@ textarea.form-control {
 }
 
 /* ── Channel grid (IPTV Playlists) ──────────────────────────────────────── */
-#channelGrid {
+#channelGrid,
+.channel-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
 }
@@ -745,6 +746,48 @@ textarea.form-control {
   background: rgba(63, 185, 80, 0.18);
   border-color: rgba(63, 185, 80, 0.5);
 }
+
+/* Compact favorite toggle button on channel cards */
+.ch-fav-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  flex-shrink: 0;
+  color: var(--muted);
+  transition: color 0.15s, background 0.15s;
+}
+
+.ch-fav-btn:hover,
+.ch-fav-btn.active {
+  color: #f59e0b;
+}
+
+.ch-fav-btn.active {
+  background: rgba(245, 158, 11, 0.1);
+  border-color: rgba(245, 158, 11, 0.25);
+}
+
+/* ── Favorites section ───────────────────────────────────────────────────── */
+#favoritesSection {
+  background-color: var(--bg);
+}
+
+.favorites-section-header {
+  display: flex;
+  align-items: center;
+  padding: 14px 16px 10px;
+  font-size: 0.85rem;
+  color: var(--text);
+}
+
+
 
 /* ── Health status dots ──────────────────────────────────────────────────── */
 .health-dot {
@@ -1241,14 +1284,16 @@ textarea.form-control {
 
 /* ── Tablet channel layout (641-900px): 2-col grid ──────────────────────── */
 @media (min-width: 641px) and (max-width: 900px) {
-  #channelGrid {
+  #channelGrid,
+  .channel-grid {
     grid-template-columns: repeat(2, 1fr);
   }
 }
 
 /* ── Mobile channel layout (≤640px): compact grid ──────────────────────── */
 @media (max-width: 640px) {
-  #channelGrid {
+  #channelGrid,
+  .channel-grid {
     grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
   }
 }

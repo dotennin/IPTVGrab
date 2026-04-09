@@ -24,7 +24,88 @@ let currentRequest = { url: "", headers: {} };
 let currentStreamInfo = null;
 const taskSockets = {};   // taskId → { ws: WebSocket, stop: () => void }
 
-// ── Health check state ────────────────────────────────────────────────────────
+// ── Recents ───────────────────────────────────────────────────────────────────
+const RECENT_KEY = "mn_recent_channels";
+const MAX_RECENT = 20;
+
+function _loadRecents() {
+  try { return JSON.parse(localStorage.getItem(RECENT_KEY) || "[]"); } catch { return []; }
+}
+
+function _saveRecents(list) {
+  try { localStorage.setItem(RECENT_KEY, JSON.stringify(list)); } catch { /* ignore */ }
+}
+
+function addToRecents(ch) {
+  const list = _loadRecents().filter((r) => r.url !== ch.url);
+  list.unshift({ name: ch.name, url: ch.url, tvg_logo: ch.tvg_logo || "", group: ch.group || "", watched_at: Date.now() });
+  if (list.length > MAX_RECENT) list.length = MAX_RECENT;
+  _saveRecents(list);
+}
+
+function _recentChannelCard(ch) {
+  return `
+    <div class="channel-card" id="rechan-${encodeURIComponent(ch.url).slice(0, 32)}">
+      ${_healthDot(ch.url)}
+      <div class="channel-logo-wrap">
+        ${ch.tvg_logo
+          ? `<img src="${esc(ch.tvg_logo)}" class="channel-logo" alt=""
+               onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" />
+             <div class="channel-logo-fallback" style="display:none"><i class="fas fa-tv"></i></div>`
+          : `<div class="channel-logo-fallback"><i class="fas fa-tv"></i></div>`}
+      </div>
+      <div class="channel-name" title="${esc(ch.name)}">${esc(ch.name || ch.url)}</div>
+      ${ch.group ? `<div class="channel-group">${esc(ch.group)}</div>` : ""}
+      <div class="channel-actions">
+        <button class="ch-action-btn ch-action-btn-dl" title="Download" data-re-dl-url="${esc(ch.url)}" data-re-ch='${JSON.stringify({name:ch.name,url:ch.url,tvg_logo:ch.tvg_logo||"",group:ch.group||""})}'>
+          <i class="fas fa-download"></i>
+        </button>
+        <button class="ch-action-btn ch-action-btn-watch" title="Watch" data-re-watch-url="${esc(ch.url)}" data-re-ch='${JSON.stringify({name:ch.name,url:ch.url,tvg_logo:ch.tvg_logo||"",group:ch.group||""})}'>
+          <i class="fas fa-play"></i>
+        </button>
+      </div>
+    </div>`;
+}
+
+function _bindRecentGridEvents(container) {
+  container.querySelectorAll("[data-re-dl-url]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      try { downloadChannel(JSON.parse(btn.dataset.reCh), btn); } catch { /* ignore */ }
+    });
+  });
+  container.querySelectorAll("[data-re-watch-url]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      try {
+        const ch = JSON.parse(btn.dataset.reCh);
+        addToRecents(ch);
+        watchChannel(ch);
+      } catch { /* ignore */ }
+    });
+  });
+}
+
+function renderRecentChannels() {
+  const recents = _loadRecents();
+  const grid = document.getElementById("recentChannelGrid");
+  const empty = document.getElementById("recentEmptyState");
+  const badge = document.getElementById("recentCountBadge");
+  if (badge) badge.textContent = recents.length;
+  if (!recents.length) {
+    grid.innerHTML = "";
+    empty && empty.classList.remove("d-none");
+    return;
+  }
+  empty && empty.classList.add("d-none");
+  grid.innerHTML = recents.map((ch) => _recentChannelCard(ch)).join("");
+  _bindRecentGridEvents(grid);
+}
+
+document.getElementById("clearRecentBtn").addEventListener("click", () => {
+  _saveRecents([]);
+  renderRecentChannels();
+});
+
+
 let healthCache = {};  // url -> {status: "ok"|"dead", checked_at}
 let _healthPollTimer = null;
 let healthOnlyFilter = true;  // show only "ok" channels when true
@@ -253,6 +334,7 @@ function hidePanel(panelId) {
 // Tab display logic
 function showDownloadsTab() {
   hidePanel("mainPanels");
+  hidePanel("favoritesSection");
   showPanel("downloadsSection");
   setActiveTab("downloads-tab");
 }
@@ -260,12 +342,27 @@ function showDownloadsTab() {
 function hideDownloadsTab() {
   showPanel("mainPanels");
   hidePanel("downloadsSection");
+  hidePanel("favoritesSection");
   document.getElementById("downloads-tab").classList.remove("tab-active", "active");
+}
+
+function showFavoritesTab() {
+  hidePanel("mainPanels");
+  hidePanel("downloadsSection");
+  showPanel("favoritesSection");
+  setActiveTab("favorites-tab");
+  renderRecentChannels();
+}
+
+function hideFavoritesTab() {
+  hidePanel("favoritesSection");
+  document.getElementById("favorites-tab").classList.remove("tab-active", "active");
 }
 
 // UI toggling between playlist and URL/cURL
 function toggleUI(isPlaylist) {
   hideDownloadsTab();
+  hideFavoritesTab();
 
   const controls = [
     { id: "outputSettingsRow", playlistHide: true },
@@ -284,6 +381,8 @@ function toggleUI(isPlaylist) {
 }
 
 // Bind tab events
+document.getElementById("favorites-tab").addEventListener("click", showFavoritesTab);
+
 document.getElementById("playlist-tab").addEventListener("click", () => {
   toggleUI(true);
   setActiveTab("playlist-tab");
@@ -2039,6 +2138,7 @@ function renderChannels(channels) {
   grid.querySelectorAll(".channel-watch-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
       const idx = parseInt(btn.dataset.chIdx, 10);
+      addToRecents(channels[idx]);
       watchChannel(channels[idx]);
     });
   });
@@ -2097,6 +2197,7 @@ document.getElementById("ctxWatchChannel").addEventListener("click", (e) => {
   e.stopPropagation();
   const ch = _ctxChannel;
   if (!ch) return;
+  addToRecents(ch);
   watchChannel(ch);
 });
 

@@ -67,6 +67,14 @@ class AppController extends ChangeNotifier {
   MergedPlaylistConfig? _mergedPlaylistConfig;
   HealthCheckSnapshot? _healthSnapshot;
   int? _preferredLocalServerPort;
+  List<RecentChannel> _recentChannels = const [];
+  static const int _maxRecentChannels = 20;
+
+  // Persisted UI prefs for channel/movie browser pages.
+  bool _channelBrowserList = true; // true=list, false=grid
+  bool _channelBrowserShowAll = false;
+  bool _movieBrowserList = true;
+  bool _movieBrowserShowAll = false;
 
   bool get isBusy => _isBusy;
   bool get localServerRunning => _localServerRunning;
@@ -89,6 +97,11 @@ class AppController extends ChangeNotifier {
   bool isAutoFinalizingTask(String taskId) =>
       _autoFinalizingTasks.contains(taskId);
   bool get hasActiveTasks => _tasksById.values.any((task) => !task.isTerminal);
+  List<RecentChannel> get recentChannels => _recentChannels;
+  bool get channelBrowserList => _channelBrowserList;
+  bool get channelBrowserShowAll => _channelBrowserShowAll;
+  bool get movieBrowserList => _movieBrowserList;
+  bool get movieBrowserShowAll => _movieBrowserShowAll;
 
   List<DownloadTask> get tasks {
     final values = _tasksById.values.toList();
@@ -97,6 +110,8 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> bootstrapLocalServer() async {
+    unawaited(_loadRecentChannels());
+    unawaited(_loadUiPrefs());
     if (kIsWeb) return; // Local FFI server is not available on web.
     try {
       await startLocalServer();
@@ -841,6 +856,107 @@ class AppController extends ChangeNotifier {
     }
     await downloadsDir.create(recursive: true);
     return downloadsDir.path;
+  }
+
+  Future<void> _loadRecentChannels() async {
+    try {
+      final dir = await _ensureDownloadsDir();
+      final file = File('$dir/recent_channels.json');
+      if (!await file.exists()) return;
+      final decoded = jsonDecode(await file.readAsString());
+      if (decoded is List) {
+        _recentChannels = decoded
+            .whereType<Map>()
+            .map((item) =>
+                RecentChannel.fromJson(item.cast<String, dynamic>()))
+            .toList();
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _saveRecentChannels() async {
+    try {
+      final dir = await _ensureDownloadsDir();
+      final file = File('$dir/recent_channels.json');
+      await file.writeAsString(
+          jsonEncode(_recentChannels.map((r) => r.toJson()).toList()));
+    } catch (_) {}
+  }
+
+  Future<void> addToRecentChannels({
+    required String name,
+    required String url,
+    String? logoUrl,
+    String? groupName,
+  }) async {
+    final updated = List<RecentChannel>.from(
+        _recentChannels.where((r) => r.url != url));
+    updated.insert(
+      0,
+      RecentChannel(
+        name: name,
+        url: url,
+        logoUrl: logoUrl,
+        groupName: groupName,
+        watchedAt: DateTime.now().millisecondsSinceEpoch / 1000,
+      ),
+    );
+    if (updated.length > _maxRecentChannels) {
+      updated.removeRange(_maxRecentChannels, updated.length);
+    }
+    _recentChannels = updated;
+    notifyListeners();
+    await _saveRecentChannels();
+  }
+
+  Future<void> clearRecentChannels() async {
+    _recentChannels = const [];
+    notifyListeners();
+    await _saveRecentChannels();
+  }
+
+  Future<void> setChannelBrowserPrefs({
+    bool? isList,
+    bool? showAll,
+    required bool isMovies,
+  }) async {
+    if (isMovies) {
+      if (isList != null) _movieBrowserList = isList;
+      if (showAll != null) _movieBrowserShowAll = showAll;
+    } else {
+      if (isList != null) _channelBrowserList = isList;
+      if (showAll != null) _channelBrowserShowAll = showAll;
+    }
+    notifyListeners();
+    await _saveUiPrefs();
+  }
+
+  Future<void> _loadUiPrefs() async {
+    try {
+      final dir = await _ensureDownloadsDir();
+      final file = File('$dir/ui_prefs.json');
+      if (!await file.exists()) return;
+      final decoded = jsonDecode(await file.readAsString());
+      if (decoded is Map) {
+        _channelBrowserList = decoded['channel_list'] as bool? ?? true;
+        _channelBrowserShowAll = decoded['channel_show_all'] as bool? ?? false;
+        _movieBrowserList = decoded['movie_list'] as bool? ?? true;
+        _movieBrowserShowAll = decoded['movie_show_all'] as bool? ?? false;
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _saveUiPrefs() async {
+    try {
+      final dir = await _ensureDownloadsDir();
+      final file = File('$dir/ui_prefs.json');
+      await file.writeAsString(jsonEncode({
+        'channel_list': _channelBrowserList,
+        'channel_show_all': _channelBrowserShowAll,
+        'movie_list': _movieBrowserList,
+        'movie_show_all': _movieBrowserShowAll,
+      }));
+    } catch (_) {}
   }
 
   String _startNativeLocalServer({

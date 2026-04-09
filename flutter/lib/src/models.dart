@@ -79,12 +79,14 @@ class PlaylistChannel {
     required this.url,
     this.group,
     this.logo,
+    this.tvgType,
   });
 
   final String name;
   final String url;
   final String? group;
   final String? logo;
+  final String? tvgType;
 
   String get groupName =>
       group != null && group!.trim().isNotEmpty ? group!.trim() : 'Ungrouped';
@@ -95,6 +97,7 @@ class PlaylistChannel {
       url: _asString(json['url']),
       group: _nullableString(json['group']),
       logo: _nullableString(json['logo']) ?? _nullableString(json['tvg_logo']),
+      tvgType: _nullableString(json['tvg_type']),
     );
   }
 }
@@ -312,6 +315,7 @@ class MergedChannel {
     required this.custom,
     required this.group,
     required this.tvgLogo,
+    this.tvgType,
     this.sourcePlaylistId,
     this.sourcePlaylistName,
   });
@@ -323,6 +327,7 @@ class MergedChannel {
   final bool custom;
   final String group;
   final String tvgLogo;
+  final String? tvgType;
   final String? sourcePlaylistId;
   final String? sourcePlaylistName;
 
@@ -337,6 +342,7 @@ class MergedChannel {
       tvgLogo: _nullableString(json['tvg_logo']) ??
           _nullableString(json['logo']) ??
           '',
+      tvgType: _nullableString(json['tvg_type']),
       sourcePlaylistId: _nullableString(json['source_playlist_id']),
       sourcePlaylistName: _nullableString(json['source_playlist_name']),
     );
@@ -350,6 +356,7 @@ class MergedChannel {
         'custom': custom,
         'group': group,
         'tvg_logo': tvgLogo,
+        if (tvgType != null) 'tvg_type': tvgType,
         'source_playlist_id': sourcePlaylistId,
         'source_playlist_name': sourcePlaylistName,
       };
@@ -362,6 +369,7 @@ class MergedChannel {
     bool? custom,
     String? group,
     String? tvgLogo,
+    String? tvgType,
     String? sourcePlaylistId,
     String? sourcePlaylistName,
   }) {
@@ -373,12 +381,47 @@ class MergedChannel {
       custom: custom ?? this.custom,
       group: group ?? this.group,
       tvgLogo: tvgLogo ?? this.tvgLogo,
+      tvgType: tvgType ?? this.tvgType,
       sourcePlaylistId: sourcePlaylistId ?? this.sourcePlaylistId,
       sourcePlaylistName: sourcePlaylistName ?? this.sourcePlaylistName,
     );
   }
 
   MergedChannel copy() => copyWith();
+}
+
+class RecentChannel {
+  RecentChannel({
+    required this.name,
+    required this.url,
+    required this.watchedAt,
+    this.logoUrl,
+    this.groupName,
+  });
+
+  final String name;
+  final String url;
+  final double watchedAt;
+  final String? logoUrl;
+  final String? groupName;
+
+  factory RecentChannel.fromJson(Map<String, dynamic> json) {
+    return RecentChannel(
+      name: _asString(json['name']),
+      url: _asString(json['url']),
+      watchedAt: _asDouble(json['watched_at']),
+      logoUrl: _nullableString(json['logo_url']),
+      groupName: _nullableString(json['group_name']),
+    );
+  }
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        'name': name,
+        'url': url,
+        'watched_at': watchedAt,
+        'logo_url': logoUrl,
+        'group_name': groupName,
+      };
 }
 
 class DownloadTask {

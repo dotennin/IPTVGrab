@@ -176,6 +176,8 @@ struct Channel {
     url: String,
     group: Option<String>,
     logo: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    tvg_type: Option<String>,
 }
 
 fn bool_true() -> bool {
@@ -219,6 +221,8 @@ struct MergedChannel {
     group: String,
     #[serde(default)]
     tvg_logo: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    tvg_type: Option<String>,
     #[serde(default)]
     source_playlist_id: Option<String>,
     #[serde(default)]
@@ -2447,6 +2451,7 @@ async fn list_channels(State(state): State<AppState>) -> impl IntoResponse {
                     "url": ch.url,
                     "group": ch.group,
                     "logo": ch.logo,
+                    "tvg_type": ch.tvg_type,
                     "playlist_id": p.id,
                     "playlist_name": p.name,
                 })
@@ -2540,6 +2545,7 @@ fn build_merged_view(
                 custom: false,
                 group: gname.clone(),
                 tvg_logo: ch.logo.clone().unwrap_or_default(),
+                tvg_type: ch.tvg_type.clone(),
                 source_playlist_id: Some(pl.id.clone()),
                 source_playlist_name: Some(pl.name.clone()),
                 origin_id: None,
@@ -2736,6 +2742,7 @@ async fn add_custom_channel(
         custom: true,
         group: group.name.clone(),
         tvg_logo: body.tvg_logo,
+        tvg_type: None,
         source_playlist_id: None,
         source_playlist_name: None,
         origin_id: None,
@@ -3416,6 +3423,7 @@ fn parse_m3u_text(text: &str) -> Vec<Channel> {
     let mut name = None;
     let mut group = None;
     let mut logo = None;
+    let mut tvg_type = None;
     for line in text.lines() {
         let line = line.trim();
         if line.starts_with("#EXTINF:") {
@@ -3423,6 +3431,7 @@ fn parse_m3u_text(text: &str) -> Vec<Channel> {
                 .or_else(|| line.split(',').nth(1).map(|s| s.trim().to_string()));
             group = extract_attr(line, "group-title");
             logo = extract_attr(line, "tvg-logo");
+            tvg_type = extract_attr(line, "tvg-type");
         } else if !line.is_empty() && !line.starts_with('#') {
             if let Some(n) = name.take() {
                 channels.push(Channel {
@@ -3430,6 +3439,7 @@ fn parse_m3u_text(text: &str) -> Vec<Channel> {
                     url: line.to_string(),
                     group: group.take(),
                     logo: logo.take(),
+                    tvg_type: tvg_type.take(),
                 });
             }
         }

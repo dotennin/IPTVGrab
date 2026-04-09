@@ -35,7 +35,7 @@
   <meta name="theme-color" content="#0b1220" />
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet" />
   <link href="/compat.css" rel="stylesheet" />
-  <link href="/styles.css?v=38" rel="stylesheet" />
+  <link href="/styles.css?v=40" rel="stylesheet" />
 </head>
 <body class="bg-gh-bg text-gh-text h-screen flex flex-col overflow-hidden">
 
@@ -56,6 +56,9 @@
 
   <!-- Tab bar — always visible, sits between navbar and content -->
   <div class="tab-nav bg-gh-surface px-3 shrink-0" id="mainTabNav">
+    <button class="tab-btn" id="favorites-tab" type="button">
+      <i class="fas fa-history mr-1"></i>Recents
+    </button>
     <button class="tab-btn tab-active" id="playlist-tab" data-bs-toggle="tab" data-bs-target="#playlistPane" type="button">
       <i class="fas fa-tv mr-1"></i>Playlist
     </button>
@@ -210,6 +213,28 @@
         </div>
       </div>
 
+    </div>
+  </div>
+
+  <!-- Recents section — replaces mainPanels when Recents tab is active -->
+  <div class="flex-1 flex flex-col overflow-hidden d-none" id="favoritesSection">
+    <div class="flex-1 overflow-y-auto bg-gh-surface" id="favoritesBody">
+      <!-- Recently watched -->
+      <div id="recentChannelsWrap">
+        <div class="favorites-section-header">
+          <i class="fas fa-history text-gh-muted mr-2"></i>
+          <span class="font-semibold">Recently Watched</span>
+          <span class="badge bg-secondary ms-2" id="recentCountBadge">0</span>
+          <button class="btn btn-sm text-gh-muted ms-auto" id="clearRecentBtn" title="Clear history" style="padding:2px 6px;font-size:11px">
+            <i class="fas fa-trash-alt mr-1"></i>Clear
+          </button>
+        </div>
+        <div id="recentChannelGrid" class="channel-grid p-3 pt-1"></div>
+        <div class="text-center text-gh-muted py-10 d-none" id="recentEmptyState">
+          <i class="fas fa-history fa-2x mb-3 d-block opacity-20"></i>
+          <p class="mb-0 text-sm">No recently watched channels</p>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -666,6 +691,6 @@
   <script src="https://cdn.jsdelivr.net/npm/mpegts.js@1/dist/mpegts.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.6/Sortable.min.js"></script>
   <script src="/bootstrap-shim.js"></script>
-  <script src="/app.js?v=46"></script>
+  <script src="/app.js?v=48"></script>
 </body>
 </html>
