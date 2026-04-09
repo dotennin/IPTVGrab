@@ -302,11 +302,6 @@ class ApiClient {
   Uri downloadUri(String filename) =>
       _buildUri('/downloads/${Uri.encodeComponent(filename)}');
 
-  Uri watchProxyUri(String streamUrl) => _buildUri(
-        '/api/watch/proxy',
-        queryParameters: {'url': streamUrl},
-      );
-
   Uri mergedExportUri({String? token}) => _buildUri(
         '/api/all-playlists/export.m3u',
         queryParameters: token != null ? {'token': token} : null,

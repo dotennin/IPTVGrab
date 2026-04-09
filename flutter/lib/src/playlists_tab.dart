@@ -479,11 +479,8 @@ class _PlaylistsTabState extends State<PlaylistsTab> {
                                           onPressed: () => openMediaPlayer(
                                             context,
                                             title: item.channelName,
-                                            uri: controller.watchProxyUri(
-                                              item.channelUrl,
-                                            ),
-                                            httpHeaders:
-                                                controller.mediaRequestHeaders,
+                                            uri: Uri.parse(item.channelUrl),
+                                            httpHeaders: const {},
                                             isLive: true,
                                             copyUrl: item.channelUrl,
                                             copyLabel: 'Source URL copied.',
@@ -498,8 +495,6 @@ class _PlaylistsTabState extends State<PlaylistsTab> {
                                             onFetchVariants: () =>
                                                 controller.parseStreamVariants(
                                               url: item.channelUrl,
-                                              headers: controller
-                                                  .mediaRequestHeaders,
                                             ),
                                           ),
                                           icon: const Icon(

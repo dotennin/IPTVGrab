@@ -533,8 +533,6 @@ class AppController extends ChangeNotifier {
 
   Uri downloadUri(String filename) => api.downloadUri(filename);
 
-  Uri watchProxyUri(String streamUrl) => api.watchProxyUri(streamUrl);
-
   Future<Uri> mergedExportUri() async {
     final token = await api.getExportToken();
     return api.mergedExportUri(token: token);
