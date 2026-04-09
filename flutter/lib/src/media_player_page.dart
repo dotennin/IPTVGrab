@@ -191,10 +191,20 @@ class _MediaPlayerPageState extends State<MediaPlayerPage> {
     super.initState();
     _castingActive = CastBridge.isActivelyCasting;
     if (_castingActive) {
-      // A cast session is already running — skip VLC and switch the cast
-      // content to this channel after the first frame.
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        unawaited(_switchCastToThisChannel());
+      // A cast session is already running — switch content if the URL changed,
+      // then immediately present the native AVPlayerViewController so the user
+      // gets full seek / subtitle controls.  When they dismiss it we pop this
+      // page so they land back on sources.
+      _setupCastPlayerDismiss();
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        await _switchCastToThisChannel();
+        if (!mounted) return;
+        try {
+          await CastBridge.instance.showCastPlayerVC();
+        } catch (e) {
+          if (!mounted) return;
+          showMessage(context, 'Could not open cast player: $e', error: true);
+        }
       });
     } else if (_usesVlcPlayer) {
       _vlcController = VlcPlayerController.network(
@@ -539,6 +549,15 @@ class _MediaPlayerPageState extends State<MediaPlayerPage> {
       widget.copyLabel ??
       'Media URL copied. It still requires the active session cookie when auth is enabled.';
 
+  /// Registers a one-shot dismiss callback that pops this page when the native
+  /// AVPlayerViewController (cast player) is closed by the user.  The callback
+  /// is cleared automatically after it fires or when [dispose] is called.
+  void _setupCastPlayerDismiss() {
+    CastBridge.setOnCastPlayerDismissed(() {
+      if (mounted) Navigator.of(context).pop();
+    });
+  }
+
   Future<void> _triggerCast() async {
     if (_castingActive) {
       // Already casting — show options to switch device or stop.
@@ -678,6 +697,7 @@ class _MediaPlayerPageState extends State<MediaPlayerPage> {
     _seekFeedbackTimer?.cancel();
     _accelSub?.cancel();
     _restoreSystemUi();
+    CastBridge.setOnCastPlayerDismissed(null);
     _vlcController?.removeListener(_handleControllerUpdate);
     _webController?.removeListener(_handleControllerUpdate);
     _webController?.dispose();

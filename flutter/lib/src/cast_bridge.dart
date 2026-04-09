@@ -12,7 +12,16 @@ class CastBridge {
 
   static CastBridge? _instance;
   static CastBridge get instance => _instance ??= CastBridge._();
-  CastBridge._();
+  CastBridge._() {
+    // Receive events pushed by native (e.g. AVPlayerVC dismissed by user).
+    _channel.setMethodCallHandler((call) async {
+      if (call.method == 'onCastPlayerDismissed') {
+        final cb = _onDismissed;
+        _onDismissed = null;
+        cb?.call();
+      }
+    });
+  }
 
   /// Whether the current platform supports casting at all.
   bool get isCastSupported => !kIsWeb && (Platform.isIOS || Platform.isAndroid);
@@ -30,6 +39,15 @@ class CastBridge {
 
   /// The URL currently being cast, or null when no session is active.
   static String? get castingUrl => _castingUrl;
+
+  /// Called when the user dismisses the native AVPlayerViewController that was
+  /// presented via [showCastPlayerVC].  Set once per navigation; cleared after
+  /// it fires or when the page is disposed.
+  static VoidCallback? _onDismissed;
+
+  /// Registers a one-shot callback invoked when the native cast player VC is
+  /// dismissed.  Pass null to cancel a previously registered callback.
+  static void setOnCastPlayerDismissed(VoidCallback? cb) => _onDismissed = cb;
 
   /// Shows the platform-native cast picker for [url] and marks the session as
   /// active.  On iOS this presents a fullscreen AVPlayerViewController that
@@ -91,5 +109,13 @@ class CastBridge {
   Future<void> showRoutePicker() async {
     if (!isCastSupported) return;
     await _channel.invokeMethod<void>('showRoutePicker');
+  }
+
+  /// Presents a fullscreen native AVPlayerViewController backed by the
+  /// existing cast [AVPlayer].  The user gets full seek / subtitle controls.
+  /// When they tap "Done" the native side fires [onCastPlayerDismissed].
+  Future<void> showCastPlayerVC() async {
+    if (!isCastSupported) return;
+    await _channel.invokeMethod<void>('showCastPlayerVC');
   }
 }

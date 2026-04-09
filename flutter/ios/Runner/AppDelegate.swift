@@ -19,7 +19,7 @@ import UIKit
   /// Retains the native AVPlayerViewController so it isn't immediately released
   /// when showAirPlaySession returns.  May be nil once the user dismisses it
   /// while keeping the cast running in the background.
-  private var airPlayPlayerVC: AVPlayerViewController?
+  private var airPlayPlayerVC: CastPlayerViewController?
   private var nativeInlinePlayerRegistered = false
   // Stored as Any? so we can guard availability at runtime without the
   // "stored property cannot be marked @available" compiler error.
@@ -294,6 +294,8 @@ import UIKit
         self.stopAirPlaySession(result: result)
       case "showRoutePicker":
         self.showAirPlayRoutePicker(result: result)
+      case "showCastPlayerVC":
+        self.showCastPlayerVC(result: result)
       default:
         result(FlutterMethodNotImplemented)
       }
@@ -362,7 +364,7 @@ import UIKit
       // even after the user dismisses the native player and returns to Flutter.
       self.airPlayer = player
 
-      let playerVC = AVPlayerViewController()
+      let playerVC = CastPlayerViewController()
       playerVC.player = player
       playerVC.modalPresentationStyle = .fullScreen
       self.airPlayPlayerVC = playerVC
@@ -470,7 +472,46 @@ import UIKit
     }
   }
 
-  // where it's embedded in a navigation or presentation container).
+  /// Presents the existing AVPlayer (already casting to AirPlay) inside a new
+  /// fullscreen AVPlayerViewController so the user can seek, change subtitles,
+  /// and control playback using native controls.  Unlike showAirPlaySession,
+  /// this does NOT trigger the route picker — the AirPlay route is already
+  /// active.  When the user taps "Done" / dismisses the VC, the native side
+  /// sends `onCastPlayerDismissed` back to Flutter so the page can pop itself.
+  private func showCastPlayerVC(result: @escaping FlutterResult) {
+    guard let player = airPlayer else {
+      result(FlutterError(code: "not_casting", message: "No active cast session", details: nil))
+      return
+    }
+    let scene = UIApplication.shared.connectedScenes
+      .compactMap { $0 as? UIWindowScene }
+      .first { $0.activationState == .foregroundActive }
+      ?? UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+    let keyWindow =
+      scene?.windows.first(where: { $0.isKeyWindow }) ?? scene?.windows.first
+    guard let rootVC = keyWindow?.rootViewController else {
+      result(FlutterError(code: "no_vc", message: "No active view controller found", details: nil))
+      return
+    }
+    DispatchQueue.main.async { [weak self] in
+      guard let self else { return }
+      // Re-use existing VC if it is still presented.
+      if let existing = self.airPlayPlayerVC, existing.presentingViewController != nil {
+        result(nil)
+        return
+      }
+      let playerVC = CastPlayerViewController()
+      playerVC.player = player
+      playerVC.modalPresentationStyle = .fullScreen
+      playerVC.onDismiss = { [weak self] in
+        self?.airPlayChannel?.invokeMethod("onCastPlayerDismissed", arguments: nil)
+      }
+      self.airPlayPlayerVC = playerVC
+      rootVC.present(playerVC, animated: true) {
+        result(nil)
+      }
+    }
+  }
   private static func findFlutterVC(in vc: UIViewController) -> FlutterViewController? {
     if let fvc = vc as? FlutterViewController { return fvc }
     for child in vc.children {
@@ -490,6 +531,20 @@ import UIKit
       NSLog("[BGTask] Scheduled download-continuation processing task")
     } catch {
       NSLog("[BGTask] Failed to schedule: \(error)")
+    }
+  }
+}
+
+// AVPlayerViewController subclass that notifies via a closure when it is
+// dismissed by the user (e.g. tapping "Done").  Used so the native side can
+// tell Flutter to pop the player page when the cast player is closed.
+private final class CastPlayerViewController: AVPlayerViewController {
+  var onDismiss: (() -> Void)?
+
+  override func viewDidDisappear(_ animated: Bool) {
+    super.viewDidDisappear(animated)
+    if isBeingDismissed {
+      onDismiss?()
     }
   }
 }
