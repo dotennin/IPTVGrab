@@ -1,23 +1,24 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:math' as math;
-
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_vlc_player/flutter_vlc_player.dart';
-import 'package:photo_manager/photo_manager.dart';
-import 'package:sensors_plus/sensors_plus.dart';
-import 'package:share_plus/share_plus.dart';
 import 'package:video_player/video_player.dart';
 
-import 'background_execution_bridge.dart';
 import 'cast_bridge.dart';
 import 'models.dart';
 import 'theme.dart';
 import 'utils.dart';
 
+// ── Public entry point ────────────────────────────────────────────────────────
+
+/// Opens the appropriate player for the given [uri]:
+/// - **Native non-FLV** → native AVPlayerViewController via [CastBridge.showCastPicker]
+///   (AVPlayer on iOS, ExoPlayer/Cast on Android)
+/// - **Native FLV** → minimal VLC player page
+/// - **Web** → minimal video_player page
 Future<void> openMediaPlayer(
   BuildContext context, {
   required String title,
@@ -31,199 +32,81 @@ Future<void> openMediaPlayer(
   VoidCallback? onGrabRequested,
   bool allowPictureInPicture = false,
   Future<List<StreamVariant>> Function()? onFetchVariants,
-}) {
-  return Navigator.of(context).push(
-    MaterialPageRoute<void>(
-      builder: (_) => MediaPlayerPage(
-        title: title,
-        uri: uri,
-        httpHeaders: httpHeaders,
-        isLive: isLive,
-        localFilePath: localFilePath,
-        localFileName: localFileName,
-        copyUrl: copyUrl,
-        copyLabel: copyLabel,
-        onGrabRequested: onGrabRequested,
-        allowPictureInPicture: allowPictureInPicture,
-        onFetchVariants: onFetchVariants,
-      ),
-    ),
-  );
+}) async {
+  if (!kIsWeb && !_isFlvUri(uri)) {
+    // Native default: present AVPlayerViewController via CastBridge.
+    final playUrl = localFilePath != null
+        ? 'file://$localFilePath'
+        : (copyUrl ?? uri.toString());
+    await CastBridge.instance.showCastPicker(
+      url: playUrl,
+      title: title,
+      headers: httpHeaders,
+      isLive: isLive,
+    );
+    return;
+  }
+
+  // Fallback for FLV (native) or web: push a Flutter player page.
+  final page = !kIsWeb && _isFlvUri(uri)
+      ? _VlcPlayerPage(title: title, uri: uri, httpHeaders: httpHeaders, isLive: isLive)
+      : _VideoPlayerPage(title: title, uri: uri, httpHeaders: httpHeaders, isLive: isLive, copyUrl: copyUrl ?? uri.toString());
+
+  if (context.mounted) {
+    await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => page));
+  }
 }
 
-class MediaPlayerPage extends StatefulWidget {
-  const MediaPlayerPage({
-    super.key,
+bool _isFlvUri(Uri uri) {
+  final path = uri.path.toLowerCase();
+  final str = uri.toString().toLowerCase();
+  return path.endsWith('.flv') ||
+      str.contains('.flv?') ||
+      str.contains('.flv#') ||
+      str.contains('type=flv') ||
+      str.contains('format=flv');
+}
+
+// ── VLC player page (FLV native only) ────────────────────────────────────────
+
+class _VlcPlayerPage extends StatefulWidget {
+  const _VlcPlayerPage({
     required this.title,
     required this.uri,
     required this.httpHeaders,
-    this.isLive = false,
-    this.localFilePath,
-    this.localFileName,
-    this.copyUrl,
-    this.copyLabel,
-    this.onGrabRequested,
-    this.allowPictureInPicture = false,
-    this.onFetchVariants,
+    required this.isLive,
   });
 
   final String title;
   final Uri uri;
   final Map<String, String> httpHeaders;
   final bool isLive;
-  final String? localFilePath;
-  final String? localFileName;
-  final String? copyUrl;
-  final String? copyLabel;
-  final VoidCallback? onGrabRequested;
-  final bool allowPictureInPicture;
-  final Future<List<StreamVariant>> Function()? onFetchVariants;
 
   @override
-  State<MediaPlayerPage> createState() => _MediaPlayerPageState();
+  State<_VlcPlayerPage> createState() => _VlcPlayerPageState();
 }
 
-class _MediaPlayerPageState extends State<MediaPlayerPage> {
-  // VLC player used on all native platforms (iOS, Android, macOS …).
-  VlcPlayerController? _vlcController;
-  // video_player fallback used only on the web build.
-  VideoPlayerController? _webController;
-
-  String? _error;
-  bool _initialized = false;   // tracks VideoPlayerController init on web
-  bool _isFullscreen = false;
+class _VlcPlayerPageState extends State<_VlcPlayerPage> {
+  late VlcPlayerController _ctrl;
   bool _showControls = true;
   bool _muted = false;
-  bool _enteringPictureInPicture = false;
-  String? _pictureInPictureFailure;
-  List<String> _pictureInPictureReasons = const <String>[];
+  bool _isFullscreen = false;
   Timer? _controlsTimer;
-  StreamSubscription<AccelerometerEvent>? _accelSub;
-  bool _settingFullscreen = false;
-  DateTime? _gyroToggleTime;
-  final GlobalKey _playerKey = GlobalKey();
 
-  List<StreamVariant> _variants = const [];
-  bool _fetchingVariants = false;
-  bool _variantsLoaded = false;
-  int _selectedVariantIndex = -1;
-  // Incremented to force a new VlcPlayer widget when the source changes.
-  int _vlcPlayerVersion = 0;
-
-  Offset? _doubleTapPos;
   int _seekFeedback = 0;
   Timer? _seekFeedbackTimer;
-
-  // True when the cast session is active (native AVPlayer / Chromecast is
-  // playing the stream).  When true, VLC is not created and the player area
-  // shows the cast overlay instead.
-  bool _castingActive = false;
-
-  // True when running on a native platform where VLC is available.
-  bool get _usesVlcPlayer => !kIsWeb;
-
-  bool get _playerInitialized => _usesVlcPlayer
-      ? (_vlcController?.value.isInitialized ?? false)
-      : _initialized;
-
-  bool get _playerIsPlaying => _usesVlcPlayer
-      ? (_vlcController?.value.isPlaying ?? false)
-      : (_webController?.value.isPlaying ?? false);
-
-  Duration get _playerPosition => _usesVlcPlayer
-      ? (_vlcController?.value.position ?? Duration.zero)
-      : (_webController?.value.position ?? Duration.zero);
-
-  Duration get _playerDuration => _usesVlcPlayer
-      ? (_vlcController?.value.duration ?? Duration.zero)
-      : (_webController?.value.duration ?? Duration.zero);
-
-  double get _playerAspectRatio {
-    if (_usesVlcPlayer) {
-      final size = _vlcController?.value.size;
-      if (size != null && size.width > 0 && size.height > 0) {
-        return size.width / size.height;
-      }
-      return 16 / 9;
-    }
-    final ctrl = _webController;
-    return (ctrl != null && ctrl.value.isInitialized && ctrl.value.aspectRatio > 0)
-        ? ctrl.value.aspectRatio
-        : 16 / 9;
-  }
-
-  String? get _playerError {
-    if (_usesVlcPlayer) {
-      final ctrl = _vlcController;
-      if (ctrl != null && ctrl.value.hasError) {
-        return ctrl.value.errorDescription.isEmpty
-            ? 'Playback error'
-            : ctrl.value.errorDescription;
-      }
-      return _error;
-    }
-    return _error;
-  }
-
-  List<String> get _pictureInPictureDiagnostics => _pictureInPictureReasons;
-
-  // Only Android PiP is supported with VLC (iOS PiP requires native AVPlayer).
-  bool get _canUsePictureInPicture =>
-      widget.allowPictureInPicture && !kIsWeb && Platform.isAndroid;
-
-  // FLV streams are not castable: AirPlay receivers and Chromecast both reject
-  // the FLV container. Real-time transcoding while casting is not feasible on
-  // mobile. Disable the cast button for FLV; enable it for HLS and MP4.
-  bool get _isFlvStream {
-    final path = widget.uri.path.toLowerCase();
-    final query = widget.uri.toString().toLowerCase();
-    return path.endsWith('.flv') ||
-        query.contains('.flv?') ||
-        query.contains('.flv#') ||
-        query.contains('type=flv') ||
-        query.contains('format=flv');
-  }
-
-  bool get _showCastButton => CastBridge.instance.isCastSupported;
+  Offset? _doubleTapPos;
 
   @override
   void initState() {
     super.initState();
-    _castingActive = CastBridge.isActivelyCasting;
-    if (_castingActive) {
-      // A cast session is already running — switch content if the URL changed,
-      // then immediately present the native AVPlayerViewController so the user
-      // gets full seek / subtitle controls.  When they dismiss it we pop this
-      // page so they land back on sources.
-      _setupCastPlayerDismiss();
-      WidgetsBinding.instance.addPostFrameCallback((_) async {
-        await _switchCastToThisChannel();
-        if (!mounted) return;
-        try {
-          await CastBridge.instance.showCastPlayerVC();
-        } catch (e) {
-          if (!mounted) return;
-          showMessage(context, 'Could not open cast player: $e', error: true);
-        }
-      });
-    } else if (_usesVlcPlayer) {
-      _vlcController = VlcPlayerController.network(
-        widget.uri.toString(),
-        hwAcc: HwAcc.full,
-        autoPlay: true,
-        options: _buildVlcOptions(widget.httpHeaders),
-      )..addListener(_handleControllerUpdate);
-    } else {
-      _webController = VideoPlayerController.networkUrl(
-        widget.uri,
-        httpHeaders: widget.httpHeaders,
-      );
-      _webController!.addListener(_handleControllerUpdate);
-      unawaited(_initializeWeb());
-    }
-    _accelSub = accelerometerEventStream(
-      samplingPeriod: SensorInterval.normalInterval,
-    ).listen(_onAccelerometer);
+    _ctrl = VlcPlayerController.network(
+      widget.uri.toString(),
+      hwAcc: HwAcc.full,
+      autoPlay: true,
+      options: _buildVlcOptions(widget.httpHeaders),
+    )..addListener(_onUpdate);
+    _scheduleControlsHide();
   }
 
   VlcPlayerOptions _buildVlcOptions(Map<String, String> headers) {
@@ -242,143 +125,39 @@ class _MediaPlayerPageState extends State<MediaPlayerPage> {
           extraLines.add('$key: $value');
       }
     });
-    final httpOpts = <String>[
-      if (userAgent != null) VlcHttpOptions.httpUserAgent(userAgent!),
-      if (referrer != null) VlcHttpOptions.httpReferrer(referrer!),
-    ];
-    final extras = <String>[
-      if (extraLines.isNotEmpty)
-        ':http-extra-headers=${extraLines.join('\r\n')}\r\n',
-    ];
     return VlcPlayerOptions(
-      http: httpOpts.isNotEmpty ? VlcHttpOptions(httpOpts) : null,
-      extras: extras.isNotEmpty ? extras : null,
+      http: [
+        if (userAgent != null) VlcHttpOptions.httpUserAgent(userAgent!),
+        if (referrer != null) VlcHttpOptions.httpReferrer(referrer!),
+      ].isNotEmpty
+          ? VlcHttpOptions([
+              if (userAgent != null) VlcHttpOptions.httpUserAgent(userAgent!),
+              if (referrer != null) VlcHttpOptions.httpReferrer(referrer!),
+            ])
+          : null,
+      extras: extraLines.isNotEmpty
+          ? [':http-extra-headers=${extraLines.join('\r\n')}\r\n']
+          : null,
     );
   }
 
-  void _onAccelerometer(AccelerometerEvent event) {
-    if (_settingFullscreen) return;
-    final now = DateTime.now();
-    if (_gyroToggleTime != null &&
-        now.difference(_gyroToggleTime!) <
-            const Duration(milliseconds: 1500)) {
-      return;
-    }
-    final absX = event.x.abs();
-    final absY = event.y.abs();
-    if (!_isFullscreen && absX >= 7.0 && absY < 5.0) {
-      _gyroToggleTime = now;
-      unawaited(_setFullscreen(true, fromGyro: true));
-    } else if (_isFullscreen && absY >= 7.0 && absX < 5.0) {
-      _gyroToggleTime = now;
-      unawaited(_setFullscreen(false, fromGyro: true));
-    }
+  void _onUpdate() {
+    if (mounted) setState(() {});
   }
 
-  Future<void> _initializeWeb() async {
-    try {
-      final controller = _webController!;
-      await controller.initialize();
-      await controller.setLooping(!widget.isLive);
-      await controller.setVolume(_muted ? 0 : 1);
-      await controller.play();
-      if (!mounted) return;
-      setState(() => _initialized = true);
-      _scheduleControlsHide();
-      unawaited(_loadVariants());
-    } catch (error) {
-      if (!mounted) return;
-      setState(() => _error = error.toString());
-    }
-  }
-
-  void _handleControllerUpdate() {
-    if (!mounted) return;
-    setState(() {});
-    if (_usesVlcPlayer && _playerInitialized && !_variantsLoaded) {
-      _variantsLoaded = true;
-      unawaited(_loadVariants());
-    }
-  }
-
-  Future<void> _togglePlayback() async {
-    if (_playerIsPlaying) {
-      if (_usesVlcPlayer) {
-        await _vlcController?.pause();
-      } else {
-        await _webController!.pause();
-      }
-      _controlsTimer?.cancel();
-      setState(() => _showControls = true);
-      return;
-    }
-    if (_usesVlcPlayer) {
-      await _vlcController?.play();
-    } else {
-      await _webController!.play();
-    }
-    _scheduleControlsHide();
-  }
-
-  Future<void> _seekRelative(int seconds) async {
-    final position = _playerPosition;
-    final duration = _playerDuration;
-    final target = position + Duration(seconds: seconds);
-    final clamped = target < Duration.zero
-        ? Duration.zero
-        : (duration > Duration.zero && target > duration ? duration : target);
-    await _seekTo(clamped);
-    _scheduleControlsHide();
-  }
-
-  Future<void> _seekTo(Duration position) async {
-    if (_usesVlcPlayer) {
-      await _vlcController?.seekTo(position);
-    } else {
-      await _webController!.seekTo(position);
-    }
-  }
-
-  Future<void> _setMuted(bool value) async {
-    if (_usesVlcPlayer) {
-      await _vlcController?.setVolume(value ? 0 : 100);
-    } else {
-      await _webController!.setVolume(value ? 0 : 1);
-    }
-    if (!mounted) return;
-    setState(() => _muted = value);
-    _scheduleControlsHide();
-  }
-
-  Future<void> _setFullscreen(bool enabled, {bool fromGyro = false}) async {
-    if (_settingFullscreen) return;
-    _settingFullscreen = true;
-    try {
-      if (enabled) {
-        await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-        if (!fromGyro) {
-          await SystemChrome.setPreferredOrientations(const <DeviceOrientation>[
-            DeviceOrientation.landscapeLeft,
-            DeviceOrientation.landscapeRight,
-          ]);
-        }
-      } else {
-        _restoreSystemUi();
-      }
-      if (!mounted) return;
-      setState(() {
-        _isFullscreen = enabled;
-        _showControls = true;
-      });
-      _scheduleControlsHide();
-    } finally {
-      _settingFullscreen = false;
-    }
+  @override
+  void dispose() {
+    _controlsTimer?.cancel();
+    _seekFeedbackTimer?.cancel();
+    _ctrl.removeListener(_onUpdate);
+    _ctrl.dispose();
+    if (_isFullscreen) _restoreSystemUi();
+    super.dispose();
   }
 
   void _restoreSystemUi() {
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-    SystemChrome.setPreferredOrientations(const <DeviceOrientation>[
+    SystemChrome.setPreferredOrientations(const [
       DeviceOrientation.portraitUp,
       DeviceOrientation.portraitDown,
       DeviceOrientation.landscapeLeft,
@@ -386,985 +165,499 @@ class _MediaPlayerPageState extends State<MediaPlayerPage> {
     ]);
   }
 
+  bool get _ready => _ctrl.value.isInitialized;
+  bool get _playing => _ctrl.value.isPlaying;
+  Duration get _position => _ctrl.value.position;
+  Duration get _duration => _ctrl.value.duration;
+  double get _aspectRatio {
+    final sz = _ctrl.value.size;
+    return (sz.width > 0 && sz.height > 0) ? sz.width / sz.height : 16 / 9;
+  }
+
   void _toggleControls() {
     setState(() => _showControls = !_showControls);
-    if (_showControls) {
-      _scheduleControlsHide();
-    } else {
-      _controlsTimer?.cancel();
-    }
+    if (_showControls) _scheduleControlsHide();
   }
 
   void _scheduleControlsHide() {
     _controlsTimer?.cancel();
-    if (!_isFullscreen || !_playerIsPlaying) {
-      return;
-    }
+    if (!_playing) return;
     _controlsTimer = Timer(const Duration(seconds: 4), () {
-      if (!mounted || !_playerIsPlaying) {
-        return;
-      }
-      setState(() => _showControls = false);
+      if (mounted && _playing) setState(() => _showControls = false);
     });
   }
 
-  String get _resolvedCopyUrl => widget.copyUrl ?? widget.uri.toString();
-
-  Future<void> _loadVariants() async {
-    if (widget.onFetchVariants == null || _fetchingVariants) return;
-    setState(() => _fetchingVariants = true);
-    try {
-      final variants = await widget.onFetchVariants!();
-      if (!mounted) return;
-      setState(() {
-        _variants = variants;
-        _selectedVariantIndex = variants.isEmpty ? -1 : 0;
-        _variantsLoaded = true;
-        _fetchingVariants = false;
-      });
-    } catch (_) {
-      if (mounted) setState(() => _fetchingVariants = false);
-    }
-  }
-
-  Future<void> _switchVariant(int index) async {
-    if (index == _selectedVariantIndex) return;
-    final variant = _variants[index];
-    final uri = Uri.parse(variant.url);
-    if (_usesVlcPlayer) {
-      setState(() => _selectedVariantIndex = index);
-      await _vlcController?.setMediaFromNetwork(
-        uri.toString(),
-        hwAcc: HwAcc.full,
-        autoPlay: true,
-      );
-      if (mounted) setState(() => _vlcPlayerVersion++);
+  Future<void> _togglePlay() async {
+    if (_playing) {
+      await _ctrl.pause();
+      _controlsTimer?.cancel();
+      setState(() => _showControls = true);
     } else {
-      setState(() {
-        _selectedVariantIndex = index;
-        _initialized = false;
-      });
-      final oldCtrl = _webController;
-      oldCtrl?.removeListener(_handleControllerUpdate);
-      await oldCtrl?.pause();
-      await oldCtrl?.dispose();
-      final ctrl = VideoPlayerController.networkUrl(
-        uri,
-        httpHeaders: widget.httpHeaders,
-      );
-      _webController = ctrl;
-      ctrl.addListener(_handleControllerUpdate);
-      await ctrl.initialize();
-      await ctrl.setVolume(_muted ? 0 : 1);
-      await ctrl.play();
-      if (mounted) setState(() => _initialized = true);
+      await _ctrl.play();
+      _scheduleControlsHide();
     }
   }
 
-  void _showQualitySheet(BuildContext context) {
-    if (_variants.isEmpty) return;
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.black87,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (ctx) {
-        final maxHeight = MediaQuery.of(ctx).size.height * 0.6;
-        return SafeArea(
-          child: ConstrainedBox(
-            constraints: BoxConstraints(maxHeight: maxHeight),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 14),
-                  child: Text(
-                    'Quality',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                    ),
-                  ),
-                ),
-                const Divider(color: Colors.white24, height: 1),
-                Flexible(
-                  child: ListView(
-                    shrinkWrap: true,
-                    children: _variants.asMap().entries.map((e) {
-                      final i = e.key;
-                      final v = e.value;
-                      final selected = i == _selectedVariantIndex;
-                      return ListTile(
-                        leading: Icon(
-                          selected
-                              ? Icons.check_circle
-                              : Icons.radio_button_unchecked,
-                          color: selected ? Colors.blue : Colors.white54,
-                          size: 20,
-                        ),
-                        title: Text(
-                          v.displayLabel,
-                          style: TextStyle(
-                            color: selected ? Colors.white : Colors.white70,
-                          ),
-                        ),
-                        onTap: () {
-                          Navigator.of(ctx).pop();
-                          unawaited(_switchVariant(i));
-                        },
-                      );
-                    }).toList(),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
+  Future<void> _seekRelative(int seconds) async {
+    var target = _position + Duration(seconds: seconds);
+    if (target < Duration.zero) target = Duration.zero;
+    final dur = _duration;
+    if (dur > Duration.zero && target > dur) target = dur;
+    await _ctrl.seekTo(target);
+    _showSeekHint(seconds);
+    _scheduleControlsHide();
   }
 
-  void _handleDoubleTap() {
-    if (!_isFullscreen || !_playerInitialized || widget.isLive) return;
-    final pos = _doubleTapPos;
-    if (pos == null) return;
-    final screenW = MediaQuery.of(context).size.width;
-    final seconds = pos.dx > screenW / 2 ? 10 : -10;
-    unawaited(_seekRelative(seconds));
-    _showSeekFeedback(seconds);
-  }
-
-  void _showSeekFeedback(int seconds) {
+  void _showSeekHint(int s) {
     _seekFeedbackTimer?.cancel();
-    setState(() => _seekFeedback = seconds);
+    setState(() => _seekFeedback = s);
     _seekFeedbackTimer = Timer(const Duration(milliseconds: 700), () {
       if (mounted) setState(() => _seekFeedback = 0);
     });
   }
 
-  String get _resolvedCopyLabel =>
-      widget.copyLabel ??
-      'Media URL copied. It still requires the active session cookie when auth is enabled.';
-
-  /// Registers a one-shot dismiss callback that pops this page when the native
-  /// AVPlayerViewController (cast player) is closed by the user.  The callback
-  /// is cleared automatically after it fires or when [dispose] is called.
-  void _setupCastPlayerDismiss() {
-    CastBridge.setOnCastPlayerDismissed(() {
-      if (mounted) Navigator.of(context).pop();
-    });
-  }
-
-  Future<void> _triggerCast() async {
-    if (_castingActive) {
-      // Already casting — show options to switch device or stop.
-      _showCastOptions();
-      return;
+  Future<void> _setFullscreen(bool v) async {
+    if (v) {
+      await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+      await SystemChrome.setPreferredOrientations(const [
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]);
+    } else {
+      _restoreSystemUi();
     }
-    // Pause local playback before handing off to the native cast session.
-    if (_playerIsPlaying) {
-      if (_usesVlcPlayer) {
-        await _vlcController?.pause();
-      } else {
-        await _webController?.pause();
-      }
-    }
-    try {
-      await CastBridge.instance.showCastPicker(
-        url: widget.uri.toString(),
-        title: widget.title,
-        headers: widget.httpHeaders,
-        isLive: widget.isLive,
-      );
-      if (!mounted) return;
-      // Dispose VLC immediately so it releases AVAudioSession.  If VLC is
-      // still alive when the page is popped, its dispose() call triggers
-      // AVAudioSession.setActive(false) which kills the AirPlay route.
-      setState(() {
-        _castingActive = true;
-        _vlcController?.removeListener(_handleControllerUpdate);
-        _vlcController?.dispose();
-        _vlcController = null;
-      });
-    } on PlatformException catch (e) {
-      if (!mounted) return;
-      showMessage(context, e.message ?? 'Cast unavailable', error: true);
-    } catch (e) {
-      if (!mounted) return;
-      showMessage(context, e.toString(), error: true);
-    }
-  }
-
-  /// Switches the active cast session to this page's stream (called from
-  /// initState when navigating to a new channel while already casting).
-  Future<void> _switchCastToThisChannel() async {
-    // If the cast is already playing this exact URL, nothing to do.
-    if (CastBridge.castingUrl == widget.uri.toString()) return;
-    try {
-      await CastBridge.instance.switchCastMedia(
-        url: widget.uri.toString(),
-        title: widget.title,
-        headers: widget.httpHeaders,
-        isLive: widget.isLive,
-      );
-    } catch (e) {
-      if (!mounted) return;
-      showMessage(context, 'Cast switch failed: $e', error: true);
-    }
-  }
-
-  void _showCastOptions() {
-    showModalBottomSheet<void>(
-      context: context,
-      builder: (ctx) => Column(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          ListTile(
-            leading: const Icon(Icons.cast),
-            title: const Text('Switch Device'),
-            onTap: () {
-              Navigator.pop(ctx);
-              unawaited(CastBridge.instance.showRoutePicker());
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.cast_connected),
-            title: const Text('Stop Casting'),
-            onTap: () {
-              Navigator.pop(ctx);
-              unawaited(_stopCast());
-            },
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _stopCast() async {
-    await CastBridge.instance.stopCast();
     if (!mounted) return;
     setState(() {
-      _castingActive = false;
-      _variantsLoaded = false;
-      if (_usesVlcPlayer) {
-        _vlcController?.removeListener(_handleControllerUpdate);
-        _vlcController?.dispose();
-        _vlcController = VlcPlayerController.network(
-          widget.uri.toString(),
-          hwAcc: HwAcc.full,
-          autoPlay: true,
-          options: _buildVlcOptions(widget.httpHeaders),
-        )..addListener(_handleControllerUpdate);
-      }
+      _isFullscreen = v;
+      _showControls = true;
     });
-  }
-
-  Future<void> _enterPictureInPicture() async {
-    if (_enteringPictureInPicture) return;
-    setState(() => _enteringPictureInPicture = true);
-    try {
-      final entered = await BackgroundExecutionBridge.instance.enterPictureInPicture(
-        uri: widget.uri,
-        headers: widget.httpHeaders,
-        position: widget.isLive ? null : _playerPosition,
-      );
-      if (!mounted) return;
-      if (entered) {
-        setState(() {
-          _pictureInPictureFailure = null;
-          _pictureInPictureReasons = const <String>[];
-        });
-      } else {
-        _recordPictureInPictureFailure(
-          'Picture in Picture is unavailable right now.',
-          _pictureInPictureDiagnostics,
-        );
-      }
-    } on BackgroundExecutionBridgeException catch (error) {
-      if (!mounted) return;
-      showMessage(context, error.message, error: true);
-    } finally {
-      if (mounted) setState(() => _enteringPictureInPicture = false);
-    }
-  }
-
-  @override
-  void dispose() {
-    _controlsTimer?.cancel();
-    _seekFeedbackTimer?.cancel();
-    _accelSub?.cancel();
-    _restoreSystemUi();
-    CastBridge.setOnCastPlayerDismissed(null);
-    _vlcController?.removeListener(_handleControllerUpdate);
-    _webController?.removeListener(_handleControllerUpdate);
-    _webController?.dispose();
-    _vlcController?.dispose();
-    super.dispose();
+    _scheduleControlsHide();
   }
 
   @override
   Widget build(BuildContext context) {
-    final aspectRatio = _playerAspectRatio;
+    final dur = _duration;
+    final pos = _position;
+    final hasScrub = _ready && dur > Duration.zero;
 
-    final gestureLayer = Positioned.fill(
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: _playerInitialized ? _toggleControls : null,
-        onDoubleTapDown: (d) => _doubleTapPos = d.localPosition,
-        onDoubleTap: _handleDoubleTap,
-        child: const SizedBox.expand(),
-      ),
-    );
-
-    final player = SizedBox(
-      key: _playerKey,
-      child: Stack(
-        children: <Widget>[
-          Positioned.fill(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: Colors.black,
-                borderRadius: BorderRadius.circular(_isFullscreen ? 0 : 20),
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(_isFullscreen ? 0 : 20),
-                child: _buildPlayerSurface(context),
-              ),
+    final playerView = Stack(
+      children: [
+        Positioned.fill(
+          child: ColoredBox(
+            color: Colors.black,
+            child: Center(
+              child: _ready
+                  ? VlcPlayer(
+                      controller: _ctrl,
+                      aspectRatio: _aspectRatio,
+                      placeholder: const Center(child: CircularProgressIndicator()),
+                    )
+                  : const CircularProgressIndicator(),
             ),
           ),
-          gestureLayer,
-          Positioned.fill(child: _buildControls(context)),
-          if (_seekFeedback != 0)
-            Positioned.fill(
-              child: IgnorePointer(
-                child: Center(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 20, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: Colors.black54,
-                      borderRadius: BorderRadius.circular(32),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          _seekFeedback > 0
-                              ? Icons.forward_10
-                              : Icons.replay_10,
-                          color: Colors.white,
-                          size: 30,
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          '${_seekFeedback.abs()}s',
+        ),
+        Positioned.fill(
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: _toggleControls,
+            onDoubleTapDown: (d) => _doubleTapPos = d.localPosition,
+            onDoubleTap: () {
+              if (!_ready || widget.isLive) return;
+              final pos = _doubleTapPos;
+              if (pos == null) return;
+              final w = MediaQuery.of(context).size.width;
+              unawaited(_seekRelative(pos.dx > w / 2 ? 10 : -10));
+            },
+            child: const SizedBox.expand(),
+          ),
+        ),
+        if (_seekFeedback != 0)
+          Positioned.fill(
+            child: IgnorePointer(
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                  decoration: BoxDecoration(
+                      color: Colors.black54, borderRadius: BorderRadius.circular(32)),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        _seekFeedback > 0 ? Icons.forward_10 : Icons.replay_10,
+                        color: Colors.white,
+                        size: 30,
+                      ),
+                      const SizedBox(width: 6),
+                      Text('${_seekFeedback.abs()}s',
                           style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 18,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
+                              color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600)),
+                    ],
                   ),
                 ),
               ),
             ),
-        ],
-      ),
+          ),
+        AnimatedOpacity(
+          duration: const Duration(milliseconds: 180),
+          opacity: _showControls ? 1 : 0,
+          child: IgnorePointer(
+            ignoring: !_showControls,
+            child: _buildControls(context, pos, dur, hasScrub),
+          ),
+        ),
+      ],
     );
 
     return PopScope<void>(
       canPop: !_isFullscreen,
       onPopInvokedWithResult: (didPop, _) async {
-        if (didPop || !_isFullscreen) {
-          return;
-        }
-        await _setFullscreen(false);
+        if (!didPop && _isFullscreen) await _setFullscreen(false);
       },
       child: Scaffold(
-        backgroundColor: _isFullscreen ? Colors.black : null,
-        appBar: _isFullscreen
-            ? null
-            : AppBar(
-                title: Text(widget.title),
-                actions: <Widget>[
-                  if (widget.onGrabRequested != null)
-                    IconButton(
-                      tooltip: 'Save offline',
-                      onPressed: widget.onGrabRequested,
-                      icon: const Icon(Icons.download_for_offline),
-                    ),
-                  if (_canUsePictureInPicture)
-                    IconButton(
-                      tooltip: 'Picture in picture',
-                      onPressed: _enteringPictureInPicture
-                          ? null
-                          : _enterPictureInPicture,
-                      icon: const Icon(Icons.picture_in_picture_alt_outlined),
-                    ),
-                  if (_showCastButton)
-                    IconButton(
-                      tooltip: _isFlvStream
-                          ? 'FLV streams cannot be cast'
-                          : _castingActive
-                              ? 'Casting — tap to switch device or stop'
-                              : 'Cast to AirPlay / Chromecast',
-                      onPressed: _isFlvStream ? null : _triggerCast,
-                      icon: Icon(
-                        _castingActive
-                            ? Icons.cast_connected
-                            : Icons.cast,
-                        color: _castingActive ? Colors.lightBlueAccent : null,
-                      ),
-                    ),
-                  IconButton(
-                    tooltip: 'Copy URL',
-                    onPressed: () => copyToClipboard(
-                      context,
-                      _resolvedCopyUrl,
-                      label: _resolvedCopyLabel,
-                    ),
-                    icon: const Icon(Icons.copy),
-                  ),
-                  if (widget.localFilePath != null &&
-                      widget.localFileName != null)
-                    IconButton(
-                      tooltip: 'Share file',
-                      onPressed: () => _shareFile(context),
-                      icon: const Icon(Icons.ios_share),
-                    ),
-                  if (widget.localFilePath != null &&
-                      widget.localFileName != null)
-                    IconButton(
-                      tooltip: 'Save to Photos',
-                      onPressed: () => _saveToPhotos(context),
-                      icon: const Icon(Icons.photo_library_outlined),
-                    ),
-                ],
-              ),
+        backgroundColor: Colors.black,
+        appBar: _isFullscreen ? null : AppBar(title: Text(widget.title)),
         body: SafeArea(
           top: !_isFullscreen,
           bottom: !_isFullscreen,
           child: _isFullscreen
-              ? Center(
-                  child: AspectRatio(
-                    aspectRatio: aspectRatio,
-                    child: player,
-                  ),
-                )
-              : Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    children: <Widget>[
-                      AspectRatio(
-                        aspectRatio: aspectRatio,
-                        child: player,
-                      ),
-                      const SizedBox(height: 12),
-                      Row(
-                        children: <Widget>[
-                          Expanded(
-                            child: Text(
-                              widget.isLive
-                                  ? 'Live preview from your source. Use fullscreen for a cleaner view.'
-                                  : 'Pause, seek, clip a segment, or keep a local copy in your library.',
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .bodySmall
-                                  ?.copyWith(color: appTextMuted),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      if (_canUsePictureInPicture &&
-                          _pictureInPictureFailure != null)
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: TextButton.icon(
-                            onPressed: _showPictureInPictureDiagnosticsDialog,
-                            icon: const Icon(Icons.info_outline),
-                            label: const Text('Show PiP diagnostics'),
-                          ),
-                        ),
-                      if (_canUsePictureInPicture &&
-                          _pictureInPictureFailure != null)
-                        const SizedBox(height: 8),
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: SelectableText(
-                          _resolvedCopyUrl,
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                      ),
-                    ],
-                  ),
+              ? playerView
+              : AspectRatio(aspectRatio: _aspectRatio, child: playerView),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildControls(BuildContext ctx, Duration pos, Duration dur, bool hasScrub) {
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Colors.black38, Colors.transparent, Colors.black54],
+        ),
+      ),
+      child: Column(
+        children: [
+          if (_isFullscreen)
+            SafeArea(
+              bottom: false,
+              child: Row(children: [
+                IconButton(
+                  onPressed: () => _setFullscreen(false),
+                  icon: const Icon(Icons.arrow_back, color: Colors.white),
                 ),
-        ),
-      ),
-    );
-  }
-
-  Future<void> _shareFile(BuildContext context) async {
-    final file = File(widget.localFilePath!);
-    try {
-      if (!await file.exists()) {
-        throw Exception('Local media file not found: ${widget.localFileName}');
-      }
-      await _doShareFile(context, file, widget.localFileName!);
-    } on Exception catch (error) {
-      if (!context.mounted) return;
-      showMessage(context, error.toString(), error: true);
-    }
-  }
-
-  Future<void> _doShareFile(BuildContext context, File file, String filename) async {
-    final renderObject = context.findRenderObject();
-    Rect? shareOrigin;
-    if (renderObject is RenderBox) {
-      final origin = renderObject.localToGlobal(Offset.zero);
-      shareOrigin = origin & renderObject.size;
-    }
-    await SharePlus.instance.share(
-      ShareParams(
-        files: <XFile>[XFile(file.path, mimeType: 'video/mp4', name: filename)],
-        title: filename,
-        subject: filename,
-        text: filename,
-        sharePositionOrigin: shareOrigin,
-      ),
-    );
-  }
-
-  Future<void> _saveToPhotos(BuildContext context) async {
-    final file = File(widget.localFilePath!);
-    try {
-      if (!await file.exists()) {
-        throw Exception('Local media file not found: ${widget.localFileName}');
-      }
-      final permission = await PhotoManager.requestPermissionExtend(
-        requestOption: const PermissionRequestOption(
-          iosAccessLevel: IosAccessLevel.addOnly,
-          androidPermission: AndroidPermission(type: RequestType.video, mediaLocation: false),
-        ),
-      );
-      if (!permission.hasAccess) {
-        throw Exception('Photo library permission is required.');
-      }
-      await PhotoManager.editor.saveVideo(
-        file,
-        title: widget.localFileName!.replaceFirst(RegExp(r'\.mp4$'), ''),
-      );
-      if (!context.mounted) return;
-      showMessage(context, 'Saved to Photos.');
-    } on Exception catch (error) {
-      if (!context.mounted) return;
-      showMessage(context, error.toString(), error: true);
-    }
-  }
-
-  Widget _buildControls(BuildContext context) {
-    final current = _playerPosition;
-    final total = _playerDuration;
-    // Show timeline/seek controls whenever there's a known duration, even for
-    // live-flagged streams like task preview (which IS a finite VOD playlist).
-    // Truly live streams report duration = 0, so hasTimeline stays false.
-    final hasTimeline = _playerInitialized && total > Duration.zero;
-    return AnimatedOpacity(
-      duration: const Duration(milliseconds: 180),
-      opacity: !_isFullscreen || _showControls ? 1 : 0,
-      child: IgnorePointer(
-        ignoring: _isFullscreen && !_showControls,
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: (_isFullscreen && _showControls) ? _toggleControls : null,
-          child: Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: <Color>[
-                Colors.black.withValues(alpha: _isFullscreen ? 0.38 : 0.12),
-                Colors.transparent,
-                Colors.black.withValues(alpha: 0.56),
+                Expanded(
+                  child: Text(widget.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                ),
+              ]),
+            ),
+          const Spacer(),
+          if (_ready && _isFullscreen)
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _bigIconBtn(Icons.replay_10, () => unawaited(_seekRelative(-10))),
+                const SizedBox(width: 32),
+                _bigIconBtn(
+                  _playing ? Icons.pause : Icons.play_arrow,
+                  _togglePlay,
+                  size: 88,
+                  iconSize: 48,
+                ),
+                const SizedBox(width: 32),
+                _bigIconBtn(Icons.forward_10, () => unawaited(_seekRelative(10))),
               ],
             ),
-          ),
-          child: Column(
-            children: <Widget>[
-              if (_isFullscreen)
-                SafeArea(
-                  bottom: false,
-                  child: Row(
-                    children: <Widget>[
-                      IconButton(
-                        onPressed: () => _setFullscreen(false),
-                        icon: const Icon(Icons.arrow_back, color: Colors.white),
-                      ),
-                      Expanded(
-                        child: Text(
-                          widget.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                      if (_showCastButton)
-                        IconButton(
-                          tooltip: _isFlvStream
-                              ? 'FLV streams cannot be cast'
-                              : _castingActive
-                                  ? 'Casting — tap to switch device or stop'
-                                  : 'Cast to AirPlay / Chromecast',
-                          onPressed: _isFlvStream ? null : _triggerCast,
-                          icon: Icon(
-                            _castingActive
-                                ? Icons.cast_connected
-                                : Icons.cast,
-                            color: _castingActive
-                                ? Colors.lightBlueAccent
-                                : _isFlvStream
-                                    ? Colors.white24
-                                    : Colors.white,
-                          ),
-                        ),
-                    ],
+          const Spacer(),
+          Container(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+            color: Colors.black45,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (hasScrub)
+                  SliderTheme(
+                    data: SliderTheme.of(ctx).copyWith(
+                      activeTrackColor: appPrimary,
+                      inactiveTrackColor: const Color(0xFF1E293B),
+                      thumbColor: appPrimary,
+                      overlayColor: appPrimary.withValues(alpha: 0.16),
+                      trackHeight: 3,
+                    ),
+                    child: Slider(
+                      value: pos.inMilliseconds
+                          .clamp(0, math.max(dur.inMilliseconds, 1))
+                          .toDouble(),
+                      min: 0,
+                      max: math.max(dur.inMilliseconds, 1).toDouble(),
+                      onChanged: _ready
+                          ? (v) => unawaited(_ctrl.seekTo(Duration(milliseconds: v.round())))
+                          : null,
+                    ),
                   ),
-                ),
-              const Spacer(),
-              if (_playerInitialized && _isFullscreen)
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: <Widget>[
-                    IconButton.filled(
-                      style: IconButton.styleFrom(
-                        backgroundColor: Colors.black.withValues(alpha: 0.55),
-                        foregroundColor: Colors.white,
-                        minimumSize: const Size(72, 72),
-                      ),
-                      onPressed: () => _seekRelative(-10),
-                      icon: const Icon(Icons.replay_10, size: 38),
+                  children: [
+                    IconButton(
+                      onPressed: _ready ? _togglePlay : null,
+                      icon: Icon(_playing ? Icons.pause : Icons.play_arrow),
+                      color: Colors.white,
                     ),
-                    const SizedBox(width: 32),
-                    IconButton.filled(
-                      style: IconButton.styleFrom(
-                        backgroundColor: Colors.black.withValues(alpha: 0.55),
-                        foregroundColor: Colors.white,
-                        minimumSize: const Size(88, 88),
+                    if (widget.isLive && !hasScrub)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: appDanger.withValues(alpha: 0.18),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: const Text('LIVE',
+                            style: TextStyle(color: appDanger, fontWeight: FontWeight.w700)),
+                      )
+                    else if (hasScrub)
+                      Text(
+                        '${formatDurationLabel(pos)} / ${formatDurationLabel(dur)}',
+                        style: const TextStyle(color: Colors.white70),
                       ),
-                      onPressed: _togglePlayback,
-                      icon: Icon(
-                        _playerIsPlaying ? Icons.pause : Icons.play_arrow,
-                        size: 48,
-                      ),
+                    const Spacer(),
+                    IconButton(
+                      onPressed: _ready
+                          ? () async {
+                              await _ctrl.setVolume(_muted ? 100 : 0);
+                              setState(() => _muted = !_muted);
+                            }
+                          : null,
+                      icon: Icon(_muted ? Icons.volume_off : Icons.volume_up),
+                      color: Colors.white,
                     ),
-                    const SizedBox(width: 32),
-                    IconButton.filled(
-                      style: IconButton.styleFrom(
-                        backgroundColor: Colors.black.withValues(alpha: 0.55),
-                        foregroundColor: Colors.white,
-                        minimumSize: const Size(72, 72),
-                      ),
-                      onPressed: () => _seekRelative(10),
-                      icon: const Icon(Icons.forward_10, size: 38),
+                    IconButton(
+                      onPressed: _ready ? () => unawaited(_setFullscreen(!_isFullscreen)) : null,
+                      icon: Icon(_isFullscreen ? Icons.fullscreen_exit : Icons.fullscreen),
+                      color: Colors.white,
                     ),
                   ],
                 ),
-              const Spacer(),
-              Container(
-                padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
-                color: Colors.black.withValues(alpha: 0.36),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    if (hasTimeline) _buildTimeline(context, current, total),
-                    Row(
-                      children: <Widget>[
-                        if (hasTimeline)
-                          IconButton(
-                            onPressed: _playerInitialized
-                                ? () => _seekRelative(-10)
-                                : null,
-                            icon: const Icon(Icons.replay_10),
-                          ),
-                        IconButton(
-                          onPressed:
-                              _playerInitialized ? _togglePlayback : null,
-                          icon: Icon(
-                            _playerIsPlaying ? Icons.pause : Icons.play_arrow,
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _bigIconBtn(IconData icon, VoidCallback onPressed, {double size = 72, double iconSize = 38}) {
+    return IconButton.filled(
+      style: IconButton.styleFrom(
+        backgroundColor: Colors.black.withValues(alpha: 0.55),
+        foregroundColor: Colors.white,
+        minimumSize: Size(size, size),
+      ),
+      onPressed: onPressed,
+      icon: Icon(icon, size: iconSize),
+    );
+  }
+}
+
+// ── Web video_player page ─────────────────────────────────────────────────────
+
+class _VideoPlayerPage extends StatefulWidget {
+  const _VideoPlayerPage({
+    required this.title,
+    required this.uri,
+    required this.httpHeaders,
+    required this.isLive,
+    required this.copyUrl,
+  });
+
+  final String title;
+  final Uri uri;
+  final Map<String, String> httpHeaders;
+  final bool isLive;
+  final String copyUrl;
+
+  @override
+  State<_VideoPlayerPage> createState() => _VideoPlayerPageState();
+}
+
+class _VideoPlayerPageState extends State<_VideoPlayerPage> {
+  VideoPlayerController? _ctrl;
+  String? _error;
+  bool _initialized = false;
+  bool _showControls = true;
+  bool _muted = false;
+  Timer? _controlsTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = VideoPlayerController.networkUrl(
+      widget.uri,
+      httpHeaders: widget.httpHeaders,
+    )..addListener(_onUpdate);
+    unawaited(_init());
+  }
+
+  Future<void> _init() async {
+    try {
+      await _ctrl!.initialize();
+      await _ctrl!.setLooping(!widget.isLive);
+      await _ctrl!.play();
+      if (!mounted) return;
+      setState(() => _initialized = true);
+      _scheduleControlsHide();
+    } catch (e) {
+      if (mounted) setState(() => _error = e.toString());
+    }
+  }
+
+  void _onUpdate() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _controlsTimer?.cancel();
+    _ctrl?.removeListener(_onUpdate);
+    _ctrl?.dispose();
+    super.dispose();
+  }
+
+  void _scheduleControlsHide() {
+    _controlsTimer?.cancel();
+    if (_ctrl?.value.isPlaying != true) return;
+    _controlsTimer = Timer(const Duration(seconds: 4), () {
+      if (mounted && (_ctrl?.value.isPlaying ?? false)) {
+        setState(() => _showControls = false);
+      }
+    });
+  }
+
+  void _toggleControls() {
+    setState(() => _showControls = !_showControls);
+    if (_showControls) _scheduleControlsHide();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ctrl = _ctrl;
+    final err = _error;
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(widget.title),
+        actions: [
+          IconButton(
+            tooltip: 'Copy URL',
+            onPressed: () => copyToClipboard(context, widget.copyUrl, label: 'URL copied.'),
+            icon: const Icon(Icons.copy),
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: err != null
+            ? Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Text(err,
+                      style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                ),
+              )
+            : !_initialized || ctrl == null
+                ? const Center(child: CircularProgressIndicator())
+                : GestureDetector(
+                    onTap: _toggleControls,
+                    child: Stack(
+                      children: [
+                        Center(
+                          child: AspectRatio(
+                            aspectRatio: ctrl.value.aspectRatio,
+                            child: VideoPlayer(ctrl),
                           ),
                         ),
-                        if (hasTimeline)
-                          IconButton(
-                            onPressed: _playerInitialized
-                                ? () => _seekRelative(10)
-                                : null,
-                            icon: const Icon(Icons.forward_10),
-                          ),
-                        if (widget.isLive)
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: appDanger.withValues(alpha: 0.18),
-                              borderRadius: BorderRadius.circular(999),
-                            ),
-                            child: const Text(
-                              'LIVE',
-                              style: TextStyle(
-                                color: appDanger,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ),
-                        Text(
-                          widget.isLive && !hasTimeline
-                              ? ''
-                              : '${formatDurationLabel(current)} / ${formatDurationLabel(total)}',
-                          style: const TextStyle(color: Colors.white70),
-                        ),
-                        const Spacer(),
-                        IconButton(
-                          onPressed: _playerInitialized
-                              ? () => _setMuted(!_muted)
-                              : null,
-                          icon: Icon(
-                            _muted ? Icons.volume_off : Icons.volume_up,
-                          ),
-                        ),
-                        if (_fetchingVariants)
-                          const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white54,
-                            ),
-                          )
-                        else if (_variants.length > 1)
-                          TextButton.icon(
-                            onPressed: () => _showQualitySheet(context),
-                            icon: const Icon(Icons.hd, size: 18),
-                            label: Text(
-                              _selectedVariantIndex >= 0
-                                  ? _variants[_selectedVariantIndex].displayLabel
-                                  : 'Auto',
-                              style: const TextStyle(fontSize: 12),
-                            ),
-                            style: TextButton.styleFrom(
-                              foregroundColor: Colors.white,
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 4),
-                              minimumSize: Size.zero,
-                              tapTargetSize:
-                                  MaterialTapTargetSize.shrinkWrap,
-                            ),
-                          ),
-                        IconButton(
-                          onPressed: _playerInitialized
-                              ? () => _setFullscreen(!_isFullscreen)
-                              : null,
-                          icon: Icon(
-                            _isFullscreen
-                                ? Icons.fullscreen_exit
-                                : Icons.fullscreen,
+                        AnimatedOpacity(
+                          duration: const Duration(milliseconds: 180),
+                          opacity: _showControls ? 1 : 0,
+                          child: IgnorePointer(
+                            ignoring: !_showControls,
+                            child: _buildControls(context, ctrl),
                           ),
                         ),
                       ],
                     ),
-                  ],
+                  ),
+      ),
+    );
+  }
+
+  Widget _buildControls(BuildContext context, VideoPlayerController ctrl) {
+    final pos = ctrl.value.position;
+    final dur = ctrl.value.duration;
+    final hasScrub = dur > Duration.zero;
+    return Align(
+      alignment: Alignment.bottomCenter,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+        color: Colors.black54,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (hasScrub)
+              VideoProgressIndicator(
+                ctrl,
+                allowScrubbing: true,
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                colors: const VideoProgressColors(
+                  playedColor: appPrimary,
+                  bufferedColor: Color(0xFF475569),
+                  backgroundColor: Color(0xFF1E293B),
                 ),
               ),
-            ],
-          ),
-        ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildPlayerSurface(BuildContext context) {
-    // Cast overlay replaces the video surface while a cast session is running.
-    if (_castingActive) {
-      return _buildCastingOverlay(context);
-    }
-
-    final overlay = _playerError != null
-        ? Center(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Text(
-                _playerError!,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
-            ),
-          )
-        : !_playerInitialized
-            ? const Center(child: CircularProgressIndicator())
-            : null;
-
-    if (_usesVlcPlayer) {
-      return Stack(
-        children: <Widget>[
-          Positioned.fill(
-            child: VlcPlayer(
-              key: ValueKey(_vlcPlayerVersion),
-              controller: _vlcController!,
-              aspectRatio: _playerAspectRatio,
-              placeholder: const Center(child: CircularProgressIndicator()),
-            ),
-          ),
-          if (overlay != null) Positioned.fill(child: overlay),
-        ],
-      );
-    }
-
-    if (overlay != null) return overlay;
-    return Center(child: VideoPlayer(_webController!));
-  }
-
-  Widget _buildCastingOverlay(BuildContext context) {
-    return Container(
-      color: Colors.black,
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: <Widget>[
-          const Icon(Icons.cast_connected, size: 72, color: Colors.white54),
-          const SizedBox(height: 20),
-          Text(
-            'Casting',
-            style: Theme.of(context)
-                .textTheme
-                .headlineSmall
-                ?.copyWith(color: Colors.white),
-          ),
-          if (widget.title.isNotEmpty) ...<Widget>[
-            const SizedBox(height: 8),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: Text(
-                widget.title,
-                style: const TextStyle(color: Colors.white60),
-                textAlign: TextAlign.center,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
-          const SizedBox(height: 40),
-          OutlinedButton.icon(
-            onPressed: _stopCast,
-            icon: const Icon(Icons.cast, color: Colors.white70),
-            label: const Text(
-              'Stop Casting',
-              style: TextStyle(color: Colors.white70),
-            ),
-            style: OutlinedButton.styleFrom(
-              side: const BorderSide(color: Colors.white30),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-
-  Widget _buildTimeline(
-    BuildContext context,
-    Duration current,
-    Duration total,
-  ) {
-    // Use VideoProgressIndicator on web (video_player), Slider on native (VLC).
-    if (!_usesVlcPlayer && _webController != null) {
-      return VideoProgressIndicator(
-        _webController!,
-        allowScrubbing: true,
-        padding: const EdgeInsets.symmetric(vertical: 10),
-        colors: const VideoProgressColors(
-          playedColor: appPrimary,
-          bufferedColor: Color(0xFF475569),
-          backgroundColor: Color(0xFF1E293B),
-        ),
-      );
-    }
-
-    final totalMs = math.max(total.inMilliseconds, 1);
-    final currentMs = current.inMilliseconds.clamp(0, totalMs).toDouble();
-    return SliderTheme(
-      data: SliderTheme.of(context).copyWith(
-        activeTrackColor: appPrimary,
-        inactiveTrackColor: const Color(0xFF1E293B),
-        thumbColor: appPrimary,
-        overlayColor: appPrimary.withValues(alpha: 0.16),
-        trackHeight: 3,
-      ),
-      child: Slider(
-        value: currentMs,
-        min: 0,
-        max: totalMs.toDouble(),
-        onChanged: _playerInitialized
-            ? (value) =>
-                unawaited(_seekTo(Duration(milliseconds: value.round())))
-            : null,
-      ),
-    );
-  }
-
-  Future<void> _showPictureInPictureDiagnosticsDialog() {
-    final message =
-        _pictureInPictureFailure ?? 'Picture in Picture diagnostics';
-    final mergedReasons = dedupeMessages(_pictureInPictureDiagnostics);
-    return showDialog<void>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Picture in Picture diagnostics'),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                Text(message),
-                if (mergedReasons.isNotEmpty) ...<Widget>[
-                  const SizedBox(height: 12),
-                  for (final reason in mergedReasons)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: Text('• $reason'),
+            Row(
+              children: [
+                IconButton(
+                  onPressed: () async {
+                    if (ctrl.value.isPlaying) {
+                      await ctrl.pause();
+                      _controlsTimer?.cancel();
+                      setState(() => _showControls = true);
+                    } else {
+                      await ctrl.play();
+                      _scheduleControlsHide();
+                    }
+                  },
+                  icon: Icon(ctrl.value.isPlaying ? Icons.pause : Icons.play_arrow),
+                  color: Colors.white,
+                ),
+                if (widget.isLive && !hasScrub)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: appDanger.withValues(alpha: 0.18),
+                      borderRadius: BorderRadius.circular(999),
                     ),
-                ],
+                    child: const Text('LIVE',
+                        style: TextStyle(color: appDanger, fontWeight: FontWeight.w700)),
+                  )
+                else if (hasScrub)
+                  Text(
+                    '${formatDurationLabel(pos)} / ${formatDurationLabel(dur)}',
+                    style: const TextStyle(color: Colors.white70),
+                  ),
+                const Spacer(),
+                IconButton(
+                  onPressed: () async {
+                    final newMuted = !_muted;
+                    await ctrl.setVolume(newMuted ? 0 : 1);
+                    setState(() => _muted = newMuted);
+                  },
+                  icon: Icon(_muted ? Icons.volume_off : Icons.volume_up),
+                  color: Colors.white,
+                ),
               ],
             ),
-          ),
+          ],
         ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Close'),
-          ),
-        ],
       ),
     );
-  }
-
-  void _recordPictureInPictureFailure(
-    String message,
-    List<String> reasons,
-  ) {
-    final mergedReasons = dedupeMessages(reasons);
-    setState(() {
-      _pictureInPictureFailure = message;
-      _pictureInPictureReasons = mergedReasons;
-    });
-    showMessage(context, message, error: true);
-    unawaited(_showPictureInPictureDiagnosticsDialog());
   }
 }
