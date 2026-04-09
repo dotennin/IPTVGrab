@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import 'controller.dart';
-import 'download_tab.dart';
 import 'library_tab.dart';
 import 'settings_tab.dart';
 import 'tasks_tab.dart';
@@ -51,24 +50,22 @@ class _M3u8FlutterClientAppState extends State<M3u8FlutterClientApp>
         animation: _controller,
         builder: (context, _) {
           return Scaffold(
-            body: IndexedStack(
-              index: _index,
-              children: <Widget>[
-                // 0 – Library
-                LibraryTab(
-                  controller: _controller,
-                  onUseChannel: () => setState(() => _index = 1),
-                ),
-                // 1 – Activity
-                TasksTab(controller: _controller),
-                // 2 – Grab
-                DownloadTab(
-                  controller: _controller,
-                  onOpenTasks: () => setState(() => _index = 1),
-                ),
-                // 3 – Settings
-                SettingsTab(controller: _controller),
-              ],
+            body: SafeArea(
+              bottom: false,
+              child: IndexedStack(
+                index: _index,
+                children: <Widget>[
+                  // 0 – Library
+                  LibraryTab(
+                    controller: _controller,
+                    onUseChannel: () => setState(() => _index = 1),
+                  ),
+                  // 1 – Activity
+                  TasksTab(controller: _controller),
+                  // 2 – Settings
+                  SettingsTab(controller: _controller),
+                ],
+              ),
             ),
             bottomNavigationBar: NavigationBar(
               selectedIndex: _index,
@@ -81,10 +78,6 @@ class _M3u8FlutterClientAppState extends State<M3u8FlutterClientApp>
                 NavigationDestination(
                   icon: Icon(Icons.task_alt),
                   label: 'Activity',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.download),
-                  label: 'Grab',
                 ),
                 NavigationDestination(
                   icon: Icon(Icons.settings_rounded),

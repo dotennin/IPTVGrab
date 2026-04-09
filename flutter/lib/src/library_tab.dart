@@ -191,6 +191,7 @@ class _LibraryTabState extends State<LibraryTab> {
         ),
         ListView.separated(
           shrinkWrap: true,
+          padding: EdgeInsets.zero,
           physics: const NeverScrollableScrollPhysics(),
           itemCount: recents.length,
           separatorBuilder: (_, __) =>
