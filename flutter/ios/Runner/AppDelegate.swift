@@ -11,6 +11,15 @@ import UIKit
   private let pictureInPicture = NativePictureInPictureController()
   private var backgroundChannel: FlutterMethodChannel?
   private var liveActivitiesChannel: FlutterMethodChannel?
+  private var airPlayChannel: FlutterMethodChannel?
+  /// The AVPlayer driving the AirPlay session.  Kept alive independently of
+  /// airPlayPlayerVC so the cast continues even after the user dismisses the
+  /// native player UI and navigates back to the Flutter sources page.
+  private var airPlayer: AVPlayer?
+  /// Retains the native AVPlayerViewController so it isn't immediately released
+  /// when showAirPlaySession returns.  May be nil once the user dismisses it
+  /// while keeping the cast running in the background.
+  private var airPlayPlayerVC: AVPlayerViewController?
   private var nativeInlinePlayerRegistered = false
   // Stored as Any? so we can guard availability at runtime without the
   // "stored property cannot be marked @available" compiler error.
@@ -37,9 +46,11 @@ import UIKit
     registerNativeInlinePlayer(with: self)
     installBackgroundChannel()
     installLiveActivitiesChannel()
+    installAirPlayChannel()
     DispatchQueue.main.async { [weak self] in
       self?.installBackgroundChannel()
       self?.installLiveActivitiesChannel()
+      self?.installAirPlayChannel()
     }
     return launched
   }
@@ -49,12 +60,19 @@ import UIKit
     registerNativeInlinePlayer(with: engineBridge.pluginRegistry)
     installBackgroundChannel()
     installLiveActivitiesChannel()
+    installAirPlayChannel()
     // Fallback: register directly via engine registrar messenger in case
     // window?.rootViewController is not yet a FlutterViewController.
     if liveActivitiesChannel == nil,
       let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "LiveActivitiesPlugin")
     {
       installLiveActivitiesChannelWith(messenger: registrar.messenger())
+    }
+    // Same fallback for the cast/AirPlay channel.
+    if airPlayChannel == nil,
+      let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "AirPlayCastPlugin")
+    {
+      installAirPlayChannelWith(messenger: registrar.messenger())
     }
   }
 
@@ -233,7 +251,225 @@ import UIKit
     NSLog("[LiveActivity] Method channel registered")
   }
 
-  // Walk the VC hierarchy to find a FlutterViewController (handles cases
+  // MARK: – AirPlay
+
+  private func installAirPlayChannel() {
+    guard airPlayChannel == nil,
+      let controller = window?.rootViewController.flatMap({ Self.findFlutterVC(in: $0) })
+    else { return }
+    installAirPlayChannelWith(messenger: controller.binaryMessenger)
+  }
+
+  /// Registers the medianest/cast method channel using any available messenger.
+  /// Called either from installAirPlayChannel() (when the window is already set)
+  /// or from the didInitializeImplicitFlutterEngine fallback (SceneDelegate apps
+  /// where AppDelegate.window is nil until after the engine initialises).
+  private func installAirPlayChannelWith(messenger: FlutterBinaryMessenger) {
+    guard airPlayChannel == nil else { return }
+    let channel = FlutterMethodChannel(
+      name: "medianest/cast",
+      binaryMessenger: messenger
+    )
+    channel.setMethodCallHandler { [weak self] call, result in
+      guard let self else {
+        result(FlutterError(code: "app_deallocated", message: nil, details: nil))
+        return
+      }
+      switch call.method {
+      case "showCastPicker":
+        let args = call.arguments as? [String: Any] ?? [:]
+        let url = args["url"] as? String ?? ""
+        let title = args["title"] as? String ?? ""
+        let headers = args["headers"] as? [String: String] ?? [:]
+        let isLive = args["isLive"] as? Bool ?? false
+        self.showAirPlaySession(url: url, title: title, headers: headers, isLive: isLive, result: result)
+      case "isCasting":
+        result(self.airPlayer?.isExternalPlaybackActive ?? false)
+      case "switchCastMedia":
+        let args = call.arguments as? [String: Any] ?? [:]
+        let url = args["url"] as? String ?? ""
+        let headers = args["headers"] as? [String: String] ?? [:]
+        self.switchAirPlayMedia(url: url, headers: headers, result: result)
+      case "stopCast":
+        self.stopAirPlaySession(result: result)
+      case "showRoutePicker":
+        self.showAirPlayRoutePicker(result: result)
+      default:
+        result(FlutterMethodNotImplemented)
+      }
+    }
+    airPlayChannel = channel
+    NSLog("[AirPlay] Method channel registered")
+  }
+
+  /// Presents a fullscreen native AVPlayerViewController for AirPlay casting.
+  ///
+  /// VLC's rendering pipeline is OpenGL/Metal-based and does NOT participate in
+  /// iOS AirPlay video routing — only AVPlayer can send video to an AirPlay
+  /// target.  This method creates an AVPlayer for the given HLS/MP4 URL
+  /// (with allowsExternalPlayback = true, which is the requirement for AirPlay
+  /// video), presents it fullscreen, then immediately opens the system AirPlay
+  /// route picker so the user can select a device in one tap.
+  ///
+  /// FLV streams are blocked at the Flutter layer before this is ever called.
+  private func showAirPlaySession(
+    url urlString: String,
+    title: String,
+    headers: [String: String],
+    isLive: Bool,
+    result: @escaping FlutterResult
+  ) {
+    // Resolve the current active window's root VC via UIWindowScene (works in
+    // both classic-window and SceneDelegate / FlutterSceneDelegate apps where
+    // AppDelegate.window is nil).
+    let scene = UIApplication.shared.connectedScenes
+      .compactMap { $0 as? UIWindowScene }
+      .first { $0.activationState == .foregroundActive }
+      ?? UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+    let keyWindow =
+      scene?.windows.first(where: { $0.isKeyWindow }) ?? scene?.windows.first
+    guard let rootVC = keyWindow?.rootViewController else {
+      result(FlutterError(code: "no_vc", message: "No active view controller found", details: nil))
+      return
+    }
+
+    guard let url = URL(string: urlString) else {
+      result(FlutterError(code: "invalid_url", message: "Invalid stream URL: \(urlString)", details: nil))
+      return
+    }
+
+    DispatchQueue.main.async { [weak self] in
+      guard let self else { return }
+
+      // Dismiss any previous AirPlay session before starting a new one.
+      if let existing = self.airPlayPlayerVC, existing.presentingViewController != nil {
+        existing.dismiss(animated: false)
+        self.airPlayPlayerVC = nil
+      }
+
+      // Build AVPlayer with optional HTTP headers (e.g. Referer, Cookie).
+      var assetOptions: [String: Any] = [:]
+      if !headers.isEmpty {
+        assetOptions["AVURLAssetHTTPHeaderFieldsKey"] = headers
+      }
+      let asset = AVURLAsset(url: url, options: assetOptions.isEmpty ? nil : assetOptions)
+      let item = AVPlayerItem(asset: asset)
+      let player = AVPlayer(playerItem: item)
+      // allowsExternalPlayback is true by default but set explicitly for clarity.
+      player.allowsExternalPlayback = true
+
+      // Keep the player alive independently of the VC so the cast continues
+      // even after the user dismisses the native player and returns to Flutter.
+      self.airPlayer = player
+
+      let playerVC = AVPlayerViewController()
+      playerVC.player = player
+      playerVC.modalPresentationStyle = .fullScreen
+      self.airPlayPlayerVC = playerVC
+
+      player.play()
+
+      rootVC.present(playerVC, animated: true) { [weak playerVC] in
+        result(nil)
+
+        // Immediately open the system AirPlay route-picker sheet so the user
+        // can select a device without a second tap.  We attach an invisible
+        // AVRoutePickerView to the playerVC's view (now visible) and trigger
+        // its inner button — this is the same UIKit trick as before, but now
+        // the picker appears over an AVPlayer, so route changes actually route
+        // the video.
+        guard let playerVC else { return }
+        let picker = AVRoutePickerView(frame: .zero)
+        picker.isHidden = true
+        playerVC.view.addSubview(picker)
+        for subview in picker.subviews {
+          if let button = subview as? UIButton {
+            button.sendActions(for: .touchUpInside)
+            break
+          }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+          picker.removeFromSuperview()
+        }
+      }
+    }
+  }
+
+  /// Replaces the content in the running AVPlayer without touching the AirPlay
+  /// route — the new stream is immediately routed to the connected device.
+  private func switchAirPlayMedia(
+    url urlString: String,
+    headers: [String: String],
+    result: @escaping FlutterResult
+  ) {
+    guard let player = airPlayer else {
+      result(FlutterError(code: "not_casting", message: "No active cast session", details: nil))
+      return
+    }
+    guard let url = URL(string: urlString) else {
+      result(FlutterError(code: "invalid_url", message: "Invalid stream URL", details: nil))
+      return
+    }
+    var assetOptions: [String: Any] = [:]
+    if !headers.isEmpty {
+      assetOptions["AVURLAssetHTTPHeaderFieldsKey"] = headers
+    }
+    let asset = AVURLAsset(url: url, options: assetOptions.isEmpty ? nil : assetOptions)
+    let item = AVPlayerItem(asset: asset)
+    DispatchQueue.main.async {
+      player.replaceCurrentItem(with: item)
+      player.play()
+      result(nil)
+    }
+  }
+
+  /// Stops the active AirPlay session: pauses the AVPlayer, releases it, and
+  /// dismisses the native player VC if it is still presented.
+  private func stopAirPlaySession(result: @escaping FlutterResult) {
+    DispatchQueue.main.async {
+      self.airPlayer?.pause()
+      self.airPlayer = nil
+      if let vc = self.airPlayPlayerVC, vc.presentingViewController != nil {
+        vc.dismiss(animated: true)
+      }
+      self.airPlayPlayerVC = nil
+      result(nil)
+    }
+  }
+
+  /// Shows the system AirPlay route-picker sheet over the current VC so the
+  /// user can switch or disconnect devices while a cast session is ongoing.
+  private func showAirPlayRoutePicker(result: @escaping FlutterResult) {
+    let scene = UIApplication.shared.connectedScenes
+      .compactMap { $0 as? UIWindowScene }
+      .first { $0.activationState == .foregroundActive }
+      ?? UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+    let keyWindow =
+      scene?.windows.first(where: { $0.isKeyWindow }) ?? scene?.windows.first
+    // Present from AVPlayerVC if it's still on screen, otherwise from rootVC.
+    let hostVC = (airPlayPlayerVC?.presentingViewController != nil ? airPlayPlayerVC : nil)
+      ?? keyWindow?.rootViewController
+    guard let hostVC else {
+      result(FlutterError(code: "no_vc", message: "No active view controller", details: nil))
+      return
+    }
+    DispatchQueue.main.async {
+      let picker = AVRoutePickerView(frame: .zero)
+      picker.isHidden = true
+      hostVC.view.addSubview(picker)
+      for subview in picker.subviews {
+        if let button = subview as? UIButton {
+          button.sendActions(for: .touchUpInside)
+          break
+        }
+      }
+      DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+        picker.removeFromSuperview()
+      }
+      result(nil)
+    }
+  }
+
   // where it's embedded in a navigation or presentation container).
   private static func findFlutterVC(in vc: UIViewController) -> FlutterViewController? {
     if let fvc = vc as? FlutterViewController { return fvc }

@@ -13,6 +13,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:video_player/video_player.dart';
 
 import 'background_execution_bridge.dart';
+import 'cast_bridge.dart';
 import 'models.dart';
 import 'theme.dart';
 import 'utils.dart';
@@ -113,6 +114,11 @@ class _MediaPlayerPageState extends State<MediaPlayerPage> {
   int _seekFeedback = 0;
   Timer? _seekFeedbackTimer;
 
+  // True when the cast session is active (native AVPlayer / Chromecast is
+  // playing the stream).  When true, VLC is not created and the player area
+  // shows the cast overlay instead.
+  bool _castingActive = false;
+
   // True when running on a native platform where VLC is available.
   bool get _usesVlcPlayer => !kIsWeb;
 
@@ -165,10 +171,32 @@ class _MediaPlayerPageState extends State<MediaPlayerPage> {
   bool get _canUsePictureInPicture =>
       widget.allowPictureInPicture && !kIsWeb && Platform.isAndroid;
 
+  // FLV streams are not castable: AirPlay receivers and Chromecast both reject
+  // the FLV container. Real-time transcoding while casting is not feasible on
+  // mobile. Disable the cast button for FLV; enable it for HLS and MP4.
+  bool get _isFlvStream {
+    final path = widget.uri.path.toLowerCase();
+    final query = widget.uri.toString().toLowerCase();
+    return path.endsWith('.flv') ||
+        query.contains('.flv?') ||
+        query.contains('.flv#') ||
+        query.contains('type=flv') ||
+        query.contains('format=flv');
+  }
+
+  bool get _showCastButton => CastBridge.instance.isCastSupported;
+
   @override
   void initState() {
     super.initState();
-    if (_usesVlcPlayer) {
+    _castingActive = CastBridge.isActivelyCasting;
+    if (_castingActive) {
+      // A cast session is already running — skip VLC and switch the cast
+      // content to this channel after the first frame.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        unawaited(_switchCastToThisChannel());
+      });
+    } else if (_usesVlcPlayer) {
       _vlcController = VlcPlayerController.network(
         widget.uri.toString(),
         hwAcc: HwAcc.full,
@@ -266,7 +294,7 @@ class _MediaPlayerPageState extends State<MediaPlayerPage> {
   Future<void> _togglePlayback() async {
     if (_playerIsPlaying) {
       if (_usesVlcPlayer) {
-        await _vlcController!.pause();
+        await _vlcController?.pause();
       } else {
         await _webController!.pause();
       }
@@ -275,7 +303,7 @@ class _MediaPlayerPageState extends State<MediaPlayerPage> {
       return;
     }
     if (_usesVlcPlayer) {
-      await _vlcController!.play();
+      await _vlcController?.play();
     } else {
       await _webController!.play();
     }
@@ -295,7 +323,7 @@ class _MediaPlayerPageState extends State<MediaPlayerPage> {
 
   Future<void> _seekTo(Duration position) async {
     if (_usesVlcPlayer) {
-      await _vlcController!.seekTo(position);
+      await _vlcController?.seekTo(position);
     } else {
       await _webController!.seekTo(position);
     }
@@ -303,7 +331,7 @@ class _MediaPlayerPageState extends State<MediaPlayerPage> {
 
   Future<void> _setMuted(bool value) async {
     if (_usesVlcPlayer) {
-      await _vlcController!.setVolume(value ? 0 : 100);
+      await _vlcController?.setVolume(value ? 0 : 100);
     } else {
       await _webController!.setVolume(value ? 0 : 1);
     }
@@ -395,7 +423,7 @@ class _MediaPlayerPageState extends State<MediaPlayerPage> {
     final uri = Uri.parse(variant.url);
     if (_usesVlcPlayer) {
       setState(() => _selectedVariantIndex = index);
-      await _vlcController!.setMediaFromNetwork(
+      await _vlcController?.setMediaFromNetwork(
         uri.toString(),
         hwAcc: HwAcc.full,
         autoPlay: true,
@@ -510,6 +538,110 @@ class _MediaPlayerPageState extends State<MediaPlayerPage> {
   String get _resolvedCopyLabel =>
       widget.copyLabel ??
       'Media URL copied. It still requires the active session cookie when auth is enabled.';
+
+  Future<void> _triggerCast() async {
+    if (_castingActive) {
+      // Already casting — show options to switch device or stop.
+      _showCastOptions();
+      return;
+    }
+    // Pause local playback before handing off to the native cast session.
+    if (_playerIsPlaying) {
+      if (_usesVlcPlayer) {
+        await _vlcController?.pause();
+      } else {
+        await _webController?.pause();
+      }
+    }
+    try {
+      await CastBridge.instance.showCastPicker(
+        url: widget.uri.toString(),
+        title: widget.title,
+        headers: widget.httpHeaders,
+        isLive: widget.isLive,
+      );
+      if (!mounted) return;
+      // Dispose VLC immediately so it releases AVAudioSession.  If VLC is
+      // still alive when the page is popped, its dispose() call triggers
+      // AVAudioSession.setActive(false) which kills the AirPlay route.
+      setState(() {
+        _castingActive = true;
+        _vlcController?.removeListener(_handleControllerUpdate);
+        _vlcController?.dispose();
+        _vlcController = null;
+      });
+    } on PlatformException catch (e) {
+      if (!mounted) return;
+      showMessage(context, e.message ?? 'Cast unavailable', error: true);
+    } catch (e) {
+      if (!mounted) return;
+      showMessage(context, e.toString(), error: true);
+    }
+  }
+
+  /// Switches the active cast session to this page's stream (called from
+  /// initState when navigating to a new channel while already casting).
+  Future<void> _switchCastToThisChannel() async {
+    // If the cast is already playing this exact URL, nothing to do.
+    if (CastBridge.castingUrl == widget.uri.toString()) return;
+    try {
+      await CastBridge.instance.switchCastMedia(
+        url: widget.uri.toString(),
+        title: widget.title,
+        headers: widget.httpHeaders,
+        isLive: widget.isLive,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      showMessage(context, 'Cast switch failed: $e', error: true);
+    }
+  }
+
+  void _showCastOptions() {
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (ctx) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          ListTile(
+            leading: const Icon(Icons.cast),
+            title: const Text('Switch Device'),
+            onTap: () {
+              Navigator.pop(ctx);
+              unawaited(CastBridge.instance.showRoutePicker());
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.cast_connected),
+            title: const Text('Stop Casting'),
+            onTap: () {
+              Navigator.pop(ctx);
+              unawaited(_stopCast());
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _stopCast() async {
+    await CastBridge.instance.stopCast();
+    if (!mounted) return;
+    setState(() {
+      _castingActive = false;
+      _variantsLoaded = false;
+      if (_usesVlcPlayer) {
+        _vlcController?.removeListener(_handleControllerUpdate);
+        _vlcController?.dispose();
+        _vlcController = VlcPlayerController.network(
+          widget.uri.toString(),
+          hwAcc: HwAcc.full,
+          autoPlay: true,
+          options: _buildVlcOptions(widget.httpHeaders),
+        )..addListener(_handleControllerUpdate);
+      }
+    });
+  }
 
   Future<void> _enterPictureInPicture() async {
     if (_enteringPictureInPicture) return;
@@ -653,6 +785,21 @@ class _MediaPlayerPageState extends State<MediaPlayerPage> {
                           ? null
                           : _enterPictureInPicture,
                       icon: const Icon(Icons.picture_in_picture_alt_outlined),
+                    ),
+                  if (_showCastButton)
+                    IconButton(
+                      tooltip: _isFlvStream
+                          ? 'FLV streams cannot be cast'
+                          : _castingActive
+                              ? 'Casting — tap to switch device or stop'
+                              : 'Cast to AirPlay / Chromecast',
+                      onPressed: _isFlvStream ? null : _triggerCast,
+                      icon: Icon(
+                        _castingActive
+                            ? Icons.cast_connected
+                            : Icons.cast,
+                        color: _castingActive ? Colors.lightBlueAccent : null,
+                      ),
                     ),
                   IconButton(
                     tooltip: 'Copy URL',
@@ -849,6 +996,25 @@ class _MediaPlayerPageState extends State<MediaPlayerPage> {
                           ),
                         ),
                       ),
+                      if (_showCastButton)
+                        IconButton(
+                          tooltip: _isFlvStream
+                              ? 'FLV streams cannot be cast'
+                              : _castingActive
+                                  ? 'Casting — tap to switch device or stop'
+                                  : 'Cast to AirPlay / Chromecast',
+                          onPressed: _isFlvStream ? null : _triggerCast,
+                          icon: Icon(
+                            _castingActive
+                                ? Icons.cast_connected
+                                : Icons.cast,
+                            color: _castingActive
+                                ? Colors.lightBlueAccent
+                                : _isFlvStream
+                                    ? Colors.white24
+                                    : Colors.white,
+                          ),
+                        ),
                     ],
                   ),
                 ),
@@ -1005,6 +1171,11 @@ class _MediaPlayerPageState extends State<MediaPlayerPage> {
   }
 
   Widget _buildPlayerSurface(BuildContext context) {
+    // Cast overlay replaces the video surface while a cast session is running.
+    if (_castingActive) {
+      return _buildCastingOverlay(context);
+    }
+
     final overlay = _playerError != null
         ? Center(
             child: Padding(
@@ -1038,6 +1209,52 @@ class _MediaPlayerPageState extends State<MediaPlayerPage> {
     if (overlay != null) return overlay;
     return Center(child: VideoPlayer(_webController!));
   }
+
+  Widget _buildCastingOverlay(BuildContext context) {
+    return Container(
+      color: Colors.black,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: <Widget>[
+          const Icon(Icons.cast_connected, size: 72, color: Colors.white54),
+          const SizedBox(height: 20),
+          Text(
+            'Casting',
+            style: Theme.of(context)
+                .textTheme
+                .headlineSmall
+                ?.copyWith(color: Colors.white),
+          ),
+          if (widget.title.isNotEmpty) ...<Widget>[
+            const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Text(
+                widget.title,
+                style: const TextStyle(color: Colors.white60),
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+          const SizedBox(height: 40),
+          OutlinedButton.icon(
+            onPressed: _stopCast,
+            icon: const Icon(Icons.cast, color: Colors.white70),
+            label: const Text(
+              'Stop Casting',
+              style: TextStyle(color: Colors.white70),
+            ),
+            style: OutlinedButton.styleFrom(
+              side: const BorderSide(color: Colors.white30),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
 
   Widget _buildTimeline(
     BuildContext context,
