@@ -162,10 +162,17 @@ textarea.form-control {
   display: flex;
   border-bottom: 1px solid #30363d;
   gap: 0;
+  overflow-x: auto;
+  scrollbar-width: none;           /* Firefox: hide horizontal scrollbar */
+  -ms-overflow-style: none;
+}
+
+.tab-nav::-webkit-scrollbar {
+  display: none;                   /* Chrome/Safari: hide horizontal scrollbar */
 }
 
 .tab-btn {
-  padding: 0.5rem 1rem;
+  padding: 0.5rem 0.9rem;
   font-size: 0.875rem;
   color: #8b949e;
   background: none;
@@ -174,6 +181,7 @@ textarea.form-control {
   cursor: pointer;
   transition: color 0.15s, border-color 0.15s;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .tab-btn:hover {
@@ -528,79 +536,48 @@ textarea.form-control {
 
 .channel-grid-body {
   overflow: hidden;
-  height: 560px;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .channel-group-sidebar {
-  min-width: 0;
-  border-right: none;
-  overflow-y: auto;
-  height: 100%;
-  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  border-top: 1px solid #30363d;
+  overflow: hidden;
 }
 
-.channel-group-resizer {
-  width: 12px;
-  cursor: col-resize;
-  flex-shrink: 0;
+.channel-group-sidebar-header {
   display: flex;
   align-items: center;
-  justify-content: center;
-  background: transparent;
-  position: relative;
-  z-index: 1;
-  transition: background 0.15s;
-  touch-action: none;
+  justify-content: space-between;
+  padding: 6px 14px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: #555d68;
+  border-bottom: 1px solid #21262d;
+  flex-shrink: 0;
 }
 
-.channel-group-resizer::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 1px;
-  background: #30363d;
-  transition: background 0.15s, width 0.15s;
-}
-
-.channel-group-resizer::after {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 4px;
-  height: 32px;
-  background-image: radial-gradient(circle, #555d68 1.5px, transparent 1.5px);
-  background-size: 4px 8px;
-  background-repeat: repeat-y;
-  transition: background-image 0.15s;
-}
-
-.channel-group-resizer:hover::before,
-.channel-group-resizer.dragging::before {
-  width: 2px;
-  background: #388bfd;
-}
-
-.channel-group-resizer:hover::after,
-.channel-group-resizer.dragging::after {
-  background-image: radial-gradient(circle, #388bfd 1.5px, transparent 1.5px);
-}
 
 .channel-group-list {
   list-style: none;
   margin: 0;
-  padding: 6px 0;
+  padding: 4px 0;
   overflow-y: auto;
   flex: 1;
+  min-height: 0;
 }
 
 .channel-group-item {
-  padding: 6px 12px;
-  font-size: 0.78rem;
+  padding: 7px 14px;
+  font-size: 0.8rem;
   color: var(--muted);
   cursor: pointer;
   border-left: 2px solid transparent;
@@ -623,7 +600,7 @@ textarea.form-control {
 .channel-grid-area {
   flex: 1;
   overflow-y: auto;
-  height: 100%;
+  min-height: 0;
 }
 
 .channel-card {
@@ -642,6 +619,7 @@ textarea.form-control {
 
 .channel-card:hover {
   border-color: #388bfd;
+  box-shadow: 0 0 0 1px rgba(56, 139, 253, 0.1), 0 4px 12px rgba(56, 139, 253, 0.08);
 }
 
 .channel-logo-wrap {
@@ -718,15 +696,54 @@ textarea.form-control {
 
 .channel-actions {
   display: flex;
-  gap: 4px;
+  gap: 5px;
   width: 100%;
   margin-top: auto;
+  padding-top: 2px;
 }
 
 .channel-actions .btn {
   font-size: 0.72rem;
-  padding: 3px 0;
+  padding: 4px 14px;
   flex: 1;
+  border-radius: 6px;
+}
+
+/* Compact icon-only action buttons on channel cards */
+.ch-action-btn {
+  flex: 1;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.ch-action-btn-dl {
+  background: rgba(56, 139, 253, 0.07);
+  border-color: rgba(56, 139, 253, 0.22);
+  color: #58a6ff;
+}
+
+.ch-action-btn-dl:hover {
+  background: rgba(56, 139, 253, 0.18);
+  border-color: rgba(56, 139, 253, 0.5);
+}
+
+.ch-action-btn-watch {
+  background: rgba(63, 185, 80, 0.07);
+  border-color: rgba(63, 185, 80, 0.22);
+  color: #3fb950;
+}
+
+.ch-action-btn-watch:hover {
+  background: rgba(63, 185, 80, 0.18);
+  border-color: rgba(63, 185, 80, 0.5);
 }
 
 /* ── Health status dots ──────────────────────────────────────────────────── */
@@ -766,7 +783,9 @@ textarea.form-control {
 /* ── Downloads section ───────────────────────────────────────────────────── */
 .downloads-layout {
   display: flex;
-  min-height: 160px;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .downloads-sidebar {
@@ -777,6 +796,7 @@ textarea.form-control {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  overflow-y: auto;
 }
 
 .dl-cat {
@@ -827,6 +847,7 @@ textarea.form-control {
 .downloads-content {
   flex: 1;
   min-width: 0;
+  overflow-y: auto;
 }
 
 /* ── Sort buttons ────────────────────────────────────────────────────────── */
@@ -1111,7 +1132,59 @@ textarea.form-control {
 /* ── Mobile responsive ───────────────────────────────────────────────────── */
 @media (max-width: 768px) {
   .channel-grid-body {
-    height: 400px;
+    /* height is now flex-driven; no fixed override needed */
+  }
+
+  /* Group sidebar → horizontal scrolling chip bar on mobile */
+  .channel-group-sidebar {
+    flex: 0 0 auto;
+    min-height: 0;
+    height: auto;
+    border-top: 1px solid #21262d;
+  }
+
+  .channel-group-sidebar-header {
+    display: none;
+  }
+
+  .channel-group-list {
+    display: flex;
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 8px 10px;
+    gap: 6px;
+    flex: 0 0 auto;
+    scrollbar-width: none;
+  }
+
+  .channel-group-list::-webkit-scrollbar {
+    display: none;
+  }
+
+  .channel-group-item {
+    flex-shrink: 0;
+    white-space: nowrap;
+    overflow: visible;
+    text-overflow: clip;
+    padding: 4px 12px;
+    border-radius: 20px;
+    border: 1px solid #30363d;
+    font-size: 0.76rem;
+    color: var(--muted);
+    background: transparent;
+    transition: background 0.1s, color 0.1s, border-color 0.1s;
+  }
+
+  .channel-group-item:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: #555d68;
+  }
+
+  .channel-group-item.active {
+    background: rgba(56, 139, 253, 0.15);
+    border-color: rgba(56, 139, 253, 0.5);
+    color: #58a6ff;
   }
 
   .editor-groups-panel {
@@ -1166,28 +1239,17 @@ textarea.form-control {
   }
 }
 
-/* ── Tablet channel layout (641-900px): narrow sidebar + 2-col grid ──────── */
+/* ── Tablet channel layout (641-900px): 2-col grid ──────────────────────── */
 @media (min-width: 641px) and (max-width: 900px) {
-  .channel-group-sidebar {
-    width: 110px;
-    min-width: 0;
-  }
-
-  .channel-group-item {
-    font-size: 0.72rem;
-    padding: 5px 8px;
-  }
-
   #channelGrid {
     grid-template-columns: repeat(2, 1fr);
   }
 }
 
-/* ── Mobile channel layout (≤640px): hidden sidebar + 1-col grid ───────────── */
+/* ── Mobile channel layout (≤640px): compact grid ──────────────────────── */
 @media (max-width: 640px) {
-  .channel-group-item {
-    font-size: 0.72rem;
-    padding: 2px 4px;
+  #channelGrid {
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
   }
 }
 

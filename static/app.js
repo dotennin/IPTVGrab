@@ -252,14 +252,15 @@ function hidePanel(panelId) {
 
 // Tab display logic
 function showDownloadsTab() {
-  hidePanel("topPanelsGrid");
+  hidePanel("mainPanels");
   showPanel("downloadsSection");
   setActiveTab("downloads-tab");
 }
 
 function hideDownloadsTab() {
-  showPanel("topPanelsGrid");
+  showPanel("mainPanels");
   hidePanel("downloadsSection");
+  document.getElementById("downloads-tab").classList.remove("tab-active", "active");
 }
 
 // UI toggling between playlist and URL/cURL
@@ -1871,8 +1872,9 @@ function _populateGroupFilter(channels, orderedGroups = null) {
     list.appendChild(li);
   }
   sidebar.classList.toggle("d-none", groups.length === 0);
-  const resizer = document.getElementById("channelGroupResizer");
-  if (resizer) resizer.classList.toggle("d-none", groups.length === 0);
+  // Update group count badge in sidebar header
+  const countEl = document.getElementById("groupCount");
+  if (countEl) countEl.textContent = groups.length > 0 ? groups.length : "";
 }
 
 async function selectPlaylist(id) {
@@ -1895,7 +1897,6 @@ async function selectPlaylist(id) {
     document.getElementById("channelSearch").classList.add("d-none");
     document.getElementById("healthOnlyWrap").classList.add("d-none");
     document.getElementById("channelGroupSidebar").classList.add("d-none");
-    document.getElementById("channelGroupResizer")?.classList.add("d-none");
     countBadge.textContent = "0";
     refreshBtn.disabled = true;
     document.getElementById("editPlaylistBtn").disabled = true;
@@ -2017,10 +2018,10 @@ function renderChannels(channels) {
       ${ch.group ? `<div class="channel-group">${esc(ch.group)}</div>` : ""}
       ${ch.playlist_name ? `<div class="channel-playlist-tag" title="${esc(ch.playlist_name)}">${esc(ch.playlist_name)}</div>` : ""}
       <div class="channel-actions">
-        <button class="btn btn-sm btn-primary channel-dl-btn" data-ch-idx="${i}" title="Download">
+        <button class="ch-action-btn ch-action-btn-dl channel-dl-btn" data-ch-idx="${i}" title="Download">
           <i class="fas fa-download"></i>
         </button>
-        <button class="btn btn-sm btn-outline-info channel-watch-btn" data-ch-idx="${i}" title="Watch online">
+        <button class="ch-action-btn ch-action-btn-watch channel-watch-btn" data-ch-idx="${i}" title="Watch online">
           <i class="fas fa-play"></i>
         </button>
       </div>
@@ -2952,37 +2953,6 @@ document.getElementById("allPlaylistsEditorModal").addEventListener("hide.bs.mod
     function onMove(e) {
       const w = Math.max(160, Math.min(600, startW + e.clientX - startX));
       panel.style.width = w + "px";
-    }
-    function onUp() {
-      resizer.classList.remove("dragging");
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-      resizer.removeEventListener("pointermove", onMove);
-      resizer.removeEventListener("pointerup", onUp);
-    }
-    resizer.addEventListener("pointermove", onMove);
-    resizer.addEventListener("pointerup", onUp);
-    e.preventDefault();
-  });
-})();
-
-// ── Channel group sidebar resizer ─────────────────────────────────────────
-(function () {
-  const resizer = document.getElementById("channelGroupResizer");
-  const sidebar = document.getElementById("channelGroupSidebar");
-  if (!resizer || !sidebar) return;
-
-  resizer.addEventListener("pointerdown", (e) => {
-    const startX = e.clientX;
-    const startW = sidebar.offsetWidth;
-    resizer.setPointerCapture(e.pointerId);
-    resizer.classList.add("dragging");
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-
-    function onMove(e) {
-      const w = Math.max(60, Math.min(320, startW + e.clientX - startX));
-      sidebar.style.width = w + "px";
     }
     function onUp() {
       resizer.classList.remove("dragging");
