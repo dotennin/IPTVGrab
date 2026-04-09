@@ -35,7 +35,7 @@
   <meta name="theme-color" content="#0b1220" />
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet" />
   <link href="/compat.css" rel="stylesheet" />
-  <link href="/styles.css?v=33" rel="stylesheet" />
+  <link href="/styles.css?v=34" rel="stylesheet" />
 </head>
 <body class="bg-gh-bg text-gh-text min-h-screen">
 
@@ -55,12 +55,6 @@
   </nav>
 
   <div class="w-full py-2 px-2">
-    <!-- Top panels grid -->
-    <div class="grid gap-2 xl:grid-cols-12">
-
-      <!-- Left panel: Input -->
-      <div class="xl:col-span-4">
-        <div class="rounded-lg border border-gh-border bg-gh-surface h-full flex flex-col max-h-[600px]">
           <!-- Tab nav -->
           <div class="tab-nav px-2 pt-1">
             <button class="tab-btn tab-active" id="playlist-tab" data-bs-toggle="tab" data-bs-target="#playlistPane" type="button">
@@ -72,7 +66,17 @@
             <button class="tab-btn" id="curl-tab" data-bs-toggle="tab" data-bs-target="#curlPane" type="button">
               <i class="fas fa-terminal mr-1"></i>cURL
             </button>
+            <button class="tab-btn" id="downloads-tab" type="button">
+              <i class="fas fa-download mr-1"></i>Downloads
+              <span class="badge bg-secondary ms-1" id="taskCountBadge">0</span>
+            </button>
           </div>
+    <!-- Top panels grid -->
+    <div class="grid gap-2 xl:grid-cols-12" id="topPanelsGrid">
+
+      <!-- Left panel: Input -->
+      <div class="xl:col-span-4">
+        <div class="rounded-lg border border-gh-border bg-gh-surface h-full flex flex-col max-h-[600px]">
           <!-- Card body -->
           <div class="p-3 flex-1 flex flex-col min-h-0">
             <!-- Playlist tab pane -->
@@ -202,13 +206,12 @@
       </div>
     </div>
 
-    <!-- Downloads section -->
-    <div class="mt-2">
+    <!-- Downloads section (shown when Downloads tab is active) -->
+    <div class="d-none" id="downloadsSection">
       <div class="rounded-lg border border-gh-border bg-gh-surface">
         <div class="flex items-center justify-between px-4 py-2 border-b border-gh-border flex-wrap gap-2">
           <span class="font-medium">
             <i class="fas fa-download mr-2"></i>Downloads
-            <span class="badge bg-secondary ms-1" id="taskCountBadge">0</span>
           </span>
           <div class="flex items-center gap-1">
             <span class="text-gh-muted text-sm mr-1">Sort:</span>
@@ -636,10 +639,27 @@
     </div>
   </div>
 
+  <!-- Channel context menu -->
+  <div id="channelContextMenu" class="ch-ctx-menu hidden">
+    <div class="ch-ctx-item" id="ctxDownloadChannel">
+      <i class="fas fa-download mr-2 text-gh-blue-light"></i>Download
+    </div>
+    <div class="ch-ctx-item" id="ctxWatchChannel">
+      <i class="fas fa-play mr-2 text-gh-green"></i>Watch online
+    </div>
+    <div class="ch-ctx-item" id="ctxCopyChannelUrl">
+      <i class="fas fa-copy mr-2 text-gh-muted"></i>Copy URL
+    </div>
+    <div class="ch-ctx-divider"></div>
+    <div class="ch-ctx-item ch-ctx-item-danger" id="ctxDisableChannel">
+      <i class="fas fa-ban mr-2"></i>Disable in all playlists
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/mpegts.js@1/dist/mpegts.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.6/Sortable.min.js"></script>
   <script src="/bootstrap-shim.js"></script>
-  <script src="/app.js?v=45"></script>
+  <script src="/app.js?v=46"></script>
 </body>
 </html>

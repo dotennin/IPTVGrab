@@ -1326,3 +1326,46 @@ textarea.form-control {
   color: #8b949e;
   line-height: 1.4;
 }
+
+/* ── Channel context menu ──────────────────────────────────────────────────── */
+.ch-ctx-menu {
+  position: fixed;
+  z-index: 9999;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  min-width: 190px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  user-select: none;
+}
+
+.ch-ctx-item {
+  padding: 8px 14px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  color: #e6edf3;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  transition: background 0.1s;
+}
+
+.ch-ctx-item:hover {
+  background: #21262d;
+}
+
+.ch-ctx-item-danger {
+  color: #f85149;
+}
+
+.ch-ctx-item-danger:hover {
+  background: rgba(248, 81, 73, 0.12);
+}
+
+.ch-ctx-divider {
+  height: 1px;
+  background: #30363d;
+  margin: 2px 0;
+}
+

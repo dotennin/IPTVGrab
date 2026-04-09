@@ -232,32 +232,70 @@ document.getElementById("concurrency").addEventListener("input", (e) => {
   document.getElementById("concurrencyVal").textContent = e.target.value;
 });
 
-// 定义显示和隐藏的逻辑封装成函数
-const toggleUI = (isPlaylist) => {
-  const outputSettings = document.getElementById("outputSettingsRow");
-  const parseBtnGroup = document.getElementById("parseBtnGroup");
-  const streamInfo = document.getElementById("streamInfoPanel");
-  const channelGrid = document.getElementById("channelGridPanel");
+// ── Tab switching ─────────────────────────────────────────────────────────────
 
-  if (isPlaylist) {
-    outputSettings.classList.add("d-none");
-    parseBtnGroup.classList.add("d-none");
-    streamInfo.classList.add("d-none");
-    channelGrid.classList.remove("d-none");
-  } else {
-    outputSettings.classList.remove("d-none");
-    parseBtnGroup.classList.remove("d-none");
-    streamInfo.classList.remove("d-none");
-    channelGrid.classList.add("d-none");
-  }
-};
+// Utility to toggle classes
+function setActiveTab(tabId) {
+  document.querySelectorAll(".tab-nav .tab-btn").forEach((b) =>
+    b.classList.remove("tab-active", "active")
+  );
+  document.getElementById(tabId).classList.add("tab-active", "active");
+}
 
-// 绑定事件
-document.getElementById("playlist-tab").addEventListener("click", () => toggleUI(true));
+// Show/hide main content panels
+function showPanel(panelId) {
+  document.getElementById(panelId).classList.remove("d-none");
+}
+function hidePanel(panelId) {
+  document.getElementById(panelId).classList.add("d-none");
+}
+
+// Tab display logic
+function showDownloadsTab() {
+  hidePanel("topPanelsGrid");
+  showPanel("downloadsSection");
+  setActiveTab("downloads-tab");
+}
+
+function hideDownloadsTab() {
+  showPanel("topPanelsGrid");
+  hidePanel("downloadsSection");
+}
+
+// UI toggling between playlist and URL/cURL
+function toggleUI(isPlaylist) {
+  hideDownloadsTab();
+
+  const controls = [
+    { id: "outputSettingsRow", playlistHide: true },
+    { id: "parseBtnGroup", playlistHide: true },
+    { id: "streamInfoPanel", playlistHide: true },
+    { id: "channelGridPanel", playlistHide: false },
+  ];
+
+  controls.forEach(({ id, playlistHide }) => {
+    if (isPlaylist === playlistHide) {
+      hidePanel(id);
+    } else {
+      showPanel(id);
+    }
+  });
+}
+
+// Bind tab events
+document.getElementById("playlist-tab").addEventListener("click", () => {
+  toggleUI(true);
+  setActiveTab("playlist-tab");
+});
 
 ["url-tab", "curl-tab"].forEach((id) => {
-  document.getElementById(id).addEventListener("click", () => toggleUI(false));
+  document.getElementById(id).addEventListener("click", () => {
+    toggleUI(false);
+    setActiveTab(id);
+  });
 });
+
+document.getElementById("downloads-tab").addEventListener("click", showDownloadsTab);
 
 // ── Header rows ───────────────────────────────────────────────────────────────
 function addHeaderRow(key = "", val = "") {
@@ -484,6 +522,7 @@ async function startDownload() {
 
     addTaskCard(data.task_id, currentRequest.url);
     startPolling(data.task_id);
+    showDownloadsTab();
     toast("Download task added", "info");
   } catch (e) {
     toast(e.message, "danger");
@@ -2002,6 +2041,115 @@ function renderChannels(channels) {
       watchChannel(channels[idx]);
     });
   });
+
+  // Bind right-click / long-press context menu
+  let _lpTimer = null;
+  grid.querySelectorAll(".channel-card").forEach((card, i) => {
+    const ch = channels[i];
+    card.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      showChannelContextMenu(ch, e.clientX, e.clientY);
+    });
+    card.addEventListener("touchstart", (e) => {
+      _lpTimer = setTimeout(() => {
+        _lpTimer = null;
+        const touch = e.touches[0];
+        showChannelContextMenu(ch, touch.clientX, touch.clientY);
+      }, 500);
+    }, { passive: true });
+    card.addEventListener("touchend", () => { if (_lpTimer) { clearTimeout(_lpTimer); _lpTimer = null; } });
+    card.addEventListener("touchmove", () => { if (_lpTimer) { clearTimeout(_lpTimer); _lpTimer = null; } });
+  });
+}
+
+// ── Channel context menu ──────────────────────────────────────────────────────
+let _ctxChannel = null;
+
+function showChannelContextMenu(ch, x, y) {
+  _ctxChannel = ch;
+  const menu = document.getElementById("channelContextMenu");
+  menu.classList.remove("hidden");
+  // Position, staying within viewport
+  const mw = 200, mh = 160;
+  const left = x + mw > window.innerWidth  ? x - mw : x;
+  const top  = y + mh > window.innerHeight ? y - mh : y;
+  menu.style.left = left + "px";
+  menu.style.top  = top  + "px";
+}
+
+function hideChannelContextMenu() {
+  document.getElementById("channelContextMenu").classList.add("hidden");
+  _ctxChannel = null;
+}
+
+document.addEventListener("click",   hideChannelContextMenu);
+document.addEventListener("keydown",  (e) => { if (e.key === "Escape") hideChannelContextMenu(); });
+
+document.getElementById("ctxDownloadChannel").addEventListener("click", (e) => {
+  e.stopPropagation();
+  const ch = _ctxChannel;
+  if (!ch) return;
+  downloadChannel(ch);
+});
+
+document.getElementById("ctxWatchChannel").addEventListener("click", (e) => {
+  e.stopPropagation();
+  const ch = _ctxChannel;
+  if (!ch) return;
+  watchChannel(ch);
+});
+
+document.getElementById("ctxCopyChannelUrl").addEventListener("click", (e) => {
+  e.stopPropagation();
+  const ch = _ctxChannel;
+  if (!ch?.url) return;
+  navigator.clipboard.writeText(ch.url).then(() => toast("URL copied", "success")).catch(() => toast("Copy failed", "danger"));
+  hideChannelContextMenu();
+});
+
+document.getElementById("ctxDisableChannel").addEventListener("click", async (e) => {
+  e.stopPropagation();
+  const ch = _ctxChannel;
+  hideChannelContextMenu();
+  if (!ch) return;
+  await disableChannelInAllPlaylists(ch);
+});
+
+async function disableChannelInAllPlaylists(ch) {
+  try {
+    let channelId = ch.id;
+    if (!channelId) {
+      // Look up channel in the merged config by URL
+      const res = await apiFetch("/api/all-playlists");
+      if (!res.ok) throw new Error("Failed to load All Playlists config");
+      const data = await res.json();
+      for (const g of data.groups || []) {
+        for (const c of g.channels || []) {
+          if (c.url === ch.url) { channelId = c.id; break; }
+        }
+        if (channelId) break;
+      }
+    }
+    if (!channelId) {
+      toast("Channel not found in All Playlists. Open the editor to add it first.", "warning");
+      return;
+    }
+    const res = await apiFetch(`/api/all-playlists/channels/${encodeURIComponent(channelId)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: false }),
+    });
+    if (!res.ok) {
+      const d = await res.json();
+      throw new Error(d.detail || "Failed to disable channel");
+    }
+    toast(`Disabled: ${ch.name || ch.url}`, "success");
+    // Refresh the channel grid if currently in __all__ view
+    const sel = document.getElementById("playlistSelect");
+    if (sel && sel.value === "__all__") await selectPlaylist("__all__");
+  } catch (e) {
+    toast(e.message, "danger");
+  }
 }
 
 async function downloadChannel(ch, triggerBtn = null) {
@@ -2038,7 +2186,7 @@ async function downloadChannel(ch, triggerBtn = null) {
       updateTaskCard(task.id, task);
       startPolling(task.id);
     }
-    document.getElementById("downloadsList").scrollIntoView({ behavior: "smooth" });
+    showDownloadsTab();
     toast(`Started: ${ch.name || ch.url}`, "success");
   } catch (e) {
     if (e.message !== "cancelled") toast(e.message, "danger");
