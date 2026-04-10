@@ -1,4 +1,4 @@
-.PHONY: all server test test-rust test-flutter ios-targets ios-lib ios-xcframework macos-targets macos-lib android-targets flutter-check pod-check flutter-bootstrap flutter-rust-android flutter-rust-ios flutter-rust-macos flutter-prepare flutter-run flutter-run-macos flutter-apk flutter-ipa flutter-ipa-debug flutter-clean apk ipa ipa-debug clean
+.PHONY: all server test test-rust test-flutter frontend-install frontend-dev frontend-build ios-targets ios-lib ios-xcframework macos-targets macos-lib android-targets flutter-check pod-check flutter-bootstrap flutter-rust-android flutter-rust-ios flutter-rust-macos flutter-prepare flutter-run flutter-run-macos flutter-apk flutter-ipa flutter-ipa-debug flutter-clean apk ipa ipa-debug clean
 
 PATH := $(HOME)/.cargo/bin:$(PATH)
 RUSTUP_TOOLCHAIN ?= stable
@@ -125,8 +125,24 @@ test: test-rust test-flutter
 server:
 	$(CARGO) build --release -p server
 
+# ── Frontend (Vite + TypeScript) ───────────────────────────────────────────────
+frontend-install:
+	cd frontend && npm install
+
+frontend-dev:
+	cd frontend && npm run dev
+
+frontend-build:
+	cd frontend && npm run build
+
+
 run:
-	$(CARGO) watch -w crates -x 'run -p server'
+	@printf '\033[1;34m  Rust  → http://localhost:8765\n  Vite  → http://localhost:5173  (HMR, use this for dev)\033[0m\n\n'
+	@cd frontend && npm run dev & \
+	VITE_PID=$$!; \
+	trap 'kill $$VITE_PID 2>/dev/null' INT TERM EXIT; \
+	$(CARGO) watch -w crates -x 'run -p server'; \
+	kill $$VITE_PID 2>/dev/null; true
 
 # ── iOS native artifacts for Flutter ──────────────────────────────────────────
 ios-targets:

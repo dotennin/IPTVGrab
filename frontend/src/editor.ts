@@ -1,0 +1,506 @@
+import Sortable from 'sortablejs';
+import { Modal } from './bootstrap-shim';
+import { apiFetch } from './api';
+import { esc, toast } from './utils';
+import { startHealthPoll, _healthDotInline, _originLabel } from './health';
+import { loadPlaylists, selectPlaylist } from './playlists';
+import type { MergedGroup, MergedChannel } from './types';
+
+let editorGroups: MergedGroup[] = [];
+let editorSelectedGroupId: string | null = null;
+let groupSortable: Sortable | null = null;
+let channelSortable: Sortable | null = null;
+let editorDirty = false;
+
+function openAllPlaylistsEditor(): void {
+  editorDirty = false;
+  apiFetch('/api/all-playlists')
+    .then((r) => r.json())
+    .then((data) => {
+      editorGroups = data.groups || [];
+      editorSelectedGroupId = null;
+      renderEditorGroups();
+      renderEditorChannels();
+      new Modal(document.getElementById('allPlaylistsEditorModal')!).show();
+    })
+    .catch((e: Error) => toast(e.message, 'danger'));
+}
+
+function renderEditorGroups(): void {
+  const list = document.getElementById('editorGroupList');
+  if (!list) return;
+  list.innerHTML = editorGroups
+    .map(
+      (g) => `
+    <div class="editor-group-item${g.id === editorSelectedGroupId ? ' active' : ''}${g.enabled ? '' : ' disabled-item'}"
+         data-group-id="${g.id}">
+      <span class="drag-handle"><i class="fas fa-grip-vertical"></i></span>
+      <span class="editor-item-name" title="${esc(g.name)}">${esc(g.name)}</span>
+      <span class="editor-item-badge badge ${g.custom ? 'bg-info' : 'bg-secondary'}">${g.channels?.length || 0}</span>
+      <span class="editor-item-actions">
+        <div class="form-check form-switch mb-0">
+          <input class="form-check-input editor-group-toggle" type="checkbox" ${g.enabled ? 'checked' : ''} data-gid="${g.id}" title="${g.enabled ? 'Enabled' : 'Disabled'}">
+        </div>
+        ${g.custom ? `<button class="btn btn-outline-primary btn-xs editor-rename-group-btn" data-gid="${g.id}" title="Rename group"><i class="fas fa-pencil-alt"></i></button>` : ''}
+        <button class="btn ${g.custom ? 'btn-outline-danger' : 'btn-outline-secondary'} btn-xs editor-delete-group-btn" data-gid="${g.id}" ${g.custom ? '' : 'disabled'} title="${g.custom ? 'Delete group' : 'Source groups cannot be deleted'}">
+          <i class="fas fa-trash-alt"></i>
+        </button>
+      </span>
+    </div>`,
+    )
+    .join('');
+
+  list.querySelectorAll('.editor-group-item').forEach((el) => {
+    el.addEventListener('click', (e) => {
+      if ((e.target as HTMLElement).closest('.editor-item-actions')) return;
+      editorSelectedGroupId = (el as HTMLElement).dataset.groupId || null;
+      renderEditorGroups();
+      renderEditorChannels();
+    });
+  });
+
+  list.querySelectorAll('.editor-group-toggle').forEach((cb) => {
+    cb.addEventListener('change', (e) => {
+      e.stopPropagation();
+      const input = cb as HTMLInputElement;
+      const g = editorGroups.find((g) => g.id === input.dataset.gid);
+      if (g) { g.enabled = input.checked; editorDirty = true; renderEditorGroups(); }
+    });
+  });
+
+  list.querySelectorAll('.editor-rename-group-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const g = editorGroups.find((g) => g.id === (btn as HTMLElement).dataset.gid);
+      if (!g?.custom) return;
+      (document.getElementById('renameGroupNameInput') as HTMLInputElement).value = g.name;
+      (document.getElementById('renameGroupIdInput')  as HTMLInputElement).value = g.id;
+      const modal = new Modal(document.getElementById('renameGroupModal')!);
+      modal.show();
+      setTimeout(() => {
+        const input = document.getElementById('renameGroupNameInput') as HTMLInputElement;
+        input.focus(); input.select();
+      }, 50);
+    });
+  });
+
+  list.querySelectorAll('.editor-delete-group-btn:not([disabled])').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const gid = (btn as HTMLElement).dataset.gid;
+      const g = editorGroups.find((g) => g.id === gid);
+      if (!g?.custom) return;
+      if (!confirm(`Delete custom group "${g.name}" and all its channels?`)) return;
+      editorGroups = editorGroups.filter((g) => g.id !== gid);
+      if (editorSelectedGroupId === gid) editorSelectedGroupId = null;
+      editorDirty = true;
+      renderEditorGroups();
+      renderEditorChannels();
+    });
+  });
+
+  if (groupSortable) groupSortable.destroy();
+  groupSortable = new Sortable(list as HTMLElement, {
+    handle: '.drag-handle',
+    animation: 150,
+    ghostClass: 'sortable-ghost',
+    chosenClass: 'sortable-chosen',
+    onEnd: () => {
+      const newOrder = [...list.querySelectorAll('.editor-group-item')].map(
+        (el) => (el as HTMLElement).dataset.groupId,
+      );
+      const reordered = newOrder
+        .map((id) => editorGroups.find((g) => g.id === id))
+        .filter((g): g is MergedGroup => !!g);
+      editorGroups = reordered;
+      editorDirty = true;
+    },
+  });
+}
+
+function renderEditorChannels(): void {
+  const list        = document.getElementById('editorChannelList');
+  const placeholder = document.getElementById('editorChannelPlaceholder');
+  const addBtn      = document.getElementById('editorAddChannelBtn');
+  const countEl     = document.getElementById('editorChannelCount');
+  const nameEl      = document.getElementById('editorSelectedGroupName');
+  if (!list || !placeholder) return;
+
+  const group = editorGroups.find((g) => g.id === editorSelectedGroupId);
+  if (!group) {
+    list.classList.add('d-none');
+    placeholder.classList.remove('d-none');
+    addBtn?.classList.add('d-none');
+    if (countEl) countEl.textContent = '0';
+    if (nameEl) nameEl.textContent = '';
+    return;
+  }
+
+  placeholder.classList.add('d-none');
+  list.classList.remove('d-none');
+  addBtn?.classList.remove('d-none');
+  if (countEl) countEl.textContent = String(group.channels?.length || 0);
+  if (nameEl)  nameEl.textContent  = `— ${group.name}`;
+
+  const channels = group.channels || [];
+  list.innerHTML = channels
+    .map(
+      (ch, i) => `
+    <div class="editor-channel-item${ch.enabled ? '' : ' disabled-item'}" data-ch-id="${ch.id}" data-ch-idx="${i}">
+      <span class="drag-handle"><i class="fas fa-grip-vertical"></i></span>
+      ${ch.tvg_logo ? `<img src="${esc(ch.tvg_logo)}" class="ch-logo" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">` : ''}
+      <div class="ch-logo-fallback" ${ch.tvg_logo ? 'style="display:none"' : ''}><i class="fas fa-tv"></i></div>
+      <div class="flex-grow-1" style="min-width:0">
+        <div class="editor-item-name" title="${esc(ch.name)}">${esc(ch.name || ch.url)} ${_healthDotInline(ch.url)}</div>
+        <div class="editor-channel-url" title="${esc(ch.url)}">${esc(ch.url)}</div>
+        ${ch.source_playlist_name ? `<div class="editor-channel-source">${esc(ch.source_playlist_name)}</div>` : ''}
+        ${ch.origin_id ? _originLabel(ch.origin_label ?? null) : ''}
+      </div>
+      <span class="editor-item-actions">
+        <div class="form-check form-switch mb-0">
+          <input class="form-check-input editor-ch-toggle" type="checkbox" ${ch.enabled ? 'checked' : ''} data-chid="${ch.id}">
+        </div>
+        ${ch.custom ? `<button class="btn btn-outline-primary btn-xs editor-edit-ch-btn" data-chid="${ch.id}" title="Edit"><i class="fas fa-pencil-alt"></i></button>` : ''}
+        <button class="btn btn-outline-info btn-xs editor-copy-url-btn" data-chid="${ch.id}" title="Copy URL"><i class="fas fa-copy"></i></button>
+        <button class="btn btn-outline-warning btn-xs editor-move-ch-btn" data-chid="${ch.id}" title="Move to group"><i class="fas fa-exchange-alt"></i></button>
+        <button class="btn ${ch.custom ? 'btn-outline-danger' : 'btn-outline-secondary'} btn-xs editor-delete-ch-btn" data-chid="${ch.id}" ${ch.custom ? '' : 'disabled'} title="${ch.custom ? 'Delete' : 'Source channels cannot be deleted'}">
+          <i class="fas fa-trash-alt"></i>
+        </button>
+      </span>
+    </div>`,
+    )
+    .join('');
+
+  list.querySelectorAll('.editor-ch-toggle').forEach((cb) => {
+    cb.addEventListener('change', (e) => {
+      e.stopPropagation();
+      const input = cb as HTMLInputElement;
+      const ch = channels.find((c) => c.id === input.dataset.chid);
+      if (ch) { ch.enabled = input.checked; editorDirty = true; renderEditorChannels(); }
+    });
+  });
+
+  list.querySelectorAll('.editor-edit-ch-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const ch = channels.find((c) => c.id === (btn as HTMLElement).dataset.chid);
+      if (!ch) return;
+      (document.getElementById('editChannelNameInput') as HTMLInputElement).value = ch.name || '';
+      (document.getElementById('editChannelUrlInput')  as HTMLInputElement).value = ch.url  || '';
+      (document.getElementById('editChannelLogoInput') as HTMLInputElement).value = ch.tvg_logo || '';
+      (document.getElementById('editChannelIdInput')   as HTMLInputElement).value = ch.id;
+      new Modal(document.getElementById('editChannelModal')!).show();
+    });
+  });
+
+  list.querySelectorAll('.editor-delete-ch-btn:not([disabled])').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const chid = (btn as HTMLElement).dataset.chid;
+      const ch = channels.find((c) => c.id === chid);
+      if (!ch?.custom) return;
+      group.channels = channels.filter((c) => c.id !== chid);
+      editorDirty = true;
+      renderEditorChannels();
+    });
+  });
+
+  list.querySelectorAll('.editor-move-ch-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const ch = channels.find((c) => c.id === (btn as HTMLElement).dataset.chid);
+      if (!ch) return;
+
+      const select = document.getElementById('moveChannelTargetSelect') as HTMLSelectElement;
+      select.innerHTML = editorGroups
+        .filter((g) => g.id !== editorSelectedGroupId)
+        .map((g) => `<option value="${esc(g.id)}">${esc(g.name)}</option>`)
+        .join('');
+
+      const info       = document.getElementById('moveChannelInfo');
+      const confirmBtn = document.getElementById('confirmMoveChannelBtn');
+      if (ch.custom) {
+        if (info) info.textContent = 'This channel will be removed from the current group and added to the selected group.';
+        if (confirmBtn) confirmBtn.innerHTML = '<i class="fas fa-exchange-alt mr-1"></i>Move';
+      } else {
+        if (info) info.innerHTML = 'The original will remain in this group but be <strong>disabled</strong>. A copy will be added to the selected group.';
+        if (confirmBtn) confirmBtn.innerHTML = '<i class="fas fa-copy mr-1"></i>Copy to Group';
+      }
+      (document.getElementById('moveChannelIdInput') as HTMLInputElement).value = ch.id;
+      new Modal(document.getElementById('moveChannelModal')!).show();
+    });
+  });
+
+  list.querySelectorAll('.editor-copy-url-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const ch = channels.find((c) => c.id === (btn as HTMLElement).dataset.chid);
+      if (!ch?.url) return;
+      navigator.clipboard.writeText(ch.url).then(() => {
+        const icon = btn.querySelector('i');
+        if (icon) { icon.className = 'fas fa-check'; setTimeout(() => { icon.className = 'fas fa-copy'; }, 1500); }
+      });
+    });
+  });
+
+  if (channelSortable) channelSortable.destroy();
+  channelSortable = new Sortable(list as HTMLElement, {
+    handle: '.drag-handle',
+    animation: 150,
+    ghostClass: 'sortable-ghost',
+    chosenClass: 'sortable-chosen',
+    onEnd: () => {
+      const newOrder = [...list.querySelectorAll('.editor-channel-item')].map(
+        (el) => (el as HTMLElement).dataset.chId,
+      );
+      group.channels = newOrder
+        .map((id) => channels.find((c) => c.id === id))
+        .filter((c): c is MergedChannel => !!c);
+      editorDirty = true;
+    },
+  });
+}
+
+document.getElementById('editAllPlaylistsBtn')?.addEventListener('click', openAllPlaylistsEditor);
+
+document.getElementById('refreshAllPlaylistsBtn')?.addEventListener('click', async () => {
+  const btn = document.getElementById('refreshAllPlaylistsBtn') as HTMLButtonElement;
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+  try {
+    const res = await apiFetch('/api/all-playlists/refresh', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Refresh failed');
+    await loadPlaylists();
+    await selectPlaylist('__all__');
+    let msg = `Refreshed: ${data.total_channels} channels`;
+    if (data.errors?.length) msg += ` (${data.errors.length} error(s))`;
+    toast(msg, 'success');
+    startHealthPoll();
+  } catch (e) {
+    toast((e as Error).message, 'danger');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-sync-alt"></i>';
+  }
+});
+
+document.getElementById('editorSaveBtn')?.addEventListener('click', async () => {
+  const btn = document.getElementById('editorSaveBtn') as HTMLButtonElement;
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Saving...';
+  try {
+    const res = await apiFetch('/api/all-playlists', {
+      method:  'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ groups: editorGroups }),
+    });
+    if (!res.ok) {
+      const data = await res.json();
+      throw new Error(data.detail || 'Save failed');
+    }
+    editorDirty = false;
+    Modal.getInstance(document.getElementById('allPlaylistsEditorModal')!)?.hide();
+    toast('All Playlists config saved', 'success');
+    await selectPlaylist('__all__');
+  } catch (e) {
+    toast((e as Error).message, 'danger');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-save me-1"></i>Save Changes';
+  }
+});
+
+document.getElementById('editorRefreshAllBtn')?.addEventListener('click', async () => {
+  const btn = document.getElementById('editorRefreshAllBtn') as HTMLButtonElement;
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Refreshing...';
+  try {
+    const res = await apiFetch('/api/all-playlists/refresh', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Refresh failed');
+    const res2  = await apiFetch('/api/all-playlists');
+    const data2 = await res2.json();
+    editorGroups = data2.groups || [];
+    if (editorSelectedGroupId && !editorGroups.find((g) => g.id === editorSelectedGroupId)) {
+      editorSelectedGroupId = null;
+    }
+    renderEditorGroups();
+    renderEditorChannels();
+    editorDirty = false;
+    let msg = `Refreshed: ${data.total_channels} channels`;
+    if (data.errors?.length) msg += ` (${data.errors.length} error(s))`;
+    toast(msg, 'success');
+    startHealthPoll();
+  } catch (e) {
+    toast((e as Error).message, 'danger');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-sync-alt me-1"></i>Refresh All';
+  }
+});
+
+document.getElementById('editorAddGroupBtn')?.addEventListener('click', () => {
+  (document.getElementById('newGroupNameInput') as HTMLInputElement).value = '';
+  new Modal(document.getElementById('addGroupModal')!).show();
+});
+
+document.getElementById('confirmAddGroupBtn')?.addEventListener('click', () => {
+  const name = (document.getElementById('newGroupNameInput') as HTMLInputElement).value.trim();
+  if (!name) { toast('Group name is required', 'danger'); return; }
+  if (editorGroups.some((g) => g.name === name)) { toast('Group already exists', 'danger'); return; }
+  editorGroups.unshift({
+    id: 'g_' + Math.random().toString(36).slice(2, 10),
+    name,
+    enabled: true,
+    custom: true,
+    channels: [],
+  });
+  editorDirty = true;
+  Modal.getInstance(document.getElementById('addGroupModal')!)?.hide();
+  renderEditorGroups();
+});
+
+document.getElementById('confirmRenameGroupBtn')?.addEventListener('click', () => {
+  const gid     = (document.getElementById('renameGroupIdInput')   as HTMLInputElement).value;
+  const newName = (document.getElementById('renameGroupNameInput') as HTMLInputElement).value.trim();
+  if (!newName) { toast('Group name is required', 'danger'); return; }
+  const g = editorGroups.find((g) => g.id === gid);
+  if (!g?.custom) return;
+  if (editorGroups.some((og) => og.id !== gid && og.name === newName)) {
+    toast('A group with that name already exists', 'danger'); return;
+  }
+  g.name = newName;
+  (g.channels || []).forEach((ch) => { if (ch.custom) ch.group = newName; });
+  editorDirty = true;
+  Modal.getInstance(document.getElementById('renameGroupModal')!)?.hide();
+  renderEditorGroups();
+  renderEditorChannels();
+});
+
+document.getElementById('renameGroupNameInput')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') (document.getElementById('confirmRenameGroupBtn') as HTMLButtonElement)?.click();
+});
+
+document.getElementById('editorAddChannelBtn')?.addEventListener('click', () => {
+  (document.getElementById('newChannelNameInput') as HTMLInputElement).value = '';
+  (document.getElementById('newChannelUrlInput')  as HTMLInputElement).value = '';
+  (document.getElementById('newChannelLogoInput') as HTMLInputElement).value = '';
+  new Modal(document.getElementById('addChannelModal')!).show();
+});
+
+document.getElementById('confirmAddChannelBtn')?.addEventListener('click', () => {
+  const name = (document.getElementById('newChannelNameInput') as HTMLInputElement).value.trim();
+  const url  = (document.getElementById('newChannelUrlInput')  as HTMLInputElement).value.trim();
+  const logo = (document.getElementById('newChannelLogoInput') as HTMLInputElement).value.trim();
+  if (!name || !url) { toast('Name and URL are required', 'danger'); return; }
+  const group = editorGroups.find((g) => g.id === editorSelectedGroupId);
+  if (!group) { toast('No group selected', 'danger'); return; }
+  if (!group.channels) group.channels = [];
+  group.channels.unshift({
+    id: 'cc_' + Math.random().toString(36).slice(2, 10),
+    name,
+    url,
+    tvg_logo: logo,
+    group: group.name,
+    enabled: true,
+    custom: true,
+    source_playlist_id: null,
+    source_playlist_name: null,
+  });
+  editorDirty = true;
+  Modal.getInstance(document.getElementById('addChannelModal')!)?.hide();
+  renderEditorChannels();
+});
+
+document.getElementById('confirmMoveChannelBtn')?.addEventListener('click', () => {
+  const chid      = (document.getElementById('moveChannelIdInput')      as HTMLInputElement).value;
+  const targetGid = (document.getElementById('moveChannelTargetSelect') as HTMLSelectElement).value;
+  if (!chid || !targetGid) return;
+
+  const srcGroup = editorGroups.find((g) => g.id === editorSelectedGroupId);
+  const tgtGroup = editorGroups.find((g) => g.id === targetGid);
+  if (!srcGroup || !tgtGroup) return;
+
+  const ch = (srcGroup.channels || []).find((c) => c.id === chid);
+  if (!ch) return;
+
+  if (ch.custom) {
+    srcGroup.channels = srcGroup.channels.filter((c) => c.id !== chid);
+    tgtGroup.channels = [...(tgtGroup.channels || []), ch];
+  } else {
+    const copy: MergedChannel = {
+      ...ch,
+      id: 'cc_' + Math.random().toString(36).slice(2, 10),
+      custom: true,
+      group: tgtGroup.name,
+      source_playlist_id: null,
+      source_playlist_name: null,
+      origin_id: ch.id,
+    };
+    tgtGroup.channels = [...(tgtGroup.channels || []), copy];
+    ch.enabled = false;
+  }
+
+  editorDirty = true;
+  Modal.getInstance(document.getElementById('moveChannelModal')!)?.hide();
+  renderEditorGroups();
+  renderEditorChannels();
+});
+
+document.getElementById('confirmEditChannelBtn')?.addEventListener('click', () => {
+  const chId = (document.getElementById('editChannelIdInput')   as HTMLInputElement).value;
+  const name = (document.getElementById('editChannelNameInput') as HTMLInputElement).value.trim();
+  const url  = (document.getElementById('editChannelUrlInput')  as HTMLInputElement).value.trim();
+  const logo = (document.getElementById('editChannelLogoInput') as HTMLInputElement).value.trim();
+  if (!name || !url) { toast('Name and URL are required', 'danger'); return; }
+  for (const g of editorGroups) {
+    const ch = (g.channels || []).find((c) => c.id === chId);
+    if (ch && ch.custom) { ch.name = name; ch.url = url; ch.tvg_logo = logo; editorDirty = true; break; }
+  }
+  Modal.getInstance(document.getElementById('editChannelModal')!)?.hide();
+  renderEditorChannels();
+});
+
+document.getElementById('allPlaylistsEditorModal')?.addEventListener('hide.bs.modal', (e) => {
+  if (editorDirty) {
+    if (!confirm('You have unsaved changes. Close without saving?')) {
+      e.preventDefault();
+    }
+  }
+});
+
+// ── Editor panel resizer ──────────────────────────────────────────────────────
+(function () {
+  const resizer = document.getElementById('editorResizer') as HTMLElement | null;
+  const panel   = document.querySelector('.editor-groups-panel') as HTMLElement | null;
+  if (!resizer || !panel) return;
+
+  // Capture non-null refs for the event handlers
+  const resizerEl = resizer;
+  const panelEl   = panel;
+
+  resizerEl.addEventListener('pointerdown', (e: PointerEvent) => {
+    const startX = e.clientX;
+    const startW = panelEl.offsetWidth;
+    resizerEl.setPointerCapture(e.pointerId);
+    resizerEl.classList.add('dragging');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    function onMove(e: PointerEvent): void {
+      const w = Math.max(160, Math.min(600, startW + e.clientX - startX));
+      panelEl.style.width = w + 'px';
+    }
+    function onUp(): void {
+      resizerEl.classList.remove('dragging');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      resizerEl.removeEventListener('pointermove', onMove as EventListener);
+      resizerEl.removeEventListener('pointerup', onUp);
+    }
+    resizerEl.addEventListener('pointermove', onMove as EventListener);
+    resizerEl.addEventListener('pointerup', onUp);
+    e.preventDefault();
+  });
+})();

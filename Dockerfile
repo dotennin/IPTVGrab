@@ -1,5 +1,20 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Stage 1 – Build the Rust server binary
+# Stage 1 – Build the frontend (Vite + TypeScript)
+# ─────────────────────────────────────────────────────────────────────────────
+FROM node:20-alpine AS frontend-builder
+
+WORKDIR /app
+
+# Install deps first for better layer caching
+COPY frontend/package.json frontend/package-lock.json frontend/
+RUN cd frontend && npm ci --prefer-offline
+
+# Copy source and build; outDir is '../static/dist' relative to frontend/
+COPY frontend/ frontend/
+RUN mkdir -p static && cd frontend && npm run build
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Stage 2 – Build the Rust server binary
 # ─────────────────────────────────────────────────────────────────────────────
 FROM rust:1.85-bookworm AS builder
 
@@ -28,7 +43,7 @@ RUN cargo build --release -p server \
  && strip target/release/m3u8-server
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Stage 2 – Minimal runtime image
+# Stage 3 – Minimal runtime image
 # ─────────────────────────────────────────────────────────────────────────────
 FROM debian:bookworm-slim
 
@@ -42,7 +57,8 @@ WORKDIR /app
 
 COPY --from=builder /build/target/release/m3u8-server ./m3u8-server
 
-COPY static/ /app/static/
+# Copy only the Vite-built frontend (includes favicons, login.html, and all assets)
+COPY --from=frontend-builder /app/static/dist/ /app/static/dist/
 
 RUN mkdir -p /app/downloads
 

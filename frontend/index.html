@@ -4,38 +4,12 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Media Nest</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      darkMode: 'class',
-      theme: {
-        extend: {
-          colors: {
-            'gh-bg':         '#0d1117',
-            'gh-surface':    '#161b22',
-            'gh-surface2':   '#21262d',
-            'gh-border':     '#30363d',
-            'gh-text':       '#e6edf3',
-            'gh-muted':      '#8b949e',
-            'gh-blue':       '#388bfd',
-            'gh-blue-light': '#58a6ff',
-            'gh-green':      '#3fb950',
-            'gh-red':        '#f85149',
-            'gh-yellow':     '#e3b341',
-          }
-        }
-      }
-    }
-  </script>
   <link rel="icon" type="image/x-icon" href="/favicon.ico" />
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
   <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <link rel="manifest" href="/site.webmanifest" />
   <meta name="theme-color" content="#0b1220" />
-  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet" />
-  <link href="/compat.css" rel="stylesheet" />
-  <link href="/styles.css?v=40" rel="stylesheet" />
 </head>
 <body class="bg-gh-bg text-gh-text h-screen flex flex-col overflow-hidden">
 
@@ -687,10 +661,6 @@
     </div>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/mpegts.js@1/dist/mpegts.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.6/Sortable.min.js"></script>
-  <script src="/bootstrap-shim.js"></script>
-  <script src="/app.js?v=48"></script>
+  <script type="module" src="/src/main.ts"></script>
 </body>
 </html>

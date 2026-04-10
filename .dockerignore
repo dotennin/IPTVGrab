@@ -9,6 +9,10 @@ crates/mobile-ffi/
 /downloads/
 /downloads_backup/
 
+# Frontend build artifacts (rebuilt inside Docker)
+/frontend/node_modules/
+/static/dist/
+
 # macOS noise
 .DS_Store
 .AppleDouble

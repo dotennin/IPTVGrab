@@ -371,8 +371,12 @@ pub async fn run_from_env() -> anyhow::Result<()> {
     let host = std::env::var("HOST").unwrap_or_else(|_| "0.0.0.0".into());
     let downloads_dir =
         PathBuf::from(std::env::var("DOWNLOADS_DIR").unwrap_or_else(|_| "downloads".into()));
-    let static_dir =
-        PathBuf::from(std::env::var("STATIC_DIR").unwrap_or_else(|_| "static".into()));
+    // Prefer the Vite build output (static/dist/) when present; fall back to static/
+    let static_dir = {
+        let base = PathBuf::from(std::env::var("STATIC_DIR").unwrap_or_else(|_| "static".into()));
+        let dist = base.join("dist");
+        if dist.is_dir() { dist } else { base }
+    };
 
     let server = start_embedded_server(EmbeddedServerConfig {
         host,
