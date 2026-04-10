@@ -540,6 +540,9 @@ class AppController extends ChangeNotifier {
 
   Future<String> fetchMergedExport() => api.fetchMergedExport();
 
+  /// Probe [streamUrl] to detect its format ('flv', 'hls', or 'unknown').
+  Future<String> probeWatchKind(String streamUrl) => api.probeWatchKind(streamUrl);
+
   void suggestDownloadUrl(String url) {
     suggestedUrl.value = url;
   }

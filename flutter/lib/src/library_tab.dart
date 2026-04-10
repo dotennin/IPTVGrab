@@ -325,6 +325,7 @@ class _RecentListTile extends StatelessWidget {
       },
       allowPictureInPicture: true,
       onFetchVariants: () => controller.parseStreamVariants(url: channel.url),
+      probeKind: controller.probeWatchKind,
     );
   }
 }
@@ -467,6 +468,7 @@ class _SearchResultsSliver extends StatelessWidget {
       },
       allowPictureInPicture: true,
       onFetchVariants: () => controller.parseStreamVariants(url: item.channelUrl),
+      probeKind: controller.probeWatchKind,
     );
   }
 }

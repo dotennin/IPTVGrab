@@ -573,6 +573,7 @@ class _ChannelListTile extends StatelessWidget {
       copyLabel: 'Source URL copied.',
       allowPictureInPicture: true,
       onFetchVariants: () => controller.parseStreamVariants(url: item.channelUrl),
+      probeKind: controller.probeWatchKind,
     );
   }
 }
@@ -687,6 +688,7 @@ class _ChannelGridCard extends StatelessWidget {
       copyLabel: 'Source URL copied.',
       allowPictureInPicture: true,
       onFetchVariants: () => controller.parseStreamVariants(url: item.channelUrl),
+      probeKind: controller.probeWatchKind,
     );
   }
 }

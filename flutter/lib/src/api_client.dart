@@ -273,6 +273,18 @@ class ApiClient {
     }
   }
 
+  /// Probe a stream URL via the server's watch-probe endpoint.
+  /// Returns 'flv', 'hls', or 'unknown'.
+  Future<String> probeWatchKind(String streamUrl) async {
+    try {
+      final json = await _requestJson('GET', '/api/watch/probe',
+          queryParameters: {'url': streamUrl}) as Map<String, dynamic>;
+      return (json['kind'] as String?) ?? 'unknown';
+    } on Exception {
+      return 'unknown';
+    }
+  }
+
   WebSocketChannel connectTaskSocket(String taskId) {
     final uri = taskWebSocketUri(taskId);
     // On web, browsers cannot pass custom headers for WebSocket handshakes.

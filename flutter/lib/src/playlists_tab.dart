@@ -494,6 +494,7 @@ class _PlaylistsTabState extends State<PlaylistsTab> {
                                               isLive: true,
                                               copyUrl: item.channelUrl,
                                               copyLabel: 'Source URL copied.',
+                                              probeKind: controller.probeWatchKind,
                                               onGrabRequested: () {
                                                 Navigator.of(context)
                                                     .maybePop();
