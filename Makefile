@@ -1,4 +1,4 @@
-.PHONY: all server test test-rust test-flutter frontend-install frontend-dev frontend-build ios-targets ios-lib ios-xcframework macos-targets macos-lib android-targets flutter-check pod-check flutter-bootstrap flutter-rust-android flutter-rust-ios flutter-rust-macos flutter-prepare flutter-run flutter-run-macos flutter-apk flutter-ipa flutter-ipa-debug flutter-clean apk ipa ipa-debug clean
+.PHONY: all server test test-rust test-flutter frontend-install frontend-dev frontend-build ios-targets ios-lib ios-xcframework macos-targets macos-lib android-targets flutter-check pod-check flutter-bootstrap flutter-rust-android flutter-rust-android-arm64 flutter-rust-ios flutter-rust-macos flutter-prepare flutter-run flutter-run-macos flutter-apk flutter-apk-arm64 flutter-apk-split flutter-appbundle flutter-ipa flutter-ipa-debug flutter-clean apk apk-arm64 apk-split appbundle ipa ipa-debug clean
 
 PATH := $(HOME)/.cargo/bin:$(PATH)
 RUSTUP_TOOLCHAIN ?= stable
@@ -76,8 +76,33 @@ flutter-run-macos: flutter-rust-macos
 flutter-run-web: flutter-bootstrap
 	cd $(FLUTTER_APP) && $(FLUTTER) run -d chrome
 
+# Full fat APK (all ABIs, ~130 MB) — kept for local sideloading/testing
 flutter-apk: flutter-rust-android
 	cd $(FLUTTER_APP) && $(FLUTTER) build apk
+
+# Split APKs per ABI (~40-50 MB each) — good for GitHub Releases sideloads
+flutter-apk-split: flutter-rust-android
+	cd $(FLUTTER_APP) && $(FLUTTER) build apk --split-per-abi
+
+# arm64-only APK (~40 MB) — covers all modern Android devices (2015+)
+flutter-rust-android-arm64: flutter-bootstrap
+	@test -n "$(ANDROID_NDK_HOME)" && test -d "$(ANDROID_NDK_HOME)" || { \
+		echo "Android NDK not found."; \
+		echo "Install the NDK via Android Studio or export ANDROID_NDK_HOME."; \
+		exit 1; \
+	}
+	@mkdir -p $(FLUTTER_APP)/android/app/src/main/jniLibs
+	env ANDROID_NDK_HOME="$(ANDROID_NDK_HOME)" ANDROID_NDK_ROOT="$(ANDROID_NDK_HOME)" $(CARGO) ndk \
+		-t arm64-v8a \
+		-o $(FLUTTER_APP)/android/app/src/main/jniLibs \
+		build --lib --release -p mobile-ffi
+
+flutter-apk-arm64: flutter-rust-android-arm64
+	cd $(FLUTTER_APP) && $(FLUTTER) build apk --target-platform android-arm64
+
+# Android App Bundle (AAB) for Play Store — Google Play splits by ABI automatically
+flutter-appbundle: flutter-rust-android
+	cd $(FLUTTER_APP) && $(FLUTTER) build appbundle
 
 flutter-ipa: pod-check flutter-rust-ios
 	rm -rf $(FLUTTER_APP)/build/ios/archive $(FLUTTER_APP)/build/ios/ipa
@@ -89,6 +114,12 @@ flutter-ipa-debug: pod-check flutter-rust-ios
 
 
 apk: flutter-apk
+
+apk-arm64: flutter-apk-arm64
+
+apk-split: flutter-apk-split
+
+appbundle: flutter-appbundle
 
 ipa: flutter-ipa
 
