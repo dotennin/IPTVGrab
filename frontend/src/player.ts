@@ -335,6 +335,11 @@ document.addEventListener('keydown', (event) => {
   previewViewportEl.addEventListener(eventName, handlePreviewActivity);
 });
 
+// Show channel OSD when cursor moves over the player (if a channel list is loaded)
+previewViewportEl.addEventListener('mousemove', () => {
+  if (_channelList.length > 0) _showChOsd();
+});
+
 previewVideo.addEventListener('play', schedulePreviewChromeHide);
 previewVideo.addEventListener('pause', resetPreviewChrome);
 previewVideo.addEventListener('ended', resetPreviewChrome);
@@ -589,6 +594,16 @@ const _chOsdNextBtn  = document.getElementById('chOsdNextBtn');
 
 _chOsdPrevBtn?.addEventListener('click', () => switchChannel(-1));
 _chOsdNextBtn?.addEventListener('click', () => switchChannel(1));
+
+// Pause auto-hide while the cursor is inside the OSD pill
+_chOsdEl?.addEventListener('mouseenter', () => {
+  if (_chOsdTimer) { clearTimeout(_chOsdTimer); _chOsdTimer = null; }
+});
+_chOsdEl?.addEventListener('mouseleave', () => {
+  if (_chOsdEl?.classList.contains('ch-osd-visible')) {
+    _chOsdTimer = setTimeout(_hideChOsd, 2000);
+  }
+});
 
 function _showChOsd(): void {
   if (!_chOsdEl || !_chOsdName || !_chOsdIndex) return;

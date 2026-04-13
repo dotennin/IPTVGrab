@@ -1753,23 +1753,22 @@ textarea.form-control {
 }
 
 
-/* ── Channel OSD overlay (shown while switching channels with D-pad) ──────── */
+/* ── Channel OSD overlay (shown while switching channels or on cursor move) ── */
+
+/* Outer band: full width, centers the pill, fades in from below */
 .ch-osd {
   position: absolute;
-  bottom: 0;
+  bottom: 28px;
   left: 0;
   right: 0;
   z-index: 50;
   display: flex;
+  justify-content: center;
   align-items: center;
-  justify-content: space-between;
-  padding: 12px 20px;
-  background: linear-gradient(to top, rgba(0,0,0,0.82) 0%, rgba(0,0,0,0.42) 80%, transparent 100%);
   opacity: 0;
-  transform: translateY(8px);
-  transition: opacity 0.2s ease, transform 0.2s ease;
+  transform: translateY(10px);
+  transition: opacity 0.22s ease, transform 0.22s ease;
   pointer-events: none;
-  gap: 12px;
 }
 
 .ch-osd.ch-osd-visible {
@@ -1778,67 +1777,89 @@ textarea.form-control {
   pointer-events: auto;
 }
 
+/* Pill container */
+.ch-osd-pill {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(10, 10, 14, 0.80);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 999px;
+  padding: 5px;
+  max-width: min(600px, 92vw);
+  box-shadow: 0 6px 28px rgba(0, 0, 0, 0.55);
+}
+
+/* Prev / Next buttons */
+.ch-osd-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.09);
+  border: none;
+  border-radius: 999px;
+  color: #fff;
+  padding: 8px 14px;
+  font-size: 0.82rem;
+  min-height: 44px;
+  min-width: 44px;
+  cursor: pointer;
+  white-space: nowrap;
+  max-width: 150px;
+  transition: background 0.15s, transform 0.1s;
+}
+
+.ch-osd-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.20);
+}
+
+.ch-osd-btn:active:not(:disabled) {
+  background: rgba(255, 255, 255, 0.30);
+  transform: scale(0.95);
+}
+
+.ch-osd-btn:disabled {
+  opacity: 0.25;
+  cursor: default;
+}
+
+/* Centre block */
 .ch-osd-center {
   flex: 1;
   text-align: center;
   min-width: 0;
+  padding: 0 10px;
 }
 
 .ch-osd-name {
-  font-size: 1.1rem;
+  font-size: 1rem;
   font-weight: 600;
   color: #fff;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.7);
 }
 
 .ch-osd-index {
-  font-size: 0.75rem;
-  color: rgba(255,255,255,0.65);
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.55);
   margin-top: 2px;
-}
-
-.ch-osd-side {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  background: rgba(255,255,255,0.12);
-  border: 1px solid rgba(255,255,255,0.18);
-  border-radius: 8px;
-  color: #fff;
-  padding: 6px 12px;
-  font-size: 0.8rem;
-  cursor: pointer;
-  white-space: nowrap;
-  max-width: 160px;
-  min-height: 44px;
-  transition: background 0.15s;
-  backdrop-filter: blur(4px);
-}
-
-.ch-osd-side:hover:not(:disabled) {
-  background: rgba(255,255,255,0.22);
-}
-
-.ch-osd-side:disabled {
-  opacity: 0.3;
-  cursor: default;
 }
 
 .ch-osd-side-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  max-width: 90px;
 }
 
-/* In fullscreen the OSD must overlay the <video> element */
-:fullscreen #chOsd,
-:-webkit-full-screen #chOsd {
+/* In fullscreen the OSD must be fixed over the <video> */
+:fullscreen .ch-osd,
+:-webkit-full-screen .ch-osd {
   position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  z-index: 9999;
+  bottom: 36px;
 }
