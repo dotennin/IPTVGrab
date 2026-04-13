@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -35,14 +36,17 @@ Future<void> openMediaPlayer(
   Future<List<StreamVariant>> Function()? onFetchVariants,
   Future<String> Function(String url)? probeKind,
 }) async {
-  // Web: always use in-app video_player.
-  if (kIsWeb) {
+  // Web or Android: use the in-app video_player (ExoPlayer on Android).
+  // Android's CastBridge.showNativePlayer is not implemented natively;
+  // the in-app player covers both local files (file://) and localhost HTTP.
+  if (kIsWeb || defaultTargetPlatform == TargetPlatform.android) {
     final page = _VideoPlayerPage(
       title: title,
       uri: uri,
       httpHeaders: httpHeaders,
       isLive: isLive,
       copyUrl: copyUrl ?? uri.toString(),
+      localFilePath: localFilePath,
     );
     if (context.mounted) {
       await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => page));
@@ -50,7 +54,7 @@ Future<void> openMediaPlayer(
     return;
   }
 
-  // Native: detect FLV.
+  // Native (iOS / macOS / desktop): detect FLV.
   bool isFlv = _isFlvUri(uri);
 
   // For live streams with opaque URLs, probe the server to detect format.
@@ -66,7 +70,7 @@ Future<void> openMediaPlayer(
     return;
   }
 
-  // Native non-FLV: use AVPlayer / ExoPlayer.
+  // iOS / macOS non-FLV: use AVPlayer via CastBridge.
   final playUrl = localFilePath != null
       ? 'file://$localFilePath'
       : (copyUrl ?? uri.toString());
@@ -144,6 +148,7 @@ class _VideoPlayerPage extends StatefulWidget {
     required this.httpHeaders,
     required this.isLive,
     required this.copyUrl,
+    this.localFilePath,
   });
 
   final String title;
@@ -151,6 +156,9 @@ class _VideoPlayerPage extends StatefulWidget {
   final Map<String, String> httpHeaders;
   final bool isLive;
   final String copyUrl;
+  /// When set, the player uses a local file instead of a network URL.
+  /// Passed on Android where the server stores files in internal storage.
+  final String? localFilePath;
 
   @override
   State<_VideoPlayerPage> createState() => _VideoPlayerPageState();
@@ -167,10 +175,16 @@ class _VideoPlayerPageState extends State<_VideoPlayerPage> {
   @override
   void initState() {
     super.initState();
-    _ctrl = VideoPlayerController.networkUrl(
-      widget.uri,
-      httpHeaders: widget.httpHeaders,
-    )..addListener(_onUpdate);
+    // Prefer a local file controller (ExoPlayer / AVPlayer native file path)
+    // over a network request when the file is already on-device.
+    final localPath = widget.localFilePath;
+    _ctrl = (!kIsWeb && localPath != null)
+        ? VideoPlayerController.file(File(localPath))
+        : VideoPlayerController.networkUrl(
+            widget.uri,
+            httpHeaders: widget.httpHeaders,
+          );
+    _ctrl!.addListener(_onUpdate);
     unawaited(_init());
   }
 

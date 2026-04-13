@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Allow cleartext HTTP to localhost only.
+  The embedded Rust server binds to 127.0.0.1; video_player (ExoPlayer)
+  and the API client both need cleartext access to it.
+  All other traffic must use HTTPS (Android 9+ default).
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">localhost</domain>
+    </domain-config>
+</network-security-config>

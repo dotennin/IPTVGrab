@@ -78,6 +78,14 @@ class MainActivity : FlutterActivity() {
                     val isLive = call.argument<Boolean>("isLive") ?: false
                     showCastPicker(url, title, isLive, result)
                 }
+                // showNativePlayer is handled in-app on Android (video_player/ExoPlayer).
+                // Other cast lifecycle calls are no-ops on Android — return success
+                // so the Dart caller doesn't throw MissingPluginException.
+                "showNativePlayer",
+                "showCastPlayerVC",
+                "switchCastMedia",
+                "stopCast",
+                "showRoutePicker" -> result.success(null)
                 else -> result.notImplemented()
             }
         }
