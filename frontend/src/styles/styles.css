@@ -1752,3 +1752,93 @@ textarea.form-control {
   max-height: calc(100vh - 44px - 68px - 40px); /* topbar + bottomnav + tab-nav */
 }
 
+
+/* ── Channel OSD overlay (shown while switching channels with D-pad) ──────── */
+.ch-osd {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  background: linear-gradient(to top, rgba(0,0,0,0.82) 0%, rgba(0,0,0,0.42) 80%, transparent 100%);
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  pointer-events: none;
+  gap: 12px;
+}
+
+.ch-osd.ch-osd-visible {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.ch-osd-center {
+  flex: 1;
+  text-align: center;
+  min-width: 0;
+}
+
+.ch-osd-name {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+}
+
+.ch-osd-index {
+  font-size: 0.75rem;
+  color: rgba(255,255,255,0.65);
+  margin-top: 2px;
+}
+
+.ch-osd-side {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255,255,255,0.12);
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 8px;
+  color: #fff;
+  padding: 6px 12px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  white-space: nowrap;
+  max-width: 160px;
+  min-height: 44px;
+  transition: background 0.15s;
+  backdrop-filter: blur(4px);
+}
+
+.ch-osd-side:hover:not(:disabled) {
+  background: rgba(255,255,255,0.22);
+}
+
+.ch-osd-side:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.ch-osd-side-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* In fullscreen the OSD must overlay the <video> element */
+:fullscreen #chOsd,
+:-webkit-full-screen #chOsd {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 9999;
+}

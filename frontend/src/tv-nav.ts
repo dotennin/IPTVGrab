@@ -171,18 +171,15 @@ document.addEventListener('keydown', (e: KeyboardEvent) => {
 
   if (!NAV_KEYS.has(e.key)) return;
 
+  // When the player modal is visible, let player.ts handle all navigation keys
+  const previewModalEl = document.getElementById('previewModal');
+  if (previewModalEl?.classList.contains('show')) return;
+
   const active = document.activeElement as HTMLElement | null;
   const zone   = detectZone(active);
 
-  // Escape: close player modal, go back to channels
+  // Escape: go back to channels (or close URL section)
   if (e.key === 'Escape') {
-    const playerModal = document.getElementById('playerModal');
-    if (playerModal && !playerModal.classList.contains('d-none')) {
-      // Let bootstrap-shim handle the hide via data-bs-dismiss button
-      playerModal.querySelector<HTMLElement>('[data-bs-dismiss="modal"]')?.click();
-      e.preventDefault();
-      return;
-    }
     // If in URL section, go back to channels
     const urlSection = document.getElementById('urlSettingsSection');
     if (urlSection && !urlSection.classList.contains('d-none')) {

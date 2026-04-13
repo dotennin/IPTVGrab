@@ -17,6 +17,7 @@ import {
   showStreamInfo,
   startDownload,
   setNextOpenAutoFullscreen,
+  setChannelContext,
 } from './player';
 import { addToRecents } from './recents';
 import { addTaskCard, startPolling, updateTaskCard } from './tasks';
@@ -261,6 +262,7 @@ export function renderChannels(
     card.addEventListener('click', (e) => {
       if ((e.target as Element).closest('.channel-actions')) return;
       addToRecents(ch as Parameters<typeof addToRecents>[0]);
+      setChannelContext(channels as Channel[], i);
       setNextOpenAutoFullscreen(true);
       watchChannel(ch);
     });
@@ -271,6 +273,7 @@ export function renderChannels(
       if (key === 'Enter' || key === ' ') {
         e.preventDefault();
         addToRecents(ch as Parameters<typeof addToRecents>[0]);
+        setChannelContext(channels as Channel[], i);
         setNextOpenAutoFullscreen(true);
         watchChannel(ch);
       }

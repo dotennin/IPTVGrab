@@ -5,7 +5,7 @@ import { esc, formatDuration, toast } from './utils';
 import { settings } from './settings';
 import { Modal } from './bootstrap-shim';
 import { addTaskCard, startPolling, currentRequest } from './tasks';
-import type { StreamInfo } from './types';
+import type { StreamInfo, Channel } from './types';
 
 export let currentStreamInfo: StreamInfo | null = null;
 
@@ -14,6 +14,19 @@ let _tvAutoFullscreen = false;
 export function setNextOpenAutoFullscreen(val: boolean): void {
   _tvAutoFullscreen = val;
 }
+
+// ── TV D-pad channel switching ────────────────────────────────────────────────
+let _channelList: Channel[] = [];
+let _channelIndex = -1;
+/** Call this when opening a channel so ArrowLeft/Right can zap through the list. */
+export function setChannelContext(channels: Channel[], index: number): void {
+  _channelList = channels;
+  _channelIndex = index;
+}
+
+// true while the player is in fullscreen that was entered automatically (TV mode)
+let _tvFullscreenActive = false;
+let _chOsdTimer: ReturnType<typeof setTimeout> | null = null;
 
 // ── Stream info panel ─────────────────────────────────────────────────────────
 function resetStreamInfo(): void {
@@ -288,6 +301,7 @@ previewModalEl.addEventListener('shown.bs.modal', () => {
   schedulePreviewChromeHide();
   if (_tvAutoFullscreen) {
     _tvAutoFullscreen = false;
+    _tvFullscreenActive = true;
     void enterPreviewFullscreen();
   }
 });
@@ -298,8 +312,18 @@ document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
     event.preventDefault();
     event.stopImmediatePropagation();
+    _tvFullscreenActive = false;
     void closePreviewModal();
     return;
+  }
+  // D-pad left/right: switch to prev/next channel in the current list
+  if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+    if (_channelList.length > 1) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      switchChannel(event.key === 'ArrowLeft' ? -1 : 1);
+      return;
+    }
   }
   if (!event.repeat && (event.key === 'f' || event.key === 'F')) {
     event.preventDefault();
@@ -314,10 +338,25 @@ document.addEventListener('keydown', (event) => {
 previewVideo.addEventListener('play', schedulePreviewChromeHide);
 previewVideo.addEventListener('pause', resetPreviewChrome);
 previewVideo.addEventListener('ended', resetPreviewChrome);
-document.addEventListener('fullscreenchange', handlePreviewActivity);
-document.addEventListener('webkitfullscreenchange', handlePreviewActivity);
+// Belt-and-suspenders: if browser exits fullscreen via ESC (native) while in TV
+// auto-fullscreen mode, close the modal so one key press = fully exit.
+function _onFullscreenChange(): void {
+  handlePreviewActivity();
+  if (!document.fullscreenElement && _tvFullscreenActive && isPreviewVisible()) {
+    _tvFullscreenActive = false;
+    void closePreviewModal();
+  }
+}
+document.addEventListener('fullscreenchange', _onFullscreenChange);
+document.addEventListener('webkitfullscreenchange', _onFullscreenChange);
 previewVideo.addEventListener('webkitbeginfullscreen', handlePreviewActivity);
-previewVideo.addEventListener('webkitendfullscreen', handlePreviewActivity);
+previewVideo.addEventListener('webkitendfullscreen', () => {
+  handlePreviewActivity();
+  if (_tvFullscreenActive && isPreviewVisible()) {
+    _tvFullscreenActive = false;
+    void closePreviewModal();
+  }
+});
 
 function _hidePlayerQuality(): void {
   if (playerQualityBar) playerQualityBar.classList.add('d-none');
@@ -532,7 +571,62 @@ previewModalEl.addEventListener('hidden.bs.modal', () => {
   previewVideo.load();
   deactivateClipMode();
   _currentPreviewTaskId = null;
+  // Reset TV channel context
+  _channelList = [];
+  _channelIndex = -1;
+  _tvFullscreenActive = false;
+  _hideChOsd();
 });
+
+// ── Channel D-pad switching ────────────────────────────────────────────────────
+const _chOsdEl      = document.getElementById('chOsd');
+const _chOsdName    = document.getElementById('chOsdName');
+const _chOsdIndex   = document.getElementById('chOsdIndex');
+const _chOsdPrevName = document.getElementById('chOsdPrevName');
+const _chOsdNextName = document.getElementById('chOsdNextName');
+const _chOsdPrevBtn  = document.getElementById('chOsdPrevBtn');
+const _chOsdNextBtn  = document.getElementById('chOsdNextBtn');
+
+_chOsdPrevBtn?.addEventListener('click', () => switchChannel(-1));
+_chOsdNextBtn?.addEventListener('click', () => switchChannel(1));
+
+function _showChOsd(): void {
+  if (!_chOsdEl || !_chOsdName || !_chOsdIndex) return;
+  const ch     = _channelList[_channelIndex];
+  const prevCh = _channelList[_channelIndex - 1];
+  const nextCh = _channelList[_channelIndex + 1];
+
+  _chOsdName.textContent  = ch?.name || ch?.url || '';
+  _chOsdIndex.textContent = `${_channelIndex + 1} / ${_channelList.length}`;
+  if (_chOsdPrevName) _chOsdPrevName.textContent = prevCh?.name || '';
+  if (_chOsdNextName) _chOsdNextName.textContent = nextCh?.name  || '';
+
+  // Show/dim prev-next buttons at list boundaries
+  if (_chOsdPrevBtn) (_chOsdPrevBtn as HTMLButtonElement).disabled = _channelIndex <= 0;
+  if (_chOsdNextBtn) (_chOsdNextBtn as HTMLButtonElement).disabled = _channelIndex >= _channelList.length - 1;
+
+  _chOsdEl.classList.add('ch-osd-visible');
+  if (_chOsdTimer) clearTimeout(_chOsdTimer);
+  _chOsdTimer = setTimeout(_hideChOsd, 2500);
+}
+
+function _hideChOsd(): void {
+  _chOsdEl?.classList.remove('ch-osd-visible');
+  if (_chOsdTimer) { clearTimeout(_chOsdTimer); _chOsdTimer = null; }
+}
+
+function switchChannel(delta: number): void {
+  const next = _channelIndex + delta;
+  if (next < 0 || next >= _channelList.length) return;
+  _channelIndex = next;
+  const ch = _channelList[_channelIndex];
+  _showChOsd();
+  // Load the new stream — modal stays open, fullscreen state preserved
+  const wasFullscreen = isPreviewFullscreen();
+  void openHLSPlayer(ch.url, ch.name || ch.url, true).then(() => {
+    if (wasFullscreen && !isPreviewFullscreen()) void enterPreviewFullscreen();
+  });
+}
 
 // ── Clip mode ─────────────────────────────────────────────────────────────────
 let _currentPreviewTaskId: string | null = null;
