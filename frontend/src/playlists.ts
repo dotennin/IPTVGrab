@@ -20,10 +20,48 @@ import { addToRecents } from './recents';
 import { addTaskCard, startPolling, updateTaskCard } from './tasks';
 import { Modal } from './bootstrap-shim';
 import { renderChannelCard, bindChannelGrid } from './channel-card';
+import type { BindOptions } from './channel-card';
 import type { SavedPlaylist, Channel, MergedChannel, StreamInfo } from './types';
+
+const PAGE_SIZE = 60;
 
 export let currentPlaylist: SavedPlaylist | null = null;
 export let allChannels: (Channel & { id?: string; playlist_name?: string })[] = [];
+
+// ── Virtual / infinite-scroll state ──────────────────────────────────────────
+let _virtualChannels: (Channel & { id?: string; playlist_name?: string })[] = [];
+let _virtualRendered = 0;
+let _scrollObserver: IntersectionObserver | null = null;
+let _gridBindOpts: BindOptions | null = null;
+
+function _appendNextPage(): void {
+  const grid = document.getElementById('channelGrid');
+  if (!grid || !_gridBindOpts) return;
+
+  // Remove old sentinel before adding new content
+  grid.querySelector('.channel-load-sentinel')?.remove();
+
+  const batch = _virtualChannels.slice(_virtualRendered, _virtualRendered + PAGE_SIZE);
+  if (batch.length === 0) return;
+
+  // Render batch into a temp container so we only bind the new cards
+  const tmp = document.createElement('div');
+  tmp.innerHTML = batch
+    .map((ch, batchIdx) => renderChannelCard(ch, _virtualRendered + batchIdx, { showPlaylistTag: true }))
+    .join('');
+  bindChannelGrid(tmp, _virtualChannels, _gridBindOpts);
+  while (tmp.firstChild) grid.appendChild(tmp.firstChild);
+
+  _virtualRendered += batch.length;
+
+  // Append sentinel and observe if there are more channels to load
+  if (_virtualRendered < _virtualChannels.length) {
+    const sentinel = document.createElement('div');
+    sentinel.className = 'channel-load-sentinel';
+    grid.appendChild(sentinel);
+    _scrollObserver?.observe(sentinel);
+  }
+}
 
 export async function loadPlaylists({ autoSelect = false } = {}): Promise<void> {
   try {
@@ -201,18 +239,21 @@ export function renderChannels(
   }
   if (!grid) return;
 
+  // Tear down previous observer before re-rendering
+  _scrollObserver?.disconnect();
+  _scrollObserver = null;
+
   if (!channels.length) {
     grid.innerHTML = '';
+    _virtualChannels = [];
+    _virtualRendered = 0;
     placeholder?.classList.remove('d-none');
     return;
   }
   placeholder?.classList.add('d-none');
 
-  grid.innerHTML = channels
-    .map((ch, i) => renderChannelCard(ch, i, { showPlaylistTag: true }))
-    .join('');
-
-  bindChannelGrid(grid, channels, {
+  // Store bind-options once so _appendNextPage can reuse them
+  _gridBindOpts = {
     onWatch: (ch) => {
       addToRecents(ch as Parameters<typeof addToRecents>[0]);
       watchChannel(ch);
@@ -223,7 +264,26 @@ export function renderChannels(
     onContextMenu: (ch, x, y) => {
       showChannelContextMenu(ch as unknown as MergedChannel, x, y);
     },
-  });
+  };
+
+  // Initialise virtual-scroll state
+  _virtualChannels = channels;
+  _virtualRendered = 0;
+  grid.innerHTML   = '';
+
+  _scrollObserver = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) {
+          _scrollObserver!.unobserve(entry.target);
+          _appendNextPage();
+        }
+      }
+    },
+    { rootMargin: '300px' },
+  );
+
+  _appendNextPage();
 }
 
 // ── Channel context menu ──────────────────────────────────────────────────────

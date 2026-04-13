@@ -258,33 +258,33 @@ export function updateTaskCard(taskId: string, task: Task): void {
             <i class="fas fa-download me-1"></i>${esc(task.output)}${sizeStr}
           </a>
           ${task.duration_sec ? `<span class="ms-2 text-muted small">${task.duration_sec}s elapsed</span>` : ''}
-          <button class="btn btn-link btn-sm p-0 ms-2 text-info" onclick="(window as any).restartTask('${taskId}')">
+          <button class="btn btn-link btn-sm p-0 ms-2 text-info" onclick="window.restartTask('${taskId}')">
             <i class="fas fa-redo me-1"></i>Restart
           </button>`;
       } else if (task.status === 'failed') {
         info.innerHTML = `
           <div class="task-error text-danger" title="Click to expand/collapse" onclick="this.classList.toggle('expanded')">Error: ${esc(task.error || 'Unknown error')}</div>
           <div class="mt-1">
-            <button class="btn btn-link btn-sm p-0 text-warning" onclick="(window as any).resumeTask('${taskId}')">
+            <button class="btn btn-link btn-sm p-0 text-warning" onclick="window.resumeTask('${taskId}')">
               <i class="fas fa-play me-1"></i>Resume
             </button>
-            <button class="btn btn-link btn-sm p-0 ms-2 text-info" onclick="(window as any).restartTask('${taskId}')">
+            <button class="btn btn-link btn-sm p-0 ms-2 text-info" onclick="window.restartTask('${taskId}')">
               <i class="fas fa-sync me-1"></i>Restart
             </button>
           </div>`;
         info.className = 'task-info small';
       } else if (task.status === 'cancelled') {
         info.innerHTML = `<span class="text-muted">Cancelled</span>
-          <button class="btn btn-link btn-sm p-0 ms-2 text-info" onclick="(window as any).restartTask('${taskId}')">
+          <button class="btn btn-link btn-sm p-0 ms-2 text-info" onclick="window.restartTask('${taskId}')">
             <i class="fas fa-redo me-1"></i>Restart
           </button>`;
         info.className = 'task-info small';
       } else if (task.status === 'interrupted') {
         info.innerHTML = `<span class="text-warning"><i class="fas fa-exclamation-triangle me-1"></i>Interrupted</span>
-          <button class="btn btn-link btn-sm p-0 ms-2 text-warning" onclick="(window as any).resumeTask('${taskId}')">
+          <button class="btn btn-link btn-sm p-0 ms-2 text-warning" onclick="window.resumeTask('${taskId}')">
             <i class="fas fa-redo me-1"></i>Resume
           </button>
-          <button class="btn btn-link btn-sm p-0 ms-2 text-info" onclick="(window as any).restartTask('${taskId}')">
+          <button class="btn btn-link btn-sm p-0 ms-2 text-info" onclick="window.restartTask('${taskId}')">
             <i class="fas fa-sync me-1"></i>Restart
           </button>`;
         info.className = 'task-info small';
@@ -294,10 +294,10 @@ export function updateTaskCard(taskId: string, task: Task): void {
         const pct   = total > 0 ? ` (${task.progress || 0}%)` : '';
         info.innerHTML = `
           <span class="text-warning"><i class="fas fa-pause me-1"></i>Paused${pct}${segs ? ` — ${segs}${total ? '/' + total : ''} segs saved` : ''}</span>
-          <button class="btn btn-link btn-sm p-0 ms-2 text-warning" onclick="(window as any).resumeTask('${taskId}')">
+          <button class="btn btn-link btn-sm p-0 ms-2 text-warning" onclick="window.resumeTask('${taskId}')">
             <i class="fas fa-play me-1"></i>Resume
           </button>
-          <button class="btn btn-link btn-sm p-0 ms-2 text-info" onclick="(window as any).restartTask('${taskId}')">
+          <button class="btn btn-link btn-sm p-0 ms-2 text-info" onclick="window.restartTask('${taskId}')">
             <i class="fas fa-sync me-1"></i>Restart
           </button>`;
         info.className = 'task-info small';
@@ -371,12 +371,12 @@ export function updateTaskCard(taskId: string, task: Task): void {
       extras.innerHTML = `
         <button class="btn btn-sm btn-outline-warning"
                 title="Delete all recorded segments and start fresh"
-                onclick="(window as any).restartRecording('${taskId}')">
+                onclick="window.restartRecording('${taskId}')">
           <i class="fas fa-redo me-1"></i>Restart
         </button>
         <button class="btn btn-sm btn-outline-info"
                 title="Keep &amp; merge current segments, then start a new recording"
-                onclick="(window as any).forkRecording('${taskId}')">
+                onclick="window.forkRecording('${taskId}')">
           <i class="fas fa-code-branch me-1"></i>Stop &amp; New
         </button>`;
       extras.dataset.populated = '1';
@@ -512,7 +512,7 @@ export async function cancelTask(taskId: string): Promise<void> {
       info.className = 'task-info small';
       delete info.dataset.status;
       info.innerHTML = `<span class="text-muted">Cancelled</span>
-        <button class="btn btn-link btn-sm p-0 ms-2 text-info" onclick="(window as any).restartTask('${taskId}')">
+        <button class="btn btn-link btn-sm p-0 ms-2 text-info" onclick="window.restartTask('${taskId}')">
           <i class="fas fa-redo me-1"></i>Restart
         </button>`;
     }
