@@ -16,3 +16,4 @@ import './player';
 import './playlists';
 import './editor';
 import './ui';
+import './tv-nav';

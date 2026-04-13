@@ -16,6 +16,7 @@ import {
   currentStreamInfo,
   showStreamInfo,
   startDownload,
+  setNextOpenAutoFullscreen,
 } from './player';
 import { addToRecents } from './recents';
 import { addTaskCard, startPolling, updateTaskCard } from './tasks';
@@ -211,7 +212,7 @@ export function renderChannels(
   grid.innerHTML = channels
     .map(
       (ch, i) => `
-    <div class="channel-card" id="channel-${ch.id || i}">
+    <div class="channel-card" id="channel-${ch.id || i}" tabindex="0" role="button" aria-label="${esc(ch.name || ch.url)}" data-ch-json="${esc(JSON.stringify(ch))}">
       ${_healthDot(ch.url)}
       <div class="channel-logo-wrap">
         ${
@@ -251,9 +252,30 @@ export function renderChannels(
     });
   });
 
+  // Direct card click / keyboard Enter = watch (TV remote friendly)
   let _lpTimer: ReturnType<typeof setTimeout> | null = null;
   grid.querySelectorAll('.channel-card').forEach((card, i) => {
     const ch = channels[i];
+
+    // Click on card body (not action buttons) → watch with auto-fullscreen
+    card.addEventListener('click', (e) => {
+      if ((e.target as Element).closest('.channel-actions')) return;
+      addToRecents(ch as Parameters<typeof addToRecents>[0]);
+      setNextOpenAutoFullscreen(true);
+      watchChannel(ch);
+    });
+
+    // Keyboard Enter on focused card → watch
+    card.addEventListener('keydown', (e) => {
+      const key = (e as KeyboardEvent).key;
+      if (key === 'Enter' || key === ' ') {
+        e.preventDefault();
+        addToRecents(ch as Parameters<typeof addToRecents>[0]);
+        setNextOpenAutoFullscreen(true);
+        watchChannel(ch);
+      }
+    });
+
     card.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       const me = e as MouseEvent;

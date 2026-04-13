@@ -13,187 +13,161 @@
 </head>
 <body class="bg-gh-bg text-gh-text h-screen flex flex-col overflow-hidden">
 
-  <!-- Navbar -->
-  <nav class="flex items-center justify-between px-4 py-2 bg-gh-surface border-b border-gh-border" id="navbar">
-    <span class="text-lg font-semibold">
+  <!-- Minimal topbar (logo only; controls live in bottom nav) -->
+  <nav class="tv-topbar flex items-center px-4 shrink-0" id="navbar">
+    <span class="text-base font-semibold">
       <i class="fas fa-satellite-dish mr-2 text-gh-blue-light"></i>Media Nest
     </span>
-    <div class="flex items-center gap-3">
-      <button class="inline-flex items-center px-2 py-1 border border-[#444c56] text-gh-muted hover:bg-gh-surface2 hover:text-gh-text rounded text-sm transition-colors" id="settingsBtn" type="button" title="Settings">
-        <i class="fas fa-cog"></i>
-      </button>
-      <button class="d-none inline-flex items-center px-2 py-1 border border-[#444c56] text-gh-muted hover:bg-gh-surface2 hover:text-gh-text rounded text-sm transition-colors" id="logoutBtn" type="button" title="Sign out">
-        <i class="fas fa-sign-out-alt mr-1"></i>Sign out
-      </button>
-    </div>
   </nav>
 
-  <!-- Tab bar — always visible, sits between navbar and content -->
-  <div class="tab-nav bg-gh-surface px-3 shrink-0" id="mainTabNav">
-    <button class="tab-btn" id="favorites-tab" type="button">
-      <i class="fas fa-history mr-1"></i>Recents
-    </button>
-    <button class="tab-btn tab-active" id="playlist-tab" data-bs-toggle="tab" data-bs-target="#playlistPane" type="button">
-      <i class="fas fa-tv mr-1"></i>Playlist
-    </button>
-    <button class="tab-btn" id="url-tab" data-bs-toggle="tab" data-bs-target="#urlPane" type="button">
-      <i class="fas fa-link mr-1"></i>URL
-    </button>
-    <button class="tab-btn" id="curl-tab" data-bs-toggle="tab" data-bs-target="#curlPane" type="button">
-      <i class="fas fa-terminal mr-1"></i>cURL
-    </button>
-    <button class="tab-btn" id="downloads-tab" type="button">
-      <i class="fas fa-download mr-1"></i>Downloads
-      <span class="badge bg-secondary ms-1" id="taskCountBadge">0</span>
-    </button>
-  </div>
+  <!-- ── CHANNELS section ────────────────────────────────────────────── -->
+  <div class="tv-section flex-1 flex flex-col overflow-hidden" id="mainPanels">
 
-  <!-- Main panels: left input column + right display column -->
-  <div class="flex-1 flex flex-col md:flex-row overflow-hidden" id="mainPanels">
-
-    <!-- Left column: playlist / URL / cURL controls (~360 px on md+, full-width stacked on mobile) -->
-    <div class="w-full md:w-[360px] shrink-0 max-h-[45vh] md:max-h-full flex flex-col overflow-hidden border-b border-gh-border md:border-b-0 md:border-r bg-gh-surface">
-      <div class="flex-shrink-0 overflow-y-auto p-3">
-
-        <!-- Playlist tab pane -->
-        <div class="tab-pane tab-pane-active" id="playlistPane">
-          <div class="flex gap-2 items-center flex-nowrap">
-            <select class="form-select form-select-sm flex-1 min-w-0" id="playlistSelect">
-              <option value="">＋ Add playlist…</option>
-            </select>
-            <div class="flex gap-1 items-center flex-shrink-0">
-              <button class="inline-flex items-center px-2 py-1 border border-[#444c56] text-gh-muted hover:bg-gh-surface2 hover:text-gh-text rounded text-sm transition-colors" id="refreshPlaylistBtn" title="Refresh from URL" disabled>
-                <i class="fas fa-sync-alt"></i>
-              </button>
-              <button class="inline-flex items-center px-2 py-1 border border-[#444c56] text-gh-muted hover:bg-gh-surface2 hover:text-gh-text rounded text-sm transition-colors" id="editPlaylistBtn" title="Edit playlist" disabled>
-                <i class="fas fa-pencil-alt"></i>
-              </button>
-              <button class="d-none inline-flex items-center px-2 py-1 border border-[#444c56] text-gh-muted hover:bg-gh-surface2 hover:text-gh-text rounded text-sm transition-colors" id="refreshAllPlaylistsBtn" title="Refresh all sources">
-                <i class="fas fa-sync-alt"></i>
-              </button>
-              <button class="d-none inline-flex items-center px-2 py-1 border border-[#444c56] text-gh-muted hover:bg-gh-surface2 hover:text-gh-text rounded text-sm transition-colors" id="editAllPlaylistsBtn" title="Edit All Playlists">
-                <i class="fas fa-edit"></i>
-              </button>
-              <button class="inline-flex items-center px-2 py-1 border border-[#da3633]/60 text-gh-red hover:bg-[#da3633]/10 rounded text-sm transition-colors" id="deletePlaylistBtn" title="Delete playlist" disabled>
-                <i class="fas fa-trash"></i>
-              </button>
-            </div>
-          </div>
-          <div class="d-none" id="channelFilterBar"></div>
-        </div>
-
-        <!-- URL tab pane -->
-        <div class="tab-pane" id="urlPane">
-          <div class="mb-3">
-            <label class="form-label text-gh-muted text-sm">M3U8 URL</label>
-            <input type="url" class="form-control font-mono" id="urlInput" placeholder="https://example.com/stream.m3u8?token=..." spellcheck="false" />
-          </div>
-          <label class="form-label text-gh-muted text-sm">Custom Headers</label>
-          <div id="headersList"></div>
-          <button class="inline-flex items-center px-2 py-1 mb-2 border border-[#444c56] text-gh-muted hover:bg-gh-surface2 hover:text-gh-text rounded text-sm transition-colors mt-2" id="addHeaderBtn" type="button">
-            <i class="fas fa-plus mr-1"></i>Add Header
+    <!-- Control bar: playlist select + channel search/filter -->
+    <div class="tv-control-bar shrink-0" id="tvControlBar">
+      <div class="tv-control-left">
+        <select class="form-select form-select-sm min-w-0" style="max-width:200px" id="playlistSelect">
+          <option value="">＋ Add playlist…</option>
+        </select>
+        <div class="flex gap-1 items-center">
+          <button class="tv-icon-btn" id="refreshPlaylistBtn" title="Refresh from URL" disabled>
+            <i class="fas fa-sync-alt"></i>
+          </button>
+          <button class="tv-icon-btn" id="editPlaylistBtn" title="Edit playlist" disabled>
+            <i class="fas fa-pencil-alt"></i>
+          </button>
+          <button class="d-none tv-icon-btn" id="refreshAllPlaylistsBtn" title="Refresh all sources">
+            <i class="fas fa-sync-alt"></i>
+          </button>
+          <button class="d-none tv-icon-btn" id="editAllPlaylistsBtn" title="Edit All Playlists">
+            <i class="fas fa-edit"></i>
+          </button>
+          <button class="tv-icon-btn tv-icon-btn-danger" id="deletePlaylistBtn" title="Delete playlist" disabled>
+            <i class="fas fa-trash"></i>
           </button>
         </div>
-
-        <!-- cURL tab pane -->
-        <div class="tab-pane" id="curlPane">
-          <label class="form-label text-gh-muted text-sm">Paste cURL command copied from browser DevTools</label>
-          <textarea class="form-control font-mono" id="curlInput" rows="9" placeholder="curl 'https://example.com/stream.m3u8' \&#10;  -H 'user-agent: Mozilla/5.0 ...' \&#10;  -H 'referer: https://...' \&#10;  ..." spellcheck="false"></textarea>
-        </div>
-
-        <!-- Output settings (visible when URL / cURL tab active) -->
-        <div class="d-none" id="outputSettingsRow">
-          <div class="grid grid-cols-12 gap-3 items-end">
-            <div class="col-span-7">
-              <label class="form-label text-gh-muted text-sm">Output filename (optional)</label>
-              <div class="input-group">
-                <input type="text" class="form-control" id="outputName" placeholder="video_output" />
-                <span class="input-group-text">.mp4</span>
-              </div>
-            </div>
-            <div class="col-span-5">
-              <label class="form-label text-gh-muted text-sm">Concurrency: <span id="concurrencyVal">8</span></label>
-              <input type="range" class="form-range" id="concurrency" min="1" max="32" value="8" />
-            </div>
-          </div>
-        </div>
-
-        <div class="mt-3 flex gap-2 d-none" id="parseBtnGroup">
-          <button class="inline-flex items-center px-3 py-1.5 bg-[#1f6feb] hover:bg-gh-blue text-white rounded text-sm font-medium transition-colors" id="parseBtn" type="button">
-            <i class="fas fa-search mr-1"></i>Parse stream
-          </button>
-        </div>
-
       </div>
-
-      <!-- Group sidebar — fills remaining left panel height when a playlist with groups is loaded -->
-      <div class="channel-group-sidebar d-none" id="channelGroupSidebar">
-        <div class="channel-group-sidebar-header">
-          <span>Groups</span>
-          <span id="groupCount"></span>
+      <div class="tv-control-right">
+        <input type="text" class="form-control form-control-sm d-none" id="channelSearch" placeholder="Search…" style="max-width:220px" />
+        <div class="form-check form-switch d-none mb-0" id="healthOnlyWrap">
+          <input class="form-check-input" type="checkbox" role="switch" id="healthOnlyCheck" />
+          <label class="form-check-label text-sm text-gh-muted" for="healthOnlyCheck">Active</label>
         </div>
-        <ul class="channel-group-list" id="groupList">
-          <li class="channel-group-item active" data-group="">All</li>
-        </ul>
+        <span class="d-none text-sm" id="healthProgressBadge">
+          <i class="fas fa-spinner fa-spin mr-1 text-yellow-400"></i>
+          <span id="healthProgressText" class="text-yellow-400"></span>
+        </span>
+        <span class="badge bg-secondary" id="channelCountBadge">0</span>
       </div>
     </div>
 
-    <!-- Right column: stream info panel OR channel grid (one visible at a time) -->
-    <div class="flex-1 flex flex-col overflow-hidden bg-gh-surface">
+    <!-- Hidden filter bar placeholder (JS compat) -->
+    <div class="d-none" id="channelFilterBar"></div>
 
-      <!-- Stream info panel (hidden by default, shown after URL/cURL parse) -->
-      <div class="flex-1 flex flex-col overflow-hidden d-none" id="streamInfoPanel">
-        <div id="streamInfoCard" class="flex-1 flex flex-col overflow-hidden">
-          <div class="flex items-center justify-between px-4 py-2 border-b border-gh-border shrink-0">
-            <span><i class="fas fa-info-circle mr-2"></i>Stream info</span>
-            <span id="streamTypeBadge"></span>
+    <!-- Horizontal group tabs bar (shown when groups exist) -->
+    <div class="tv-group-bar d-none" id="channelGroupSidebar">
+      <ul class="tv-group-list" id="groupList">
+        <li class="channel-group-item active" data-group="">All</li>
+      </ul>
+      <span class="d-none" id="groupCount"></span>
+    </div>
+
+    <!-- Channel grid (full width) -->
+    <div class="flex-1 flex flex-col overflow-hidden" id="channelGridPanel">
+      <div class="channel-grid-body">
+        <div class="channel-grid-area p-1">
+          <div class="text-center text-gh-muted py-16" id="channelPlaceholder">
+            <i class="fas fa-tv fa-2x mb-2 d-block opacity-25"></i>
+            <p class="mb-0 text-sm">Select a playlist to browse channels</p>
           </div>
-          <div class="p-4 flex-1 overflow-y-auto" id="streamInfoBody">
-            <div class="text-center text-gh-muted py-16" id="streamPlaceholder">
-              <i class="fas fa-play-circle fa-3x mb-3 d-block opacity-25"></i>
-              <p class="mb-0">Stream info will appear here after parsing</p>
+          <div id="channelGrid" class="channel-grid"></div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /#mainPanels -->
+
+  <!-- ── ADD STREAM section (URL / cURL) ────────────────────────────── -->
+  <div class="tv-section flex-1 flex flex-col overflow-hidden d-none" id="urlSettingsSection">
+
+    <!-- URL / cURL sub-tabs -->
+    <div class="tab-nav bg-gh-surface px-3 shrink-0">
+      <button class="tab-btn tab-active" id="url-tab" data-bs-toggle="tab" data-bs-target="#urlPane" type="button">
+        <i class="fas fa-link mr-1"></i>URL
+      </button>
+      <button class="tab-btn" id="curl-tab" data-bs-toggle="tab" data-bs-target="#curlPane" type="button">
+        <i class="fas fa-terminal mr-1"></i>cURL
+      </button>
+    </div>
+
+    <!-- Scrollable form area -->
+    <div class="flex-shrink-0 overflow-y-auto p-3">
+
+      <!-- URL pane -->
+      <div class="tab-pane tab-pane-active" id="urlPane">
+        <div class="mb-3">
+          <label class="form-label text-gh-muted text-sm">M3U8 URL</label>
+          <input type="url" class="form-control font-mono" id="urlInput" placeholder="https://example.com/stream.m3u8?token=..." spellcheck="false" />
+        </div>
+        <label class="form-label text-gh-muted text-sm">Custom Headers</label>
+        <div id="headersList"></div>
+        <button class="inline-flex items-center px-2 py-1 mb-2 border border-[#444c56] text-gh-muted hover:bg-gh-surface2 hover:text-gh-text rounded text-sm transition-colors mt-2" id="addHeaderBtn" type="button">
+          <i class="fas fa-plus mr-1"></i>Add Header
+        </button>
+      </div>
+
+      <!-- cURL pane -->
+      <div class="tab-pane" id="curlPane">
+        <label class="form-label text-gh-muted text-sm">Paste cURL command copied from browser DevTools</label>
+        <textarea class="form-control font-mono" id="curlInput" rows="9" placeholder="curl 'https://example.com/stream.m3u8' \&#10;  -H 'user-agent: Mozilla/5.0 ...' \&#10;  -H 'referer: https://...' \&#10;  ..." spellcheck="false"></textarea>
+      </div>
+
+      <!-- Output settings -->
+      <div id="outputSettingsRow">
+        <div class="grid grid-cols-12 gap-3 items-end mt-3">
+          <div class="col-span-7">
+            <label class="form-label text-gh-muted text-sm">Output filename (optional)</label>
+            <div class="input-group">
+              <input type="text" class="form-control" id="outputName" placeholder="video_output" />
+              <span class="input-group-text">.mp4</span>
             </div>
+          </div>
+          <div class="col-span-5">
+            <label class="form-label text-gh-muted text-sm">Concurrency: <span id="concurrencyVal">8</span></label>
+            <input type="range" class="form-range" id="concurrency" min="1" max="32" value="8" />
           </div>
         </div>
       </div>
 
-      <!-- Channel grid panel (shown by default on playlist tab) -->
-      <div class="flex-1 flex flex-col overflow-hidden" id="channelGridPanel">
-        <!-- Header -->
-        <div class="flex items-center gap-2 px-3 py-2 border-b border-gh-border flex-wrap shrink-0" id="channelGridHeader">
-          <span class="whitespace-nowrap font-medium"><i class="fas fa-tv mr-2"></i>Channels</span>
-          <input type="text" class="form-control form-control-sm d-none flex-1 min-w-0" id="channelSearch" placeholder="Search…" style="max-width:300px" />
-          <div class="flex items-center gap-2 ml-auto whitespace-nowrap">
-            <div class="form-check form-switch d-none mb-0" id="healthOnlyWrap">
-              <input class="form-check-input" type="checkbox" role="switch" id="healthOnlyCheck" />
-              <label class="form-check-label text-sm text-gh-muted" for="healthOnlyCheck">Active</label>
-            </div>
-            <span class="d-none text-sm" id="healthProgressBadge">
-              <i class="fas fa-spinner fa-spin mr-1 text-yellow-400"></i>
-              <span id="healthProgressText" class="text-yellow-400"></span>
-            </span>
-            <span class="badge bg-secondary" id="channelCountBadge">0</span>
-          </div>
-        </div>
-        <!-- Body: channel grid (groups moved to left panel) -->
-        <div class="channel-grid-body">
-          <div class="channel-grid-area p-1">
-            <div class="text-center text-gh-muted py-16" id="channelPlaceholder">
-              <i class="fas fa-tv fa-2x mb-2 d-block opacity-25"></i>
-              <p class="mb-0 text-sm">Select a playlist to browse channels</p>
-            </div>
-            <div id="channelGrid" class="channel-grid"></div>
-          </div>
-        </div>
+      <div class="mt-3 flex gap-2" id="parseBtnGroup">
+        <button class="inline-flex items-center px-3 py-1.5 bg-[#1f6feb] hover:bg-gh-blue text-white rounded text-sm font-medium transition-colors" id="parseBtn" type="button">
+          <i class="fas fa-search mr-1"></i>Parse stream
+        </button>
       </div>
 
     </div>
-  </div>
 
-  <!-- Recents section — replaces mainPanels when Recents tab is active -->
-  <div class="flex-1 flex flex-col overflow-hidden d-none" id="favoritesSection">
+    <!-- Stream info panel (shown after parse) -->
+    <div class="flex-1 flex flex-col overflow-hidden d-none" id="streamInfoPanel">
+      <div id="streamInfoCard" class="flex-1 flex flex-col overflow-hidden">
+        <div class="flex items-center justify-between px-4 py-2 border-b border-gh-border shrink-0">
+          <span><i class="fas fa-info-circle mr-2"></i>Stream info</span>
+          <span id="streamTypeBadge"></span>
+        </div>
+        <div class="p-4 flex-1 overflow-y-auto" id="streamInfoBody">
+          <div class="text-center text-gh-muted py-16" id="streamPlaceholder">
+            <i class="fas fa-play-circle fa-3x mb-3 d-block opacity-25"></i>
+            <p class="mb-0">Stream info will appear here after parsing</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /#urlSettingsSection -->
+
+  <!-- ── RECENTS section ────────────────────────────────────────────── -->
+  <div class="tv-section flex-1 flex flex-col overflow-hidden d-none" id="favoritesSection">
     <div class="flex-1 overflow-y-auto bg-gh-surface" id="favoritesBody">
-      <!-- Recently watched -->
       <div id="recentChannelsWrap">
         <div class="favorites-section-header">
           <i class="fas fa-history text-gh-muted mr-2"></i>
@@ -212,8 +186,8 @@
     </div>
   </div>
 
-  <!-- Downloads section — replaces mainPanels when Downloads tab is active -->
-  <div class="flex-1 flex flex-col overflow-hidden d-none" id="downloadsSection">
+  <!-- ── DOWNLOADS section ──────────────────────────────────────────── -->
+  <div class="tv-section flex-1 flex flex-col overflow-hidden d-none" id="downloadsSection">
     <div class="flex-1 flex flex-col overflow-hidden bg-gh-surface">
       <div class="flex items-center justify-between px-4 py-2 border-b border-gh-border flex-wrap gap-2 shrink-0">
         <span class="font-medium">
@@ -233,7 +207,6 @@
         </div>
       </div>
       <div class="downloads-layout flex-1 min-h-0">
-        <!-- Category sidebar -->
         <div class="downloads-sidebar">
           <div class="dl-cat active" data-cat="all" title="All Tasks">
             <i class="fas fa-layer-group"></i>
@@ -261,7 +234,6 @@
             </button>
           </div>
         </div>
-        <!-- Task list -->
         <div class="downloads-content p-3">
           <div class="text-center text-gh-muted py-8" id="tasksPlaceholder">
             <i class="fas fa-inbox fa-2x mb-2 d-block opacity-25"></i>
@@ -273,7 +245,7 @@
     </div>
   </div>
 
-  <!-- Toast container -->
+  <!-- Toast container (positioned above bottom nav via CSS) -->
   <div id="toastContainer"></div>
 
   <!-- Edit Playlist modal -->
@@ -660,6 +632,34 @@
       <i class="fas fa-ban mr-2"></i>Disable in all playlists
     </div>
   </div>
+
+  <!-- ── TV Remote Bottom Nav ───────────────────────────────────────── -->
+  <nav class="tv-bottom-nav" id="tvBottomNav" aria-label="Main navigation">
+    <button class="tv-nav-btn" id="favorites-tab" type="button" tabindex="0">
+      <i class="fas fa-history"></i>
+      <span>Recents</span>
+    </button>
+    <button class="tv-nav-btn tv-nav-active" id="playlist-tab" type="button" tabindex="0">
+      <i class="fas fa-tv"></i>
+      <span>Channels</span>
+    </button>
+    <button class="tv-nav-btn" id="url-nav-btn" type="button" tabindex="0">
+      <i class="fas fa-plus-circle"></i>
+      <span>Add Stream</span>
+    </button>
+    <button class="tv-nav-btn" id="downloads-tab" type="button" tabindex="0">
+      <i class="fas fa-download"></i>
+      <span>Downloads<span class="tv-badge" id="taskCountBadge">0</span></span>
+    </button>
+    <button class="tv-nav-btn" id="settingsBtn" type="button" tabindex="0">
+      <i class="fas fa-cog"></i>
+      <span>Settings</span>
+    </button>
+    <button class="tv-nav-btn d-none" id="logoutBtn" type="button" tabindex="0">
+      <i class="fas fa-sign-out-alt"></i>
+      <span>Sign out</span>
+    </button>
+  </nav>
 
   <script type="module" src="/src/main.ts"></script>
 </body>

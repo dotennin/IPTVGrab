@@ -1476,3 +1476,279 @@ textarea.form-control {
   margin: 2px 0;
 }
 
+/* ══════════════════════════════════════════════════════════════════════════
+   TV Remote UI — D-Pad Friendly Layout
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Topbar ─────────────────────────────────────────────────────────────── */
+.tv-topbar {
+  height: 44px;
+  background: #161b22;
+  border-bottom: 1px solid #30363d;
+}
+
+/* ── Section layout helper ──────────────────────────────────────────────── */
+.tv-section {
+  /* sections are full-viewport siblings; only one visible at a time */
+}
+
+/* ── Control bar (playlist + search row) ────────────────────────────────── */
+.tv-control-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: #161b22;
+  border-bottom: 1px solid #30363d;
+  flex-wrap: wrap;
+}
+
+.tv-control-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.tv-control-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* Small icon buttons in the control bar */
+.tv-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid #444c56;
+  background: transparent;
+  color: #8b949e;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.tv-icon-btn:hover,
+.tv-icon-btn:focus-visible {
+  background: #21262d;
+  color: #e6edf3;
+  border-color: #8b949e;
+  outline: none;
+}
+
+.tv-icon-btn:focus-visible {
+  box-shadow: 0 0 0 3px rgba(56, 139, 253, 0.4);
+  border-color: #388bfd;
+}
+
+.tv-icon-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.tv-icon-btn-danger {
+  border-color: rgba(218, 54, 51, 0.6);
+  color: #f85149;
+}
+
+.tv-icon-btn-danger:hover,
+.tv-icon-btn-danger:focus-visible {
+  background: rgba(218, 54, 51, 0.12);
+  color: #f85149;
+  border-color: #da3633;
+}
+
+/* ── Horizontal group tabs bar ──────────────────────────────────────────── */
+.tv-group-bar {
+  display: flex;
+  align-items: stretch;
+  background: #161b22;
+  border-bottom: 1px solid #30363d;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  flex-shrink: 0;
+  min-height: 38px;
+}
+
+.tv-group-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.tv-group-list {
+  display: flex;
+  flex-direction: row;
+  list-style: none;
+  margin: 0;
+  padding: 0 6px;
+  gap: 2px;
+  align-items: stretch;
+}
+
+/* .channel-group-item is still used by playlists.ts — keep the class */
+.tv-group-bar .channel-group-item {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 14px;
+  font-size: 0.8rem;
+  color: #8b949e;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.15s, border-color 0.15s;
+  border-radius: 0;
+  user-select: none;
+}
+
+.tv-group-bar .channel-group-item:hover {
+  color: #e6edf3;
+}
+
+.tv-group-bar .channel-group-item.active {
+  color: #58a6ff;
+  border-bottom-color: #388bfd;
+  font-weight: 500;
+}
+
+.tv-group-bar .channel-group-item:focus-visible {
+  outline: none;
+  background: rgba(56, 139, 253, 0.12);
+  color: #58a6ff;
+}
+
+/* ── Channel card enhancements for remote nav ───────────────────────────── */
+.channel-card {
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
+}
+
+.channel-card:hover {
+  transform: scale(1.03);
+}
+
+.channel-card:focus-visible,
+.channel-card:focus {
+  outline: 3px solid #388bfd;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 6px rgba(56, 139, 253, 0.25), 0 4px 20px rgba(0,0,0,0.5);
+  border-color: #388bfd !important;
+  transform: scale(1.04);
+  z-index: 2;
+  position: relative;
+}
+
+/* Make channel-card focusable as a block */
+.channel-card[tabindex] {
+  position: relative;
+}
+
+/* ── TV Bottom Navigation ───────────────────────────────────────────────── */
+.tv-bottom-nav {
+  display: flex;
+  align-items: stretch;
+  justify-content: stretch;
+  background: #161b22;
+  border-top: 1px solid #30363d;
+  height: 68px;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 30;
+}
+
+.tv-nav-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  gap: 3px;
+  padding: 6px 4px;
+  background: transparent;
+  border: none;
+  color: #6e7681;
+  font-size: 0.65rem;
+  cursor: pointer;
+  position: relative;
+  transition: color 0.15s, background 0.15s;
+  border-top: 2px solid transparent;
+  text-align: center;
+}
+
+.tv-nav-btn i {
+  font-size: 1.3rem;
+  line-height: 1;
+  display: block;
+}
+
+.tv-nav-btn span {
+  font-size: 0.65rem;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.tv-nav-btn:hover {
+  color: #e6edf3;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.tv-nav-btn.tv-nav-active {
+  color: #58a6ff;
+  border-top-color: #388bfd;
+}
+
+.tv-nav-btn.tv-nav-active i {
+  color: #58a6ff;
+}
+
+.tv-nav-btn:focus-visible {
+  outline: none;
+  background: rgba(56, 139, 253, 0.12);
+  color: #58a6ff;
+  box-shadow: inset 0 2px 0 #388bfd;
+  border-top-color: #388bfd;
+}
+
+/* Badge on Downloads nav button */
+.tv-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.6rem;
+  font-weight: 600;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: #58a6ff;
+  color: #0d1117;
+  vertical-align: middle;
+  margin-left: 3px;
+  line-height: 1;
+}
+
+.tv-badge:empty,
+.tv-badge[data-count="0"] {
+  display: none;
+}
+
+/* ── Toast: float above bottom nav ─────────────────────────────────────── */
+#toastContainer {
+  bottom: calc(68px + 12px) !important;
+}
+
+/* ── Grid: slightly larger cards for TV comfort ─────────────────────────── */
+.channel-grid {
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+}
+
+/* ── URL settings section scrollable area ───────────────────────────────── */
+#urlSettingsSection .flex-shrink-0.overflow-y-auto {
+  max-height: calc(100vh - 44px - 68px - 40px); /* topbar + bottomnav + tab-nav */
+}
+

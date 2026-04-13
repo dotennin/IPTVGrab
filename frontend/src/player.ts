@@ -9,6 +9,12 @@ import type { StreamInfo } from './types';
 
 export let currentStreamInfo: StreamInfo | null = null;
 
+// TV remote: set this flag before calling openHLSPlayer to auto-enter fullscreen
+let _tvAutoFullscreen = false;
+export function setNextOpenAutoFullscreen(val: boolean): void {
+  _tvAutoFullscreen = val;
+}
+
 // ── Stream info panel ─────────────────────────────────────────────────────────
 function resetStreamInfo(): void {
   const badge = document.getElementById('streamTypeBadge');
@@ -280,6 +286,10 @@ previewModalEl.addEventListener('shown.bs.modal', () => {
   resetPreviewChrome();
   previewVideo.focus();
   schedulePreviewChromeHide();
+  if (_tvAutoFullscreen) {
+    _tvAutoFullscreen = false;
+    void enterPreviewFullscreen();
+  }
 });
 
 document.addEventListener('keydown', (event) => {

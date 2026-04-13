@@ -7,12 +7,22 @@ import { addTaskCard, updateTaskCard, startPolling, currentRequest as _cr } from
 import { currentStreamInfo as _csi, showStreamInfo, showError } from './player';
 import { loadPlaylists } from './playlists';
 
-// ── Tab switching ─────────────────────────────────────────────────────────────
-function setActiveTab(tabId: string): void {
-  document.querySelectorAll('.tab-nav .tab-btn').forEach((b) =>
-    b.classList.remove('tab-active', 'active'),
+// ── Section management ────────────────────────────────────────────────────────
+const ALL_SECTIONS = ['mainPanels', 'urlSettingsSection', 'favoritesSection', 'downloadsSection'];
+
+function showSection(id: string): void {
+  ALL_SECTIONS.forEach((s) => {
+    const el = document.getElementById(s);
+    if (el) el.classList.toggle('d-none', s !== id);
+  });
+}
+
+// ── Bottom nav active state ───────────────────────────────────────────────────
+function setNavActive(btnId: string): void {
+  document.querySelectorAll('#tvBottomNav .tv-nav-btn').forEach((b) =>
+    b.classList.remove('tv-nav-active'),
   );
-  document.getElementById(tabId)?.classList.add('tab-active', 'active');
+  document.getElementById(btnId)?.classList.add('tv-nav-active');
 }
 
 function showPanel(panelId: string): void {
@@ -24,63 +34,42 @@ function hidePanel(panelId: string): void {
 }
 
 export function showDownloadsTab(): void {
-  hidePanel('mainPanels');
-  hidePanel('favoritesSection');
-  showPanel('downloadsSection');
-  setActiveTab('downloads-tab');
-}
-
-function hideDownloadsTab(): void {
-  showPanel('mainPanels');
-  hidePanel('downloadsSection');
-  hidePanel('favoritesSection');
-  document.getElementById('downloads-tab')?.classList.remove('tab-active', 'active');
+  showSection('downloadsSection');
+  setNavActive('downloads-tab');
 }
 
 function showFavoritesTab(): void {
-  hidePanel('mainPanels');
-  hidePanel('downloadsSection');
-  showPanel('favoritesSection');
-  setActiveTab('favorites-tab');
+  showSection('favoritesSection');
+  setNavActive('favorites-tab');
   renderRecentChannels();
 }
 
-function hideFavoritesTab(): void {
-  hidePanel('favoritesSection');
-  document.getElementById('favorites-tab')?.classList.remove('tab-active', 'active');
+function showPlaylistTab(): void {
+  showSection('mainPanels');
+  setNavActive('playlist-tab');
 }
 
-function toggleUI(isPlaylist: boolean): void {
-  hideDownloadsTab();
-  hideFavoritesTab();
-
-  const controls: Array<{ id: string; playlistHide: boolean }> = [
-    { id: 'outputSettingsRow', playlistHide: true },
-    { id: 'parseBtnGroup',     playlistHide: true },
-    { id: 'streamInfoPanel',   playlistHide: true },
-    { id: 'channelGridPanel',  playlistHide: false },
-  ];
-
-  controls.forEach(({ id, playlistHide }) => {
-    if (isPlaylist === playlistHide) { hidePanel(id); } else { showPanel(id); }
-  });
+function showUrlSection(): void {
+  showSection('urlSettingsSection');
+  setNavActive('url-nav-btn');
 }
 
+// ── Bottom nav listeners ──────────────────────────────────────────────────────
 document.getElementById('favorites-tab')?.addEventListener('click', showFavoritesTab);
+document.getElementById('playlist-tab')?.addEventListener('click', showPlaylistTab);
+document.getElementById('downloads-tab')?.addEventListener('click', showDownloadsTab);
+document.getElementById('url-nav-btn')?.addEventListener('click', showUrlSection);
 
-document.getElementById('playlist-tab')?.addEventListener('click', () => {
-  toggleUI(true);
-  setActiveTab('playlist-tab');
-});
-
+// url-tab / curl-tab are sub-tabs inside urlSettingsSection — just switch panes
+// (bootstrap-shim Tab handles .tab-pane-active toggling)
+// When clicking these sub-tabs ensure urlSettingsSection is visible
 ['url-tab', 'curl-tab'].forEach((id) => {
   document.getElementById(id)?.addEventListener('click', () => {
-    toggleUI(false);
-    setActiveTab(id);
+    if (document.getElementById('urlSettingsSection')?.classList.contains('d-none')) {
+      showUrlSection();
+    }
   });
 });
-
-document.getElementById('downloads-tab')?.addEventListener('click', showDownloadsTab);
 
 // ── Header rows ───────────────────────────────────────────────────────────────
 function addHeaderRow(key = '', val = ''): void {
@@ -147,20 +136,20 @@ document.getElementById('parseBtn')?.addEventListener('click', async () => {
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || 'Parse failed');
 
-    // Update currentRequest on the imported object reference (tasks.ts)
     _cr.url     = url || data.url || '';
     _cr.headers = data.headers || headers;
 
-    // Auto-fill URL tab
     const urlInput = document.getElementById('urlInput') as HTMLInputElement | null;
     if (urlInput) urlInput.value = data.url || '';
     if (data.headers) populateHeaders(data.headers);
 
     showStreamInfo(data);
+    showPanel('streamInfoPanel');
     toast('Parsed successfully', 'success');
   } catch (e) {
     toast((e as Error).message, 'danger');
     showError((e as Error).message);
+    showPanel('streamInfoPanel');
   } finally {
     btn.disabled = false;
     btn.innerHTML = '<i class="fas fa-search me-1"></i>Parse stream';
