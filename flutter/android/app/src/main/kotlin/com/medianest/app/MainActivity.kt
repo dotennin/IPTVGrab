@@ -43,6 +43,13 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+        // Ensure libmobile_ffi.so is loaded into the process linker namespace
+        // before Flutter's Dart isolate runs DynamicLibrary.open('libmobile_ffi.so').
+        // Belt-and-suspenders alongside android:extractNativeLibs="true" in the manifest.
+        try {
+            System.loadLibrary("mobile_ffi")
+        } catch (_: UnsatisfiedLinkError) {}
+
         super.configureFlutterEngine(flutterEngine)
 
         MethodChannel(

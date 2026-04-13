@@ -112,15 +112,53 @@ class AppController extends ChangeNotifier {
   Future<void> bootstrapLocalServer() async {
     unawaited(_loadRecentChannels());
     unawaited(_loadUiPrefs());
-    if (kIsWeb) return; // Local FFI server is not available on web.
+    if (kIsWeb) {
+      // No embedded FFI server on web. Connect to the origin that is serving
+      // this page — correct for both Vite-proxy dev mode (localhost:5173 →
+      // proxies /api to :8765) and production (Flutter built into static/dist/
+      // and served by the Rust server directly).
+      unawaited(_bootstrapWebConnection());
+      return;
+    }
     try {
       await startLocalServer();
-    } on ApiException catch (error) {
-      _localServerError = error.message;
+    } catch (error) {
+      // Catch ALL exception types, not just ApiException — the native-side
+      // LocalServerBridgeException is a *different* Dart type from the one
+      // declared in local_server_bridge.dart, so a typed catch would miss it.
+      _localServerError =
+          error is ApiException ? error.message : error.toString();
       if (!_disposed) {
         notifyListeners();
       }
     }
+  }
+
+  Future<void> _bootstrapWebConnection() async {
+    try {
+      final origin = Uri.base.origin; // e.g. http://localhost:8765
+      await _runBusy(
+        () => _connectToLocalServer(
+          baseUrl: origin,
+          authPassword: null,
+          allowAutoLogin: false,
+        ),
+      );
+    } catch (error) {
+      _localServerError =
+          error is ApiException ? error.message : error.toString();
+      if (!_disposed) {
+        notifyListeners();
+      }
+    }
+  }
+
+  /// Clears any connection error and re-runs the full bootstrap sequence.
+  /// Called by the Settings tab retry button.
+  Future<void> retryLocalServer() async {
+    _localServerError = null;
+    notifyListeners();
+    await bootstrapLocalServer();
   }
 
   Future<void> startLocalServer({
@@ -142,8 +180,8 @@ class AppController extends ChangeNotifier {
         _closeAllSockets();
         try {
           localServer.stop();
-        } on LocalServerBridgeException catch (error) {
-          throw ApiException(error.message);
+        } catch (error) {
+          throw ApiException(error.toString());
         }
       }
 
@@ -190,8 +228,8 @@ class AppController extends ChangeNotifier {
       await _setBackgroundKeepAlive(false);
       try {
         localServer.stop();
-      } on LocalServerBridgeException catch (error) {
-        throw ApiException(error.message);
+      } catch (error) {
+        throw ApiException(error.toString());
       }
 
       _shouldKeepLocalServerRunning = false;
@@ -973,16 +1011,24 @@ class AppController extends ChangeNotifier {
         port: port ?? 0,
         authPassword: authPassword,
       );
-    } on LocalServerBridgeException catch (error) {
-      throw ApiException(error.message);
+    } catch (error) {
+      // Use a broad catch: the LocalServerBridgeException defined in
+      // local_server_bridge_native.dart is a DIFFERENT Dart type from the one
+      // in local_server_bridge.dart, so `on LocalServerBridgeException` would
+      // silently miss it and let the exception propagate uncaught.
+      final msg = error is ApiException
+          ? error.message
+          : error.toString();
+      throw ApiException(msg);
     }
   }
 
   String? _currentNativeLocalServerBaseUrl() {
     try {
       return localServer.currentBaseUrl();
-    } on LocalServerBridgeException catch (error) {
-      throw ApiException(error.message);
+    } catch (error) {
+      final msg = error is ApiException ? error.message : error.toString();
+      throw ApiException(msg);
     }
   }
 
@@ -1168,8 +1214,8 @@ class AppController extends ChangeNotifier {
     if (staleBaseUrl != null && staleBaseUrl.isNotEmpty) {
       try {
         localServer.stop();
-      } on LocalServerBridgeException catch (error) {
-        debugPrint('Failed to stop stale local server: ${error.message}');
+      } catch (error) {
+        debugPrint('Failed to stop stale local server: $error');
       }
     }
 

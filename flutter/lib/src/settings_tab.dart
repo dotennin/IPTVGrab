@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'controller.dart';
@@ -51,12 +53,30 @@ class SettingsTab extends StatelessWidget {
                 animation: controller,
                 builder: (context, _) {
                   final connected = controller.isConnected;
+                  final error = controller.localServerError;
                   final baseUrl = controller.api.baseUrl;
+
+                  if (error != null) {
+                    return _SettingsRow(
+                      icon: Icons.error_rounded,
+                      color: Colors.red,
+                      label: 'Connection Failed',
+                      subtitle: error,
+                      trailing: TextButton(
+                        onPressed: () =>
+                            unawaited(controller.retryLocalServer()),
+                        child: const Text('Retry'),
+                      ),
+                      onTap: null,
+                    );
+                  }
+
                   return _SettingsRow(
                     icon: Icons.wifi_rounded,
                     color: connected ? Colors.green : Colors.orange,
                     label: connected ? 'Connected' : 'Connecting…',
-                    subtitle: baseUrl.isNotEmpty ? baseUrl : 'Starting local server',
+                    subtitle:
+                        baseUrl.isNotEmpty ? baseUrl : 'Starting local server…',
                     trailing: connected
                         ? const Icon(Icons.circle, size: 10, color: Colors.green)
                         : const SizedBox(
