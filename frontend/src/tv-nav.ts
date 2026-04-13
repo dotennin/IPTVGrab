@@ -1,232 +1,131 @@
 /**
- * tv-nav.ts — D-pad / keyboard spatial navigation for TV remote control.
+ * tv-nav.ts — Arrow-key channel navigation for TV remote control.
  *
- * Zone model:
- *   1. Bottom nav  → left/right between .tv-nav-btn  (wraps)
- *   2. Group bar   → left/right between .channel-group-item
- *   3. Channel grid → 2-D arrow navigation
- *   Cross-zone:  Down from group bar → first card
- *                Up from first grid row → group bar
- *                Escape → close player modal → channels section
+ * Rules:
+ *  • Arrow keys ALWAYS navigate the currently visible channel grid only.
+ *  • No zone model — bottom-nav and group-bar have no D-pad routing.
+ *  • Enter on a focused card → auto-fullscreen + setChannelContext.
+ *  • Virtual cursor: arrows work even when no card is focused yet.
  */
 
-import { setNextOpenAutoFullscreen } from './player';
+import { setNextOpenAutoFullscreen, setChannelContext } from './player';
 import { watchChannel } from './playlists';
 import { addToRecents } from './recents';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────────────────────────────────────
+// ── Virtual cursor ────────────────────────────────────────────────────────────
 
-function focusable(el: Element | null): el is HTMLElement {
-  return el instanceof HTMLElement && !el.hasAttribute('disabled');
-}
+let _navIdx = 0;
 
-function focusSafe(el: Element | null): boolean {
-  if (focusable(el)) {
-    el.focus({ preventScroll: false });
-    el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-    return true;
-  }
-  return false;
-}
-
-function bottomNavButtons(): HTMLElement[] {
-  return Array.from(
-    document.querySelectorAll<HTMLElement>('#tvBottomNav .tv-nav-btn'),
-  );
-}
-
-function groupBarItems(): HTMLElement[] {
-  return Array.from(
-    document.querySelectorAll<HTMLElement>('#groupList .channel-group-item'),
-  );
-}
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function channelCards(): HTMLElement[] {
-  return Array.from(
-    document.querySelectorAll<HTMLElement>('#channelGrid .channel-card'),
-  );
+  const recentsSection = document.getElementById('favoritesSection');
+  if (recentsSection && !recentsSection.classList.contains('d-none')) {
+    return Array.from(document.querySelectorAll<HTMLElement>('#recentChannelGrid .channel-card'));
+  }
+  return Array.from(document.querySelectorAll<HTMLElement>('#channelGrid .channel-card'));
 }
 
-/** Return number of CSS grid columns for the channel grid */
 function gridColumns(): number {
-  const grid = document.getElementById('channelGrid');
+  const recentsSection = document.getElementById('favoritesSection');
+  const gridId = (recentsSection && !recentsSection.classList.contains('d-none'))
+    ? 'recentChannelGrid' : 'channelGrid';
+  const grid = document.getElementById(gridId);
   if (!grid) return 1;
-  const cols = getComputedStyle(grid).gridTemplateColumns.split(' ');
-  return cols.length || 1;
+  return getComputedStyle(grid).gridTemplateColumns.split(' ').length || 1;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Zone detection
-// ─────────────────────────────────────────────────────────────────────────────
-
-type Zone = 'bottom-nav' | 'group-bar' | 'channel-grid' | 'other';
-
-function detectZone(el: Element | null): Zone {
-  if (!el) return 'other';
-  if (el.closest('#tvBottomNav'))  return 'bottom-nav';
-  if (el.closest('#groupList'))    return 'group-bar';
-  if (el.closest('#channelGrid'))  return 'channel-grid';
-  return 'other';
+function selectCard(idx: number, cards: HTMLElement[]): void {
+  if (!cards.length) return;
+  _navIdx = Math.max(0, Math.min(idx, cards.length - 1));
+  const card = cards[_navIdx];
+  card.focus({ preventScroll: false });
+  card.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Navigation handlers
-// ─────────────────────────────────────────────────────────────────────────────
+// ── _ch attachment via MutationObserver ───────────────────────────────────────
 
-function navBottomNav(el: HTMLElement, key: string): boolean {
-  const btns = bottomNavButtons();
-  const idx  = btns.indexOf(el);
-  if (idx < 0) return false;
-
-  if (key === 'ArrowLeft')  { focusSafe(btns[(idx - 1 + btns.length) % btns.length]); return true; }
-  if (key === 'ArrowRight') { focusSafe(btns[(idx + 1) % btns.length]); return true; }
-  if (key === 'ArrowUp') {
-    // Move up into channel grid if visible, else group bar
-    const groups = groupBarItems();
-    if (groups.length) { focusSafe(groups[0]); return true; }
-    const cards = channelCards();
-    if (cards.length) { focusSafe(cards[0]); return true; }
-  }
-  return false;
+function attachChData(): void {
+  document
+    .querySelectorAll<HTMLElement>('#channelGrid .channel-card, #recentChannelGrid .channel-card')
+    .forEach((card) => {
+      if ((card as HTMLElement & { _ch?: unknown })._ch) return;
+      const json = card.dataset.chJson;
+      if (json) {
+        try { (card as HTMLElement & { _ch?: unknown })._ch = JSON.parse(json); }
+        catch { /* ignore */ }
+      }
+    });
 }
 
-function navGroupBar(el: HTMLElement, key: string): boolean {
-  const items = groupBarItems();
-  const idx   = items.indexOf(el);
-  if (idx < 0) return false;
+const gridObserver = new MutationObserver(() => { attachChData(); _navIdx = 0; });
+['channelGrid', 'recentChannelGrid'].forEach((id) => {
+  const el = document.getElementById(id);
+  if (el) gridObserver.observe(el, { childList: true });
+});
+attachChData();
 
-  if (key === 'ArrowLeft')  { focusSafe(items[Math.max(0, idx - 1)]); return true; }
-  if (key === 'ArrowRight') { focusSafe(items[Math.min(items.length - 1, idx + 1)]); return true; }
-  if (key === 'ArrowDown') {
-    const cards = channelCards();
-    if (cards.length) { focusSafe(cards[0]); return true; }
-  }
-  if (key === 'ArrowUp') {
-    const btns = bottomNavButtons();
-    if (btns.length) { focusSafe(btns[0]); return true; }
-  }
-  return false;
-}
+// ── Global keydown handler (capture phase) ────────────────────────────────────
 
-function navChannelGrid(el: HTMLElement, key: string): boolean {
-  const cards = channelCards();
-  const idx   = cards.indexOf(el);
-  if (idx < 0) return false;
-
-  const cols = gridColumns();
-
-  if (key === 'ArrowRight') {
-    // Don't wrap past end of visual row
-    if ((idx + 1) % cols !== 0 && idx + 1 < cards.length) {
-      focusSafe(cards[idx + 1]); return true;
-    }
-  }
-  if (key === 'ArrowLeft') {
-    if (idx % cols !== 0 && idx - 1 >= 0) {
-      focusSafe(cards[idx - 1]); return true;
-    }
-  }
-  if (key === 'ArrowDown') {
-    if (idx + cols < cards.length) { focusSafe(cards[idx + cols]); return true; }
-  }
-  if (key === 'ArrowUp') {
-    if (idx - cols >= 0) { focusSafe(cards[idx - cols]); return true; }
-    // First row → go to group bar
-    const groups = groupBarItems();
-    if (groups.length) { focusSafe(groups[0]); return true; }
-    const btns = bottomNavButtons();
-    if (btns.length) { focusSafe(btns[0]); return true; }
-    return true;
-  }
-  if (key === 'Enter' || key === ' ') {
-    // Trigger watch with auto-fullscreen
-    const ch = (el as HTMLElement & { _ch?: unknown })._ch;
-    if (ch) {
-      addToRecents(ch as Parameters<typeof addToRecents>[0]);
-      setNextOpenAutoFullscreen(true);
-      watchChannel(ch as Parameters<typeof watchChannel>[0]);
-    } else {
-      // Fallback: simulate click on the card body
-      el.click();
-    }
-    return true;
-  }
-  return false;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Global keydown listener
-// ─────────────────────────────────────────────────────────────────────────────
-
-const NAV_KEYS = new Set([
-  'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Escape',
-]);
+const ARROW_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown']);
 
 document.addEventListener('keydown', (e: KeyboardEvent) => {
-  // Skip if typing in an input/textarea
   const tag = (e.target as HTMLElement)?.tagName;
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
 
-  if (!NAV_KEYS.has(e.key)) return;
+  // Player handles its own keys while open
+  if (document.getElementById('previewModal')?.classList.contains('show')) return;
 
-  // When the player modal is visible, let player.ts handle all navigation keys
-  const previewModalEl = document.getElementById('previewModal');
-  if (previewModalEl?.classList.contains('show')) return;
+  const isArrow  = ARROW_KEYS.has(e.key);
+  const isEnter  = e.key === 'Enter';
+  const isEscape = e.key === 'Escape';
 
-  const active = document.activeElement as HTMLElement | null;
-  const zone   = detectZone(active);
+  if (!isArrow && !isEnter && !isEscape) return;
 
-  // Escape: go back to channels (or close URL section)
-  if (e.key === 'Escape') {
-    // If in URL section, go back to channels
+  // Escape: collapse URL section back to channels
+  if (isEscape) {
     const urlSection = document.getElementById('urlSettingsSection');
     if (urlSection && !urlSection.classList.contains('d-none')) {
       document.getElementById('playlist-tab')?.click();
       e.preventDefault();
-      return;
     }
     return;
   }
 
-  let handled = false;
-  if (zone === 'bottom-nav' && active)  handled = navBottomNav(active, e.key);
-  if (zone === 'group-bar'  && active)  handled = navGroupBar(active, e.key);
-  if (zone === 'channel-grid' && active) handled = navChannelGrid(active, e.key);
+  const cards = channelCards();
+  if (!cards.length) return;
 
-  // If nothing has focus yet and user presses Down/Right, focus first card
-  if (!handled && zone === 'other') {
-    if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
-      const cards = channelCards();
-      if (cards.length) { focusSafe(cards[0]); handled = true; }
+  // Resolve effective index: prefer focused card, fall back to virtual cursor
+  const focusedIdx = cards.indexOf(document.activeElement as HTMLElement);
+  const idx = focusedIdx >= 0 ? focusedIdx : Math.min(_navIdx, cards.length - 1);
+
+  if (isEnter) {
+    if (focusedIdx < 0) {
+      selectCard(idx, cards);
+    } else {
+      const ch = (cards[focusedIdx] as HTMLElement & { _ch?: unknown })._ch;
+      if (ch) {
+        const channelList = cards
+          .map((c) => (c as HTMLElement & { _ch?: unknown })._ch)
+          .filter(Boolean) as Parameters<typeof setChannelContext>[0];
+        addToRecents(ch as Parameters<typeof addToRecents>[0]);
+        setChannelContext(channelList, focusedIdx);
+        setNextOpenAutoFullscreen(true);
+        watchChannel(ch as Parameters<typeof watchChannel>[0]);
+      }
     }
+    e.preventDefault();
+    return;
   }
 
-  if (handled) e.preventDefault();
+  // Arrow navigation
+  const cols = gridColumns();
+  let next = idx;
+  if (e.key === 'ArrowRight') next = Math.min(idx + 1, cards.length - 1);
+  if (e.key === 'ArrowLeft')  next = Math.max(idx - 1, 0);
+  if (e.key === 'ArrowDown')  next = Math.min(idx + cols, cards.length - 1);
+  if (e.key === 'ArrowUp')    next = Math.max(idx - cols, 0);
+
+  selectCard(next, cards);
+  e.preventDefault();
 }, true);
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Attach _ch data to cards after grid renders (MutationObserver)
-// ─────────────────────────────────────────────────────────────────────────────
-// Note: channel data is attached by playlists.ts via data-ch-json attribute.
-// We read it here so Enter key can trigger watch without needing a click.
-
-function attachChData(): void {
-  document.querySelectorAll<HTMLElement>('#channelGrid .channel-card').forEach((card) => {
-    if ((card as HTMLElement & { _ch?: unknown })._ch) return; // already set
-    const json = card.dataset.chJson;
-    if (json) {
-      try {
-        (card as HTMLElement & { _ch?: unknown })._ch = JSON.parse(json);
-      } catch { /* ignore */ }
-    }
-  });
-}
-
-const gridObserver = new MutationObserver(attachChData);
-const grid = document.getElementById('channelGrid');
-if (grid) {
-  gridObserver.observe(grid, { childList: true });
-}
-attachChData();

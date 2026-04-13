@@ -5,7 +5,6 @@ import {
   healthCache,
   healthOnlyFilter,
   setHealthOnlyFilter,
-  _healthDot,
   updateHealthDots,
   startHealthPoll,
   refreshHealthOnce,
@@ -16,12 +15,11 @@ import {
   currentStreamInfo,
   showStreamInfo,
   startDownload,
-  setNextOpenAutoFullscreen,
-  setChannelContext,
 } from './player';
 import { addToRecents } from './recents';
 import { addTaskCard, startPolling, updateTaskCard } from './tasks';
 import { Modal } from './bootstrap-shim';
+import { renderChannelCard, bindChannelGrid } from './channel-card';
 import type { SavedPlaylist, Channel, MergedChannel, StreamInfo } from './types';
 
 export let currentPlaylist: SavedPlaylist | null = null;
@@ -211,89 +209,20 @@ export function renderChannels(
   placeholder?.classList.add('d-none');
 
   grid.innerHTML = channels
-    .map(
-      (ch, i) => `
-    <div class="channel-card" id="channel-${ch.id || i}" tabindex="0" role="button" aria-label="${esc(ch.name || ch.url)}" data-ch-json="${esc(JSON.stringify(ch))}">
-      ${_healthDot(ch.url)}
-      <div class="channel-logo-wrap">
-        ${
-          ch.tvg_logo
-            ? `<img src="${esc(ch.tvg_logo)}" class="channel-logo" alt=""
-                 onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" />
-               <div class="channel-logo-fallback" style="display:none"><i class="fas fa-tv"></i></div>`
-            : `<div class="channel-logo-fallback"><i class="fas fa-tv"></i></div>`
-        }
-      </div>
-      <div class="channel-name" title="${esc(ch.name)}">${esc(ch.name || ch.url)}</div>
-      ${ch.group ? `<div class="channel-group">${esc(ch.group)}</div>` : ''}
-      ${ch.playlist_name ? `<div class="channel-playlist-tag" title="${esc(ch.playlist_name)}">${esc(ch.playlist_name)}</div>` : ''}
-      <div class="channel-actions">
-        <button class="ch-action-btn ch-action-btn-dl channel-dl-btn" data-ch-idx="${i}" title="Download">
-          <i class="fas fa-download"></i>
-        </button>
-        <button class="ch-action-btn ch-action-btn-watch channel-watch-btn" data-ch-idx="${i}" title="Watch online">
-          <i class="fas fa-play"></i>
-        </button>
-      </div>
-    </div>`,
-    )
+    .map((ch, i) => renderChannelCard(ch, i, { showPlaylistTag: true }))
     .join('');
 
-  grid.querySelectorAll('.channel-dl-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const idx = parseInt((btn as HTMLElement).dataset.chIdx || '0', 10);
-      downloadChannel(channels[idx], btn as HTMLElement);
-    });
-  });
-  grid.querySelectorAll('.channel-watch-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const idx = parseInt((btn as HTMLElement).dataset.chIdx || '0', 10);
-      addToRecents(channels[idx] as Parameters<typeof addToRecents>[0]);
-      watchChannel(channels[idx]);
-    });
-  });
-
-  // Direct card click / keyboard Enter = watch (TV remote friendly)
-  let _lpTimer: ReturnType<typeof setTimeout> | null = null;
-  grid.querySelectorAll('.channel-card').forEach((card, i) => {
-    const ch = channels[i];
-
-    // Click on card body (not action buttons) → watch with auto-fullscreen
-    card.addEventListener('click', (e) => {
-      if ((e.target as Element).closest('.channel-actions')) return;
+  bindChannelGrid(grid, channels, {
+    onWatch: (ch) => {
       addToRecents(ch as Parameters<typeof addToRecents>[0]);
-      setChannelContext(channels as Channel[], i);
-      setNextOpenAutoFullscreen(true);
       watchChannel(ch);
-    });
-
-    // Keyboard Enter on focused card → watch
-    card.addEventListener('keydown', (e) => {
-      const key = (e as KeyboardEvent).key;
-      if (key === 'Enter' || key === ' ') {
-        e.preventDefault();
-        addToRecents(ch as Parameters<typeof addToRecents>[0]);
-        setChannelContext(channels as Channel[], i);
-        setNextOpenAutoFullscreen(true);
-        watchChannel(ch);
-      }
-    });
-
-    card.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
-      const me = e as MouseEvent;
-      showChannelContextMenu(ch as unknown as MergedChannel, me.clientX, me.clientY);
-    });
-    card.addEventListener('touchstart', (e) => {
-      const te = e as TouchEvent;
-      _lpTimer = setTimeout(() => {
-        _lpTimer = null;
-        const touch = te.touches[0];
-        showChannelContextMenu(ch as unknown as MergedChannel, touch.clientX, touch.clientY);
-      }, 500);
-    }, { passive: true });
-    card.addEventListener('touchend', () => { if (_lpTimer) { clearTimeout(_lpTimer); _lpTimer = null; } });
-    card.addEventListener('touchmove', () => { if (_lpTimer) { clearTimeout(_lpTimer); _lpTimer = null; } });
+    },
+    onDownload: (ch, btn) => {
+      downloadChannel(ch as Channel & { id?: string; tvg_logo?: string }, btn);
+    },
+    onContextMenu: (ch, x, y) => {
+      showChannelContextMenu(ch as unknown as MergedChannel, x, y);
+    },
   });
 }
 
