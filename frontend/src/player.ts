@@ -1,5 +1,7 @@
 import Hls from 'hls.js';
 import mpegts from 'mpegts.js';
+import Plyr from 'plyr';
+import 'plyr/dist/plyr.css';
 import { apiFetch } from './api';
 import { esc, formatDuration, toast } from './utils';
 import { settings } from './settings';
@@ -9,23 +11,22 @@ import type { StreamInfo, Channel } from './types';
 
 export let currentStreamInfo: StreamInfo | null = null;
 
-// TV remote: set this flag before calling openHLSPlayer to auto-enter fullscreen
-let _tvAutoFullscreen = false;
-export function setNextOpenAutoFullscreen(val: boolean): void {
-  _tvAutoFullscreen = val;
-}
+
 
 // ── TV D-pad channel switching ────────────────────────────────────────────────
 let _channelList: Channel[] = [];
 let _channelIndex = -1;
-/** Call this when opening a channel so ArrowLeft/Right can zap through the list. */
+/** Call this when opening a channel so ArrowUp/Down can zap through the list. */
 export function setChannelContext(channels: Channel[], index: number): void {
   _channelList = channels;
   _channelIndex = index;
 }
 
-// true while the player is in fullscreen that was entered automatically (TV mode)
-let _tvFullscreenActive = false;
+/** Trigger the channel OSD if a channel context is active. */
+export function showChOsd(): void {
+  if (_channelList.length > 0) _showChOsd();
+}
+
 let _chOsdTimer: ReturnType<typeof setTimeout> | null = null;
 
 // ── Stream info panel ─────────────────────────────────────────────────────────
@@ -198,15 +199,26 @@ let hlsInstance: Hls | null = null;
 let mpegtsPlayer: any = null;
 let _transcodeSessionId: string | null = null;
 
-const previewModalEl   = document.getElementById('previewModal')!;
-const previewViewportEl = document.getElementById('previewViewport')!;
-const previewVideo     = document.getElementById('previewVideo') as HTMLVideoElement;
-const previewTitleEl   = document.getElementById('previewModalTitle');
-const previewModal     = Modal.getOrCreateInstance(previewModalEl)!;
+const previewModalEl    = document.getElementById('previewModal')!;
+const previewViewportEl  = document.getElementById('previewViewport')!;
+const previewVideo      = document.getElementById('previewVideo') as HTMLVideoElement;
+const previewTitleEl    = document.getElementById('previewModalTitle');
+const previewModal      = Modal.getOrCreateInstance(previewModalEl)!;
 const playerQualityBar    = document.getElementById('playerQualityBar');
 const playerQualitySelect = document.getElementById('playerQualitySelect') as HTMLSelectElement | null;
-const PREVIEW_IDLE_DELAY_MS = 1800;
-let previewIdleTimer: ReturnType<typeof setTimeout> | null = null;
+
+// Plyr wraps the video element and provides polished controls (fullscreen button, etc.).
+// fullscreen.container points to #previewViewport so OSD (a sibling inside it) is always
+// visible in fullscreen — document.fullscreenElement === previewViewportEl.
+const plyrPlayer = new Plyr(previewVideo, {
+  controls: ['play', 'progress', 'current-time', 'mute', 'volume', 'settings', 'fullscreen'],
+  fullscreen: { enabled: true, fallback: true, iosNative: false, container: '#previewViewport' },
+  clickToPlay: true,
+  keyboard: { focused: false, global: false },
+  hideControls: true,
+  invertTime: false,
+  toggleInvert: false,
+});
 
 function isPreviewVisible(): boolean {
   return previewModalEl.classList.contains('show');
@@ -218,149 +230,75 @@ function setPreviewTitle(title: string): void {
   }
 }
 
-function clearPreviewIdleTimer(): void {
-  if (previewIdleTimer !== null) {
-    window.clearTimeout(previewIdleTimer);
-    previewIdleTimer = null;
-  }
-}
-
-function resetPreviewChrome(): void {
-  clearPreviewIdleTimer();
-  previewVideo.controls = true;
-  previewViewportEl.classList.remove('preview-idle');
-}
-
-function hidePreviewChrome(): void {
-  if (!isPreviewVisible() || previewVideo.paused || previewVideo.ended) return;
-  previewVideo.controls = false;
-  previewViewportEl.classList.add('preview-idle');
-}
-
-function schedulePreviewChromeHide(): void {
-  clearPreviewIdleTimer();
-  if (!isPreviewVisible() || previewVideo.paused || previewVideo.ended) return;
-  previewIdleTimer = window.setTimeout(hidePreviewChrome, PREVIEW_IDLE_DELAY_MS);
-}
-
-function handlePreviewActivity(): void {
-  if (!isPreviewVisible()) return;
-  resetPreviewChrome();
-  schedulePreviewChromeHide();
-}
-
 function isPreviewFullscreen(): boolean {
-  return document.fullscreenElement === previewViewportEl
-    || document.fullscreenElement === previewVideo
-    || (!!document.fullscreenElement && previewViewportEl.contains(document.fullscreenElement))
+  return plyrPlayer.fullscreen.active
     || (previewVideo as HTMLVideoElement & { webkitDisplayingFullscreen?: boolean }).webkitDisplayingFullscreen === true;
 }
 
-async function enterPreviewFullscreen(): Promise<void> {
-  const viewport = previewViewportEl as HTMLElement & { webkitRequestFullscreen?: () => void };
-  const video    = previewVideo   as HTMLVideoElement & { webkitEnterFullscreen?: () => void };
-
-  if (viewport.requestFullscreen) {
-    try { await viewport.requestFullscreen(); } catch { toast('Unable to enter fullscreen', 'danger'); }
-    return;
-  }
-  if (viewport.webkitRequestFullscreen) { viewport.webkitRequestFullscreen(); return; }
-  if (video.requestFullscreen) {
-    try { await video.requestFullscreen(); } catch { toast('Unable to enter fullscreen', 'danger'); }
-    return;
-  }
-  if (video.webkitEnterFullscreen) { video.webkitEnterFullscreen(); return; }
-  toast('Fullscreen is not supported in this browser', 'danger');
+function enterPreviewFullscreen(): void {
+  plyrPlayer.fullscreen.enter();
 }
 
-async function exitPreviewFullscreen(): Promise<void> {
-  const doc  = document as Document & { webkitFullscreenElement?: Element; webkitExitFullscreen?: () => void };
-  const video = previewVideo as HTMLVideoElement & { webkitDisplayingFullscreen?: boolean; webkitExitFullscreen?: () => void };
-
-  if (document.fullscreenElement && document.exitFullscreen) {
-    try { await document.exitFullscreen(); } catch { toast('Unable to exit fullscreen', 'danger'); }
-    return;
-  }
-  if (doc.webkitFullscreenElement && doc.webkitExitFullscreen) { doc.webkitExitFullscreen(); return; }
-  if (video.webkitDisplayingFullscreen && video.webkitExitFullscreen) { video.webkitExitFullscreen(); }
+function exitPreviewFullscreen(): void {
+  plyrPlayer.fullscreen.exit();
 }
 
-async function togglePreviewFullscreen(): Promise<void> {
-  if (isPreviewFullscreen()) { await exitPreviewFullscreen(); return; }
-  await enterPreviewFullscreen();
+function togglePreviewFullscreen(): void {
+  plyrPlayer.fullscreen.toggle();
 }
 
 async function closePreviewModal(): Promise<void> {
-  if (isPreviewFullscreen()) await exitPreviewFullscreen();
+  if (plyrPlayer.fullscreen.active) plyrPlayer.fullscreen.exit();
   previewModal.hide();
 }
 
 previewModalEl.addEventListener('shown.bs.modal', () => {
-  resetPreviewChrome();
   previewVideo.focus();
-  schedulePreviewChromeHide();
-  if (_tvAutoFullscreen) {
-    _tvAutoFullscreen = false;
-    _tvFullscreenActive = true;
-    void enterPreviewFullscreen();
-  }
 });
 
 document.addEventListener('keydown', (event) => {
   if (!isPreviewVisible() || event.altKey || event.ctrlKey || event.metaKey) return;
-  handlePreviewActivity();
   if (event.key === 'Escape') {
     event.preventDefault();
     event.stopImmediatePropagation();
-    _tvFullscreenActive = false;
     void closePreviewModal();
     return;
   }
-  // D-pad left/right: switch to prev/next channel in the current list
-  if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+  // D-pad up/down: switch to prev/next channel in the current list
+  if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
     if (_channelList.length > 1) {
       event.preventDefault();
       event.stopImmediatePropagation();
-      switchChannel(event.key === 'ArrowLeft' ? -1 : 1);
+      switchChannel(event.key === 'ArrowUp' ? -1 : 1);
       return;
     }
   }
   if (!event.repeat && (event.key === 'f' || event.key === 'F')) {
     event.preventDefault();
-    void togglePreviewFullscreen();
+    togglePreviewFullscreen();
   }
 });
 
-['mousemove', 'pointerdown', 'touchstart'].forEach((eventName) => {
-  previewViewportEl.addEventListener(eventName, handlePreviewActivity);
-});
-
-// Show channel OSD when cursor moves over the player (if a channel list is loaded)
+// Show channel OSD on mouse move when in fullscreen
 previewViewportEl.addEventListener('mousemove', () => {
-  if (_channelList.length > 0) _showChOsd();
+  if (isPreviewFullscreen() && _channelList.length > 0) _showChOsd();
 });
 
-previewVideo.addEventListener('play', schedulePreviewChromeHide);
-previewVideo.addEventListener('pause', resetPreviewChrome);
-previewVideo.addEventListener('ended', resetPreviewChrome);
-// Belt-and-suspenders: if browser exits fullscreen via ESC (native) while in TV
-// auto-fullscreen mode, close the modal so one key press = fully exit.
-function _onFullscreenChange(): void {
-  handlePreviewActivity();
-  if (!document.fullscreenElement && _tvFullscreenActive && isPreviewVisible()) {
-    _tvFullscreenActive = false;
-    void closePreviewModal();
-  }
-}
-document.addEventListener('fullscreenchange', _onFullscreenChange);
-document.addEventListener('webkitfullscreenchange', _onFullscreenChange);
-previewVideo.addEventListener('webkitbeginfullscreen', handlePreviewActivity);
+// Plyr fires these events when fullscreen enters/exits via any path
+// (button click, keyboard, programmatic). OSD visibility is managed here.
+plyrPlayer.on('enterfullscreen', () => {
+  if (_channelList.length > 0) setTimeout(_showChOsd, 200);
+});
+plyrPlayer.on('exitfullscreen', () => {
+  _hideChOsd();
+});
+
+// Safari iOS webkit fullscreen events (Plyr iosNative: false, so handle manually)
+previewVideo.addEventListener('webkitbeginfullscreen', () => {
+  if (_channelList.length > 0) setTimeout(_showChOsd, 200);
+});
 previewVideo.addEventListener('webkitendfullscreen', () => {
-  handlePreviewActivity();
-  if (_tvFullscreenActive && isPreviewVisible()) {
-    _tvFullscreenActive = false;
-    void closePreviewModal();
-  }
+  _hideChOsd();
 });
 
 function _hidePlayerQuality(): void {
@@ -567,7 +505,6 @@ export function openPreview(taskId: string): void {
 
 previewModalEl.addEventListener('hidden.bs.modal', () => {
   setPreviewTitle('Preview');
-  resetPreviewChrome();
   _hidePlayerQuality();
   _destroyPlayers();
   _stopTranscodeSession();
@@ -579,21 +516,29 @@ previewModalEl.addEventListener('hidden.bs.modal', () => {
   // Reset TV channel context
   _channelList = [];
   _channelIndex = -1;
-  _tvFullscreenActive = false;
   _hideChOsd();
 });
 
 // ── Channel D-pad switching ────────────────────────────────────────────────────
-const _chOsdEl      = document.getElementById('chOsd');
-const _chOsdName    = document.getElementById('chOsdName');
-const _chOsdIndex   = document.getElementById('chOsdIndex');
+const _chOsdEl       = document.getElementById('chOsd');
+const _chOsdName     = document.getElementById('chOsdName');
+const _chOsdIndex    = document.getElementById('chOsdIndex');
 const _chOsdPrevName = document.getElementById('chOsdPrevName');
 const _chOsdNextName = document.getElementById('chOsdNextName');
 const _chOsdPrevBtn  = document.getElementById('chOsdPrevBtn');
 const _chOsdNextBtn  = document.getElementById('chOsdNextBtn');
+const _chOsdCurLogo  = document.getElementById('chOsdCurLogo')  as HTMLImageElement | null;
+const _chOsdPrevLogo = document.getElementById('chOsdPrevLogo') as HTMLImageElement | null;
+const _chOsdNextLogo = document.getElementById('chOsdNextLogo') as HTMLImageElement | null;
 
 _chOsdPrevBtn?.addEventListener('click', () => switchChannel(-1));
 _chOsdNextBtn?.addEventListener('click', () => switchChannel(1));
+
+// Double-click anywhere on the viewport (not on OSD nav buttons) toggles fullscreen
+previewViewportEl.addEventListener('dblclick', (e: MouseEvent) => {
+  if ((e.target as HTMLElement).closest('.ch-osd-btn')) return;
+  togglePreviewFullscreen();
+});
 
 // Pause auto-hide while the cursor is inside the OSD pill
 _chOsdEl?.addEventListener('mouseenter', () => {
@@ -604,6 +549,18 @@ _chOsdEl?.addEventListener('mouseleave', () => {
     _chOsdTimer = setTimeout(_hideChOsd, 2000);
   }
 });
+
+function _setOsdLogo(img: HTMLImageElement | null, src: string | null | undefined): void {
+  if (!img) return;
+  if (src) {
+    img.src = src;
+    img.style.display = '';
+    img.onerror = () => { img.style.display = 'none'; };
+  } else {
+    img.style.display = 'none';
+    img.src = '';
+  }
+}
 
 function _showChOsd(): void {
   if (!_chOsdEl || !_chOsdName || !_chOsdIndex) return;
@@ -616,13 +573,18 @@ function _showChOsd(): void {
   if (_chOsdPrevName) _chOsdPrevName.textContent = prevCh?.name || '';
   if (_chOsdNextName) _chOsdNextName.textContent = nextCh?.name  || '';
 
+  // Populate channel logos
+  _setOsdLogo(_chOsdCurLogo,  ch?.tvg_logo     || ch?.logo     || null);
+  _setOsdLogo(_chOsdPrevLogo, prevCh?.tvg_logo  || prevCh?.logo || null);
+  _setOsdLogo(_chOsdNextLogo, nextCh?.tvg_logo  || nextCh?.logo || null);
+
   // Show/dim prev-next buttons at list boundaries
   if (_chOsdPrevBtn) (_chOsdPrevBtn as HTMLButtonElement).disabled = _channelIndex <= 0;
   if (_chOsdNextBtn) (_chOsdNextBtn as HTMLButtonElement).disabled = _channelIndex >= _channelList.length - 1;
 
   _chOsdEl.classList.add('ch-osd-visible');
   if (_chOsdTimer) clearTimeout(_chOsdTimer);
-  _chOsdTimer = setTimeout(_hideChOsd, 2500);
+  _chOsdTimer = setTimeout(_hideChOsd, 4000);
 }
 
 function _hideChOsd(): void {
@@ -639,7 +601,7 @@ function switchChannel(delta: number): void {
   // Load the new stream — modal stays open, fullscreen state preserved
   const wasFullscreen = isPreviewFullscreen();
   void openHLSPlayer(ch.url, ch.name || ch.url, true).then(() => {
-    if (wasFullscreen && !isPreviewFullscreen()) void enterPreviewFullscreen();
+    if (wasFullscreen && !isPreviewFullscreen()) enterPreviewFullscreen();
   });
 }
 

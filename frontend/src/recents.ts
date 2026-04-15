@@ -1,4 +1,6 @@
 import { renderChannelCard, bindChannelGrid } from './channel-card';
+import { setChannelContext } from './player';
+import { watchChannel } from './playlists';
 import type { RecentChannel, Channel } from './types';
 
 export const RECENT_KEY = 'mn_recent_channels';
@@ -42,9 +44,10 @@ export function renderRecentChannels(): void {
       .map((ch, i) => renderChannelCard(ch as unknown as Channel, i))
       .join('');
     bindChannelGrid(grid, recents as unknown as Channel[], {
-      onWatch: (ch) => {
+      onWatch: (ch, idx) => {
         addToRecents(ch as unknown as RecentChannel & { tvg_logo?: string });
-        (window as unknown as Record<string, Function>).watchChannel?.(ch);
+        setChannelContext(recents as unknown as Channel[], idx);
+        watchChannel(ch);
       },
       onDownload: (ch, btn) => {
         (window as unknown as Record<string, Function>).downloadChannel?.(ch, btn);

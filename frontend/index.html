@@ -346,21 +346,29 @@
         </div>
         <div class="p-0 bg-black">
           <div id="previewViewport">
-            <video id="previewVideo" tabindex="0" controls style="width:100%;max-height:72vh;display:block"></video>
-            <!-- Channel OSD: shown on D-pad switch or cursor movement -->
+            <video id="previewVideo" tabindex="0" style="width:100%;display:block"></video>
+            <!-- Channel OSD: shown in fullscreen mode -->
             <div id="chOsd" class="ch-osd" aria-live="polite" aria-atomic="true">
               <div class="ch-osd-pill">
+                <!-- Previous channel (↑ Up) -->
                 <button class="ch-osd-btn" id="chOsdPrevBtn" aria-label="Previous channel">
-                  <i class="fas fa-chevron-left"></i>
+                  <i class="fas fa-chevron-up ch-osd-arrow"></i>
+                  <img class="ch-osd-logo" id="chOsdPrevLogo" src="" alt="" style="display:none">
                   <span id="chOsdPrevName" class="ch-osd-side-name"></span>
                 </button>
+                <!-- Current channel -->
                 <div class="ch-osd-center">
-                  <div class="ch-osd-name" id="chOsdName"></div>
-                  <div class="ch-osd-index" id="chOsdIndex"></div>
+                  <img class="ch-osd-logo ch-osd-logo-lg" id="chOsdCurLogo" src="" alt="" style="display:none">
+                  <div class="ch-osd-main">
+                    <div class="ch-osd-name" id="chOsdName"></div>
+                    <div class="ch-osd-index" id="chOsdIndex"></div>
+                  </div>
                 </div>
+                <!-- Next channel (↓ Down) -->
                 <button class="ch-osd-btn" id="chOsdNextBtn" aria-label="Next channel">
+                  <i class="fas fa-chevron-down ch-osd-arrow"></i>
+                  <img class="ch-osd-logo" id="chOsdNextLogo" src="" alt="" style="display:none">
                   <span id="chOsdNextName" class="ch-osd-side-name"></span>
-                  <i class="fas fa-chevron-right"></i>
                 </button>
               </div>
             </div>

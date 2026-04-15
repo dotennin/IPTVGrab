@@ -15,6 +15,7 @@ import {
   currentStreamInfo,
   showStreamInfo,
   startDownload,
+  setChannelContext,
 } from './player';
 import { addToRecents } from './recents';
 import { addTaskCard, startPolling, updateTaskCard } from './tasks';
@@ -256,6 +257,8 @@ export function renderChannels(
   _gridBindOpts = {
     onWatch: (ch) => {
       addToRecents(ch as Parameters<typeof addToRecents>[0]);
+      const idx = _virtualChannels.findIndex(c => c === ch);
+      setChannelContext(_virtualChannels as Channel[], idx >= 0 ? idx : 0);
       watchChannel(ch);
     },
     onDownload: (ch, btn) => {

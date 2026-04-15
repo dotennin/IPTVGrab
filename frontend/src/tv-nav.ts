@@ -4,11 +4,11 @@
  * Rules:
  *  • Arrow keys ALWAYS navigate the currently visible channel grid only.
  *  • No zone model — bottom-nav and group-bar have no D-pad routing.
- *  • Enter on a focused card → auto-fullscreen + setChannelContext.
+ *  • Enter on a focused card → watchChannel + setChannelContext.
  *  • Virtual cursor: arrows work even when no card is focused yet.
  */
 
-import { setNextOpenAutoFullscreen, setChannelContext } from './player';
+import { setChannelContext } from './player';
 import { watchChannel } from './playlists';
 import { addToRecents } from './recents';
 
@@ -110,7 +110,6 @@ document.addEventListener('keydown', (e: KeyboardEvent) => {
           .filter(Boolean) as Parameters<typeof setChannelContext>[0];
         addToRecents(ch as Parameters<typeof addToRecents>[0]);
         setChannelContext(channelList, focusedIdx);
-        setNextOpenAutoFullscreen(true);
         watchChannel(ch as Parameters<typeof watchChannel>[0]);
       }
     }
