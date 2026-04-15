@@ -285,19 +285,24 @@ previewViewportEl.addEventListener('mousemove', () => {
 });
 
 // Plyr fires these events when fullscreen enters/exits via any path
-// (button click, keyboard, programmatic). OSD visibility is managed here.
+// (button click, keyboard, programmatic, CSS fallback). OSD visibility is managed here.
+// is-fs class drives CSS positioning for both native :fullscreen and Plyr CSS-fallback modes.
 plyrPlayer.on('enterfullscreen', () => {
+  previewViewportEl.classList.add('is-fs');
   if (_channelList.length > 0) setTimeout(_showChOsd, 200);
 });
 plyrPlayer.on('exitfullscreen', () => {
+  previewViewportEl.classList.remove('is-fs');
   _hideChOsd();
 });
 
 // Safari iOS webkit fullscreen events (Plyr iosNative: false, so handle manually)
 previewVideo.addEventListener('webkitbeginfullscreen', () => {
+  previewViewportEl.classList.add('is-fs');
   if (_channelList.length > 0) setTimeout(_showChOsd, 200);
 });
 previewVideo.addEventListener('webkitendfullscreen', () => {
+  previewViewportEl.classList.remove('is-fs');
   _hideChOsd();
 });
 

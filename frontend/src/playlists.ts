@@ -292,7 +292,7 @@ export function renderChannels(
 // ── Channel context menu ──────────────────────────────────────────────────────
 let _ctxChannel: MergedChannel | null = null;
 
-function showChannelContextMenu(ch: MergedChannel, x: number, y: number): void {
+export function showChannelContextMenu(ch: MergedChannel, x: number, y: number): void {
   _ctxChannel = ch;
   const menu = document.getElementById('channelContextMenu');
   if (!menu) return;

@@ -922,6 +922,7 @@ textarea.form-control {
   position: relative;
   width: 100%;
   background-color: #000;
+  display: flex;
 }
 
 #previewViewport.preview-idle,
@@ -1926,7 +1927,7 @@ textarea.form-control {
   min-width: 0;
 }
 
-/* In fullscreen the OSD must be fixed over the <video> */
+/* In fullscreen the OSD must be fixed over the <video> (native fullscreen) */
 :fullscreen .ch-osd,
 :-webkit-full-screen .ch-osd {
   position: fixed;
@@ -1934,4 +1935,14 @@ textarea.form-control {
   top: 50%;
   bottom: auto;
   left: auto;
+}
+
+/* Plyr CSS-fallback fullscreen mode (fires enterfullscreen but requestFullscreen may be blocked) */
+#previewViewport.is-fs .ch-osd {
+  position: fixed;
+  right: 24px;
+  top: 50%;
+  bottom: auto;
+  left: auto;
+  z-index: 10001; /* above Plyr's z-index: 10000 in fallback mode */
 }

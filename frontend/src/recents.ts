@@ -1,6 +1,6 @@
 import { renderChannelCard, bindChannelGrid } from './channel-card';
 import { setChannelContext } from './player';
-import { watchChannel } from './playlists';
+import { watchChannel, showChannelContextMenu } from './playlists';
 import type { RecentChannel, Channel } from './types';
 
 export const RECENT_KEY = 'mn_recent_channels';
@@ -51,6 +51,9 @@ export function renderRecentChannels(): void {
       },
       onDownload: (ch, btn) => {
         (window as unknown as Record<string, Function>).downloadChannel?.(ch, btn);
+      },
+      onContextMenu: (ch, x, y) => {
+        showChannelContextMenu(ch as unknown as import('./types').MergedChannel, x, y);
       },
     });
   }
