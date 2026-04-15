@@ -24,9 +24,11 @@ pub(crate) async fn get_health_check(State(state): State<AppState>) -> impl Into
     }))
 }
 
+fn default_true() -> bool { true }
+
 #[derive(Deserialize, Default)]
 pub(crate) struct HealthCheckQuery {
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub deep: bool,
 }
 

@@ -61,7 +61,7 @@ pub(crate) async fn add_playlist(
     state.playlists.write().await.insert(id.clone(), pl.clone());
     state.save_playlists().await;
     let urls: Vec<String> = pl.channels.iter().map(|c| c.url.clone()).collect();
-    trigger_health_check(state, urls, false).await;
+    trigger_health_check(state, urls, true).await;
     (
         StatusCode::CREATED,
         Json(serde_json::to_value(&pl).unwrap()),
@@ -183,7 +183,7 @@ pub(crate) async fn refresh_playlist(
             .map(|p| p.channels.iter().map(|c| c.url.clone()).collect())
             .unwrap_or_default()
     };
-    trigger_health_check(state, urls, false).await;
+    trigger_health_check(state, urls, true).await;
     Json(serde_json::json!({"channel_count": count})).into_response()
 }
 
@@ -246,6 +246,6 @@ pub(crate) async fn refresh_all_playlists(State(state): State<AppState>) -> impl
             .flat_map(|p| p.channels.iter().map(|c| c.url.clone()))
             .collect()
     };
-    trigger_health_check(state, urls, false).await;
+    trigger_health_check(state, urls, true).await;
     Json(serde_json::json!({"ok": true, "errors": errors})).into_response()
 }

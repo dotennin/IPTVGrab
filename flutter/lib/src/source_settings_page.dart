@@ -84,35 +84,6 @@ class SourceSettingsPage extends StatelessWidget {
                         }
                       },
               ),
-              const Divider(height: 1, indent: 64, endIndent: 0),
-
-              // ── Deep playability check row ────────────────────────────
-              _SettingsRow(
-                icon: Icons.monitor_heart_outlined,
-                label: 'Full Playability Test',
-                subtitle: controller.healthState.running
-                    ? 'Testing… ${controller.healthState.done}/${controller.healthState.total}'
-                    : 'Validate M3U8 streams are actually playable',
-                trailing: controller.healthState.running
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : null,
-                onTap: controller.healthState.running
-                    ? null
-                    : () async {
-                        try {
-                          await controller.runDeepHealthCheck();
-                        } on ApiException catch (e) {
-                          if (context.mounted) {
-                            showMessage(context, e.message, error: true);
-                          }
-                        }
-                      },
-              ),
-
               if (playlists.isNotEmpty) ...[
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),

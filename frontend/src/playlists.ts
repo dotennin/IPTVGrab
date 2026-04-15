@@ -9,7 +9,6 @@ import {
   updateHealthDots,
   startHealthPoll,
   refreshHealthOnce,
-  triggerDeepCheck,
 } from './health';
 import {
   openHLSPlayer,
@@ -142,7 +141,6 @@ export async function selectPlaylist(id: string): Promise<void> {
     filterBar?.classList.add('d-none');
     document.getElementById('channelSearch')?.classList.add('d-none');
     document.getElementById('healthOnlyWrap')?.classList.add('d-none');
-    document.getElementById('deepCheckBtn')?.classList.add('d-none');
     document.getElementById('channelGroupSidebar')?.classList.add('d-none');
     if (countBadge) countBadge.textContent = '0';
     if (refreshBtn) refreshBtn.disabled = true;
@@ -176,7 +174,6 @@ export async function selectPlaylist(id: string): Promise<void> {
       if (channelSearch) { channelSearch.value = ''; channelSearch.classList.remove('d-none'); }
       filterBar?.classList.remove('d-none');
       document.getElementById('healthOnlyWrap')?.classList.remove('d-none');
-      document.getElementById('deepCheckBtn')?.classList.remove('d-none');
       if (countBadge) countBadge.textContent = String(allChannels.length);
       if (refreshBtn) { refreshBtn.disabled = true; refreshBtn.classList.add('d-none'); }
       const editPlaylistBtn = document.getElementById('editPlaylistBtn') as HTMLButtonElement | null;
@@ -202,7 +199,6 @@ export async function selectPlaylist(id: string): Promise<void> {
     if (channelSearch) { channelSearch.value = ''; channelSearch.classList.remove('d-none'); }
     filterBar?.classList.remove('d-none');
     document.getElementById('healthOnlyWrap')?.classList.remove('d-none');
-    document.getElementById('deepCheckBtn')?.classList.remove('d-none');
     if (refreshBtn) { refreshBtn.disabled = !currentPlaylist!.url; refreshBtn.classList.remove('d-none'); }
     const editPlaylistBtn = document.getElementById('editPlaylistBtn') as HTMLButtonElement | null;
     if (editPlaylistBtn) { editPlaylistBtn.disabled = false; editPlaylistBtn.classList.remove('d-none'); }
@@ -528,19 +524,6 @@ document.getElementById('groupList')?.addEventListener('click', (e) => {
 document.getElementById('healthOnlyCheck')?.addEventListener('change', (e) => {
   setHealthOnlyFilter((e.target as HTMLInputElement).checked);
   renderChannels(getFilteredChannels());
-});
-
-document.getElementById('deepCheckBtn')?.addEventListener('click', async () => {
-  const btn = document.getElementById('deepCheckBtn') as HTMLButtonElement | null;
-  if (btn) {
-    btn.disabled = true;
-    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-  }
-  await triggerDeepCheck();
-  if (btn) {
-    btn.disabled = false;
-    btn.innerHTML = '<i class="fas fa-stethoscope"></i>';
-  }
 });
 
 document.getElementById('refreshPlaylistBtn')?.addEventListener('click', async () => {
