@@ -728,9 +728,8 @@ clipDownloadBtn?.addEventListener('click', async () => {
   if (!_clipTaskId || !clipStartInput || !clipEndInput) return;
   const start = parseFloat(clipStartInput.value);
   const end   = parseFloat(clipEndInput.value);
-  const origHTML = clipDownloadBtn.innerHTML;
   clipDownloadBtn.disabled = true;
-  clipDownloadBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Clipping…';
+  clipDownloadBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Starting…';
   try {
     const res = await apiFetch(`/api/tasks/${_clipTaskId}/clip`, {
       method:  'POST',
@@ -739,19 +738,19 @@ clipDownloadBtn?.addEventListener('click', async () => {
     });
     const d = await res.json();
     if (!res.ok) throw new Error(d.detail || 'Clip failed');
-    const filename = d.filename || 'clip.mp4';
-    const a = document.createElement('a');
-    a.href = `/downloads/${filename}`;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    toast(`Clip ready: ${filename}`, 'success');
+    // Async response: clip task is running in background
+    toast(`✂ Clipping started — check the Tasks tab`, 'success');
+    // Exit clip mode and navigate to Tasks tab
+    document.getElementById('clipOverlay')?.classList.add('d-none');
+    document.getElementById('clipToolbar')?.classList.add('d-none');
+    _clipTaskId = null;
+    showDownloadsTab();
+    // Start polling for the new clip task
+    if (d.clip_task_id) startPolling(d.clip_task_id);
   } catch (e) {
     toast((e as Error).message, 'danger');
-  } finally {
     clipDownloadBtn.disabled = false;
-    clipDownloadBtn.innerHTML = origHTML;
+    clipDownloadBtn.innerHTML = '<i class="fas fa-cut me-1"></i>Clip & Save';
   }
 });
 

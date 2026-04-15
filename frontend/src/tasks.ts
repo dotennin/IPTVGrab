@@ -14,30 +14,34 @@ document.getElementById('concurrency')?.addEventListener('input', (e) => {
 let currentCategory = 'all';
 let currentSort: { field: string; dir: 'asc' | 'desc' } = { field: 'created_at', dir: 'desc' };
 const SORT_DEFAULTS: Record<string, 'asc' | 'desc'> = { created_at: 'desc', filename: 'asc', size: 'desc' };
-const ACTIVE_STATUSES   = ['downloading', 'recording', 'merging', 'stopping'];
+const ACTIVE_STATUSES   = ['downloading', 'recording', 'merging', 'stopping', 'clipping'];
 const WAITING_STATUSES  = ['queued'];
+const CLIPPING_STATUSES = ['clipping'];
 const FINISHED_STATUSES = ['completed', 'failed', 'cancelled', 'interrupted'];
 
 function updateTaskCount(): void {
   const cards = document.querySelectorAll('.task-card');
-  let all = 0, active = 0, waiting = 0, finished = 0;
+  let all = 0, active = 0, waiting = 0, clipping = 0, finished = 0;
   cards.forEach((c) => {
     all++;
     const s = (c as HTMLElement).dataset.taskStatus || '';
-    if      (ACTIVE_STATUSES.includes(s))   active++;
-    else if (WAITING_STATUSES.includes(s))  waiting++;
-    else if (FINISHED_STATUSES.includes(s)) finished++;
+    if      (CLIPPING_STATUSES.includes(s))  clipping++;
+    else if (ACTIVE_STATUSES.includes(s))    active++;
+    else if (WAITING_STATUSES.includes(s))   waiting++;
+    else if (FINISHED_STATUSES.includes(s))  finished++;
   });
-  const taskCountBadge   = document.getElementById('taskCountBadge');
-  const catCountAll      = document.getElementById('catCount-all');
-  const catCountActive   = document.getElementById('catCount-active');
-  const catCountQueued   = document.getElementById('catCount-queued');
-  const catCountFinished = document.getElementById('catCount-finished');
-  if (taskCountBadge)   taskCountBadge.textContent   = String(all);
-  if (catCountAll)      catCountAll.textContent     = String(all);
-  if (catCountActive)   catCountActive.textContent  = String(active);
-  if (catCountQueued)   catCountQueued.textContent  = String(waiting);
-  if (catCountFinished) catCountFinished.textContent = String(finished);
+  const taskCountBadge    = document.getElementById('taskCountBadge');
+  const catCountAll       = document.getElementById('catCount-all');
+  const catCountActive    = document.getElementById('catCount-active');
+  const catCountQueued    = document.getElementById('catCount-queued');
+  const catCountClipping  = document.getElementById('catCount-clipping');
+  const catCountFinished  = document.getElementById('catCount-finished');
+  if (taskCountBadge)    taskCountBadge.textContent    = String(all);
+  if (catCountAll)       catCountAll.textContent        = String(all);
+  if (catCountActive)    catCountActive.textContent     = String(active);
+  if (catCountQueued)    catCountQueued.textContent     = String(waiting);
+  if (catCountClipping)  catCountClipping.textContent   = String(clipping);
+  if (catCountFinished)  catCountFinished.textContent   = String(finished);
 }
 
 function applyCategoryFilter(): void {
@@ -47,7 +51,8 @@ function applyCategoryFilter(): void {
     let show = false;
     switch (currentCategory) {
       case 'all':      show = true; break;
-      case 'active':   show = ACTIVE_STATUSES.includes(s); break;
+      case 'active':   show = ACTIVE_STATUSES.includes(s) && !CLIPPING_STATUSES.includes(s); break;
+      case 'clipping': show = CLIPPING_STATUSES.includes(s); break;
       case 'queued':   show = WAITING_STATUSES.includes(s); break;
       case 'finished': show = FINISHED_STATUSES.includes(s); break;
     }
@@ -143,6 +148,7 @@ const STATUS_MAP: Record<string, { text: string; cls: string }> = {
   recording:   { text: 'Recording',   cls: 'bg-danger'    },
   stopping:    { text: 'Merging',     cls: 'bg-info'      },
   merging:     { text: 'Merging',     cls: 'bg-info'      },
+  clipping:    { text: 'Clipping',    cls: 'bg-warning'   },
   completed:   { text: 'Completed',   cls: 'bg-success'   },
   failed:      { text: 'Failed',      cls: 'bg-danger'    },
   cancelled:   { text: 'Cancelled',   cls: 'bg-secondary' },

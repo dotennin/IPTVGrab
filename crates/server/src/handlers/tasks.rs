@@ -91,6 +91,7 @@ pub(crate) async fn start_download(
         duration_sec: None,
         recorded_segments: None,
         elapsed_sec: None,
+        task_type: None,
     };
 
     state.tasks.write().await.insert(task_id.clone(), task);
@@ -478,6 +479,7 @@ pub(crate) fn make_task(id: &str, task: &Task, now: f64) -> Task {
         duration_sec: None,
         recorded_segments: None,
         elapsed_sec: None,
+        task_type: None,
     }
 }
 

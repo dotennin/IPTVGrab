@@ -533,6 +533,7 @@ mod tests {
             duration_sec: None,
             recorded_segments: None,
             elapsed_sec: None,
+            task_type: None,
         };
 
         assert_eq!(
@@ -577,6 +578,7 @@ mod tests {
             duration_sec: None,
             recorded_segments: None,
             elapsed_sec: None,
+            task_type: None,
         };
 
         assert_eq!(

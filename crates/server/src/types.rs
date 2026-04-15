@@ -30,6 +30,9 @@ pub(crate) struct Task {
     pub(crate) duration_sec: Option<f64>,
     pub(crate) recorded_segments: Option<usize>,
     pub(crate) elapsed_sec: Option<u64>,
+    /// "download" | "clip" — None is treated as "download" for backward compat.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) task_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -271,6 +274,7 @@ mod tests {
             duration_sec: Some(120.0),
             recorded_segments: None,
             elapsed_sec: None,
+            task_type: None,
         };
         let json = serde_json::to_string(&task).unwrap();
         let back: Task = serde_json::from_str(&json).unwrap();

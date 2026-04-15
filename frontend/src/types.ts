@@ -23,6 +23,7 @@ export interface Task {
   duration_sec: number | null;
   recorded_segments: number | null;
   elapsed_sec: number | null;
+  task_type?: string;
 }
 
 export interface Channel {

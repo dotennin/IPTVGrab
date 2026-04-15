@@ -129,10 +129,8 @@ export async function selectPlaylist(id: string): Promise<void> {
   const refreshBtn = document.getElementById('refreshPlaylistBtn') as HTMLButtonElement | null;
   const deleteBtn  = document.getElementById('deletePlaylistBtn') as HTMLButtonElement | null;
 
-  setHealthOnlyFilter(true);
   _activeGroup = '';
   const healthOnlyCheck = document.getElementById('healthOnlyCheck') as HTMLInputElement | null;
-  if (healthOnlyCheck) healthOnlyCheck.checked = true;
 
   if (!id) {
     currentPlaylist = null;
@@ -181,7 +179,7 @@ export async function selectPlaylist(id: string): Promise<void> {
       if (deleteBtn) deleteBtn.disabled = true;
       document.getElementById('editAllPlaylistsBtn')?.classList.remove('d-none');
       document.getElementById('refreshAllPlaylistsBtn')?.classList.remove('d-none');
-      renderChannels(allChannels);
+      renderChannels(getFilteredChannels());
       refreshHealthOnce();
     } catch (e) {
       toast((e as Error).message, 'danger');
@@ -205,7 +203,7 @@ export async function selectPlaylist(id: string): Promise<void> {
     document.getElementById('editAllPlaylistsBtn')?.classList.add('d-none');
     document.getElementById('refreshAllPlaylistsBtn')?.classList.add('d-none');
     if (deleteBtn) deleteBtn.disabled = false;
-    renderChannels(allChannels);
+    renderChannels(getFilteredChannels());
     refreshHealthOnce();
   } catch (e) {
     toast((e as Error).message, 'danger');

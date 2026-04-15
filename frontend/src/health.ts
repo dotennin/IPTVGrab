@@ -9,7 +9,7 @@ declare function getFilteredChannels(): unknown[];
 
 export let healthCache: Record<string, HealthEntry> = {};
 let _healthPollTimer: ReturnType<typeof setInterval> | null = null;
-export let healthOnlyFilter = true;
+export let healthOnlyFilter = false;
 
 export function setHealthOnlyFilter(value: boolean): void {
   healthOnlyFilter = value;

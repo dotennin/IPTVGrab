@@ -194,7 +194,7 @@
     <div class="flex-1 flex flex-col overflow-hidden bg-gh-surface">
       <div class="flex items-center justify-between px-4 py-2 border-b border-gh-border flex-wrap gap-2 shrink-0">
         <span class="font-medium">
-          <i class="fas fa-download mr-2"></i>Downloads
+          <i class="fas fa-tasks mr-2"></i>Tasks
         </span>
         <div class="flex items-center gap-1">
           <span class="text-gh-muted text-sm mr-1">Sort:</span>
@@ -225,6 +225,11 @@
             <i class="fas fa-clock"></i>
             <span>Waiting</span>
             <span class="badge bg-secondary" id="catCount-queued">0</span>
+          </div>
+          <div class="dl-cat" data-cat="clipping" title="Clipping">
+            <i class="fas fa-cut"></i>
+            <span>Clipping</span>
+            <span class="badge bg-secondary" id="catCount-clipping">0</span>
           </div>
           <div class="dl-cat" data-cat="finished" title="Finished">
             <i class="fas fa-check-circle"></i>
@@ -676,8 +681,8 @@
       <span>Add Stream</span>
     </button>
     <button class="tv-nav-btn" id="downloads-tab" type="button" tabindex="0">
-      <i class="fas fa-download"></i>
-      <span>Downloads<span class="tv-badge" id="taskCountBadge">0</span></span>
+      <i class="fas fa-tasks"></i>
+      <span>Tasks<span class="tv-badge" id="taskCountBadge">0</span></span>
     </button>
     <button class="tv-nav-btn" id="settingsBtn" type="button" tabindex="0">
       <i class="fas fa-cog"></i>
