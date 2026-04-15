@@ -514,6 +514,17 @@ class AppController extends ChangeNotifier {
     });
   }
 
+  /// Deep check: validates M3U8 manifest content, not just TCP reachability.
+  /// Status values in results: "playable", "ok", "invalid", "dead".
+  Future<void> runDeepHealthCheck() async {
+    return _runBusy(() async {
+      await api.runDeepHealthCheck();
+      _startupHealthCheckRequested = true;
+      await refreshHealthCheck();
+      _syncHealthPolling();
+    });
+  }
+
   Future<String> addPlaylist({
     required String name,
     String? url,

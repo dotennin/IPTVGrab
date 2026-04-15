@@ -115,6 +115,8 @@ pub(crate) struct MergedChannel {
 pub(crate) struct HealthEntry {
     pub(crate) status: String,
     pub(crate) checked_at: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) latency_ms: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

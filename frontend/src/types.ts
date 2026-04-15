@@ -81,8 +81,9 @@ export interface MergedConfig {
 }
 
 export interface HealthEntry {
-  status: 'ok' | 'dead';
+  status: 'ok' | 'dead' | 'playable' | 'invalid';
   checked_at: number;
+  latency_ms?: number;
 }
 
 export interface HealthState {

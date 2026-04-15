@@ -13,11 +13,14 @@
 </head>
 <body class="bg-gh-bg text-gh-text h-screen flex flex-col overflow-hidden">
 
-  <!-- Minimal topbar (logo only; controls live in bottom nav) -->
+  <!-- Minimal topbar (logo + top-right signout) -->
   <nav class="tv-topbar flex items-center px-4 shrink-0" id="navbar">
-    <span class="text-base font-semibold">
+    <span class="text-base font-semibold flex-1">
       <i class="fas fa-satellite-dish mr-2 text-gh-blue-light"></i>Media Nest
     </span>
+    <button class="tv-topbar-signout d-none" id="logoutBtn" type="button" title="Sign out">
+      <i class="fas fa-sign-out-alt"></i>
+    </button>
   </nav>
 
   <!-- ── CHANNELS section ────────────────────────────────────────────── -->
@@ -53,6 +56,9 @@
           <input class="form-check-input" type="checkbox" role="switch" id="healthOnlyCheck" />
           <label class="form-check-label text-sm text-gh-muted" for="healthOnlyCheck">Active</label>
         </div>
+        <button class="tv-icon-btn d-none" id="deepCheckBtn" title="Full playability test (validates M3U8 manifests)">
+          <i class="fas fa-stethoscope"></i>
+        </button>
         <span class="d-none text-sm" id="healthProgressBadge">
           <i class="fas fa-spinner fa-spin mr-1 text-yellow-400"></i>
           <span id="healthProgressText" class="text-yellow-400"></span>
@@ -660,11 +666,11 @@
 
   <!-- ── TV Remote Bottom Nav ───────────────────────────────────────── -->
   <nav class="tv-bottom-nav" id="tvBottomNav" aria-label="Main navigation">
-    <button class="tv-nav-btn" id="favorites-tab" type="button" tabindex="0">
+    <button class="tv-nav-btn tv-nav-active" id="favorites-tab" type="button" tabindex="0">
       <i class="fas fa-history"></i>
       <span>Recents</span>
     </button>
-    <button class="tv-nav-btn tv-nav-active" id="playlist-tab" type="button" tabindex="0">
+    <button class="tv-nav-btn" id="playlist-tab" type="button" tabindex="0">
       <i class="fas fa-tv"></i>
       <span>Channels</span>
     </button>
@@ -679,10 +685,6 @@
     <button class="tv-nav-btn" id="settingsBtn" type="button" tabindex="0">
       <i class="fas fa-cog"></i>
       <span>Settings</span>
-    </button>
-    <button class="tv-nav-btn d-none" id="logoutBtn" type="button" tabindex="0">
-      <i class="fas fa-sign-out-alt"></i>
-      <span>Sign out</span>
     </button>
   </nav>
 

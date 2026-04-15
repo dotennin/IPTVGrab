@@ -823,6 +823,16 @@ textarea.form-control {
   background-color: #484f58;
 }
 
+.health-playable {
+  background-color: #3fb950;
+  box-shadow: 0 0 6px rgba(63, 185, 80, 0.9), 0 0 12px rgba(63, 185, 80, 0.4);
+}
+
+.health-invalid {
+  background-color: #d29922;
+  box-shadow: 0 0 5px rgba(210, 153, 34, 0.6);
+}
+
 /* ── Downloads section ───────────────────────────────────────────────────── */
 .downloads-layout {
   display: flex;
@@ -1517,6 +1527,27 @@ textarea.form-control {
   height: 44px;
   background: #161b22;
   border-bottom: 1px solid #30363d;
+}
+
+.tv-topbar-signout {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #8b949e;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  flex-shrink: 0;
+}
+
+.tv-topbar-signout:hover {
+  background: rgba(248, 81, 73, 0.15);
+  color: #f85149;
+  border-color: rgba(248, 81, 73, 0.4);
 }
 
 /* ── Section layout helper ──────────────────────────────────────────────── */

@@ -179,6 +179,12 @@ class ApiClient {
     await _requestJson('POST', '/api/health-check');
   }
 
+  /// Deep playability check: validates M3U8 manifests to confirm streams
+  /// are actually playable, not just reachable.
+  Future<void> runDeepHealthCheck() async {
+    await _requestJson('POST', '/api/health-check?deep=true');
+  }
+
   Future<List<Playlist>> fetchPlaylists() async {
     final json = await _requestJson('GET', '/api/playlists');
     if (json is! List) {

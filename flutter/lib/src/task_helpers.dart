@@ -78,10 +78,30 @@ String? taskErrorMessage(DownloadTask task, AppController controller) {
 Color healthStatusColor(String? status) {
   switch (status?.toLowerCase()) {
     case 'ok':
+    case 'playable':
       return appSuccess;
     case 'dead':
       return appDanger;
+    case 'invalid':
+      return const Color(0xFFD29922); // amber — reachable but bad content
     default:
       return const Color(0xFF64748B);
+  }
+}
+
+/// Human-readable label for a health check status.
+String healthStatusLabel(String? status, {int? latencyMs}) {
+  final ms = latencyMs != null ? ' (${latencyMs}ms)' : '';
+  switch (status?.toLowerCase()) {
+    case 'ok':
+      return 'Reachable$ms';
+    case 'playable':
+      return 'Playable ✓$ms';
+    case 'dead':
+      return 'Unreachable';
+    case 'invalid':
+      return 'Invalid stream$ms';
+    default:
+      return 'Not checked';
   }
 }

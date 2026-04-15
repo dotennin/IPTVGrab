@@ -15,18 +15,46 @@ export function setHealthOnlyFilter(value: boolean): void {
   healthOnlyFilter = value;
 }
 
+/** Returns the CSS class name for a given health status. */
+function healthClass(status: string): string {
+  switch (status) {
+    case 'ok':      return 'health-ok';
+    case 'playable': return 'health-playable';
+    case 'dead':    return 'health-dead';
+    case 'invalid': return 'health-invalid';
+    default:        return 'health-unknown';
+  }
+}
+
+/** Human-readable tooltip for a health status. */
+function healthTitle(status: string, latencyMs?: number): string {
+  const ms = latencyMs != null ? ` (${latencyMs}ms)` : '';
+  switch (status) {
+    case 'ok':       return `Reachable${ms}`;
+    case 'playable': return `Playable ✓${ms}`;
+    case 'dead':     return 'Unreachable';
+    case 'invalid':  return `Reachable but invalid stream${ms}`;
+    default:         return 'Not checked';
+  }
+}
+
+/** Returns true if the health status counts as "available" for filter purposes. */
+export function healthIsAvailable(status: string): boolean {
+  return status === 'ok' || status === 'playable';
+}
+
 export function _healthDot(url: string): string {
   const h = healthCache[url];
-  const cls = h ? (h.status === 'ok' ? 'health-ok' : 'health-dead') : 'health-unknown';
-  const title = h ? (h.status === 'ok' ? 'Reachable' : 'Unreachable') : 'Not checked';
+  const cls = h ? healthClass(h.status) : 'health-unknown';
+  const title = h ? healthTitle(h.status, h.latency_ms) : 'Not checked';
   return `<span class="health-dot ${cls}" data-health-url="${esc(url)}" title="${title}"></span>`;
 }
 
 export function _healthDotInline(url: string): string {
   const h = healthCache[url];
   if (!h) return '';
-  const cls = h.status === 'ok' ? 'health-ok' : 'health-dead';
-  const title = h.status === 'ok' ? 'Reachable' : 'Unreachable';
+  const cls = healthClass(h.status);
+  const title = healthTitle(h.status, h.latency_ms);
   return `<span class="health-dot-inline ${cls}" data-health-url="${esc(url)}" title="${title}"></span>`;
 }
 
@@ -46,16 +74,13 @@ export function updateHealthDots(): void {
     const htmlEl = el as HTMLElement;
     const url = htmlEl.dataset.healthUrl!;
     const h = healthCache[url];
-    htmlEl.classList.remove('health-ok', 'health-dead', 'health-unknown');
+    htmlEl.classList.remove('health-ok', 'health-dead', 'health-unknown', 'health-invalid', 'health-playable');
     if (!h) {
       htmlEl.classList.add('health-unknown');
       htmlEl.title = 'Not checked';
-    } else if (h.status === 'ok') {
-      htmlEl.classList.add('health-ok');
-      htmlEl.title = 'Reachable';
     } else {
-      htmlEl.classList.add('health-dead');
-      htmlEl.title = 'Unreachable';
+      htmlEl.classList.add(healthClass(h.status));
+      htmlEl.title = healthTitle(h.status, h.latency_ms);
     }
   });
   // If health filter is active, re-render so counts stay accurate
@@ -112,5 +137,17 @@ export async function refreshHealthOnce(): Promise<void> {
     _updateHealthProgress(data);
     updateHealthDots();
     if (data.running && !_healthPollTimer) startHealthPoll();
+  } catch { /* ignore */ }
+}
+
+/**
+ * Triggers a deep playability check on the server (`POST /api/health-check?deep=true`).
+ * The server fetches each M3U8 manifest and validates its content.
+ * Returns immediately; use startHealthPoll() to track progress.
+ */
+export async function triggerDeepCheck(): Promise<void> {
+  try {
+    const res = await apiFetch('/api/health-check?deep=true', { method: 'POST' });
+    if (res.ok) startHealthPoll();
   } catch { /* ignore */ }
 }

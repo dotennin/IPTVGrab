@@ -106,17 +106,20 @@ class HealthCheckEntry {
   HealthCheckEntry({
     required this.status,
     required this.checkedAt,
+    this.latencyMs,
   });
 
   final String status;
   final double checkedAt;
+  final int? latencyMs;
 
-  bool get isAvailable => status == 'ok';
+  bool get isAvailable => status == 'ok' || status == 'playable';
 
   factory HealthCheckEntry.fromJson(Map<String, dynamic> json) {
     return HealthCheckEntry(
       status: _asString(json['status']),
       checkedAt: _asDouble(json['checked_at']),
+      latencyMs: json['latency_ms'] as int?,
     );
   }
 }

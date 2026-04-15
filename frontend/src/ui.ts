@@ -192,6 +192,9 @@ document.getElementById('parseBtn')?.addEventListener('click', async () => {
 
 loadPlaylists({ autoSelect: true });
 
+// Start on the Recents tab
+showFavoritesTab();
+
 // Expose showDownloadsTab for player.ts / playlists.ts
 (window as unknown as Record<string, unknown>).showDownloadsTab = showDownloadsTab;
 
