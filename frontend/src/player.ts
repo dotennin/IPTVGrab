@@ -745,8 +745,11 @@ clipDownloadBtn?.addEventListener('click', async () => {
     document.getElementById('clipToolbar')?.classList.add('d-none');
     _clipTaskId = null;
     showDownloadsTab();
-    // Start polling for the new clip task
-    if (d.clip_task_id) startPolling(d.clip_task_id);
+    // Create a card for the clip task and start polling for status updates
+    if (d.clip_task_id) {
+      addTaskCard(d.clip_task_id, `✂ ${d.filename || 'clip'}`);
+      startPolling(d.clip_task_id);
+    }
   } catch (e) {
     toast((e as Error).message, 'danger');
     clipDownloadBtn.disabled = false;

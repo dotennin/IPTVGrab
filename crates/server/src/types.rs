@@ -122,6 +122,22 @@ pub(crate) struct HealthEntry {
     pub(crate) latency_ms: Option<u32>,
 }
 
+fn default_true() -> bool { true }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct AppSettings {
+    #[serde(default = "default_true")]
+    pub(crate) use_proxy: bool,
+    #[serde(default = "default_true")]
+    pub(crate) health_only_filter: bool,
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self { use_proxy: true, health_only_filter: true }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub(crate) struct HealthState {
     pub(crate) running: bool,

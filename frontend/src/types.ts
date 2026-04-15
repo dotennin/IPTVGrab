@@ -119,6 +119,7 @@ export interface StreamInfo {
 
 export interface Settings {
   useProxy: boolean;
+  healthOnlyFilter: boolean;
 }
 
 export interface RecentChannel {

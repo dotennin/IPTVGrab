@@ -26,6 +26,7 @@ use crate::handlers::{
         add_playlist, delete_playlist, edit_playlist, get_playlist, list_channels, list_playlists,
         refresh_all_playlists, refresh_playlist,
     },
+    settings::{get_settings, patch_settings},
     tasks::{
         cancel_task, fork_recording, get_task, list_tasks, parse_stream, pause_task,
         recording_restart, restart_task, resume_task, start_download,
@@ -38,7 +39,7 @@ use crate::handlers::{
     },
 };
 use crate::auth::{api_login, api_logout, auth_status, get_export_token, login_page};
-use crate::persistence::{load_health_cache, load_merged_config, load_playlists, load_tasks};
+use crate::persistence::{load_app_settings, load_health_cache, load_merged_config, load_playlists, load_tasks};
 use crate::state::AppState;
 use crate::types::{HealthState, WatchCacheEntry};
 
@@ -181,6 +182,7 @@ pub(crate) fn build_state(
         health_state: Arc::new(tokio::sync::RwLock::new(HealthState::default())),
         watch_cache: Arc::new(tokio::sync::RwLock::new(HashMap::<String, WatchCacheEntry>::new())),
         transcodes: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+        app_settings: Arc::new(tokio::sync::RwLock::new(load_app_settings(&downloads_dir))),
         ws_subs: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
     }
 }
@@ -243,6 +245,7 @@ pub(crate) fn build_api_router() -> Router<AppState> {
         .route("/api/watch/transcode/:id/:seg", get(transcode_segment))
         .route("/api/watch/transcode/:id", delete(stop_transcode))
         .route("/ws/tasks/:id", get(ws_task_handler))
+        .route("/api/settings", get(get_settings).patch(patch_settings))
         .route("/login", get(login_page))
 }
 

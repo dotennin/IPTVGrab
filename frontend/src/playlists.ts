@@ -24,6 +24,7 @@ import { Modal } from './bootstrap-shim';
 import { renderChannelCard, bindChannelGrid } from './channel-card';
 import type { BindOptions } from './channel-card';
 import type { SavedPlaylist, Channel, MergedChannel, StreamInfo } from './types';
+import { saveSettings } from './settings';
 
 const PAGE_SIZE = 60;
 
@@ -520,7 +521,12 @@ document.getElementById('groupList')?.addEventListener('click', (e) => {
 });
 
 document.getElementById('healthOnlyCheck')?.addEventListener('change', (e) => {
-  setHealthOnlyFilter((e.target as HTMLInputElement).checked);
+  const value = (e.target as HTMLInputElement).checked;
+  setHealthOnlyFilter(value);
+  // Sync settings modal toggle
+  const settingsToggle = document.getElementById('settingHealthOnly') as HTMLInputElement | null;
+  if (settingsToggle) settingsToggle.checked = value;
+  void saveSettings({ healthOnlyFilter: value });
   renderChannels(getFilteredChannels());
 });
 

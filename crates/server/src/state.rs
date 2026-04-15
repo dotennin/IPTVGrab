@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use tokio::sync::{mpsc, RwLock};
 
-use crate::types::{HealthEntry, HealthState, MergedConfig, SavedPlaylist, Task, WatchCacheEntry};
+use crate::types::{AppSettings, HealthEntry, HealthState, MergedConfig, SavedPlaylist, Task, WatchCacheEntry};
 
 // ── Transcode session (FLV → HLS via FFmpeg) ─────────────────────────────────
 
@@ -71,6 +71,7 @@ pub(crate) struct AppState {
     pub(crate) watch_cache: Arc<RwLock<HashMap<String, WatchCacheEntry>>>,
     /// Active FLV→HLS transcode sessions keyed by source_url.
     pub(crate) transcodes: Arc<RwLock<HashMap<String, Arc<TranscodeSession>>>>,
+    pub(crate) app_settings: Arc<RwLock<AppSettings>>,
     pub(crate) ws_subs: Arc<tokio::sync::Mutex<HashMap<String, Vec<mpsc::Sender<String>>>>>,
 }
 
@@ -101,5 +102,11 @@ impl AppState {
         let path = self.downloads_dir.join("health_cache.json");
         let hc = self.health_cache.read().await;
         let _ = tokio::fs::write(&path, serde_json::to_vec_pretty(&*hc).unwrap_or_default()).await;
+    }
+
+    pub(crate) async fn save_app_settings(&self) {
+        let path = self.downloads_dir.join("settings.json");
+        let s = self.app_settings.read().await;
+        let _ = tokio::fs::write(&path, serde_json::to_vec_pretty(&*s).unwrap_or_default()).await;
     }
 }

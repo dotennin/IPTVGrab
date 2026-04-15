@@ -1,6 +1,7 @@
 import { apiFetch } from './api';
 import { esc, toast } from './utils';
-import { settings, saveSettings } from './settings';
+import { settings, loadSettings, saveSettings } from './settings';
+import { setHealthOnlyFilter } from './health';
 import { Modal } from './bootstrap-shim';
 import { renderRecentChannels } from './recents';
 import { addTaskCard, updateTaskCard, startPolling, currentRequest as _cr } from './tasks';
@@ -165,17 +166,34 @@ document.getElementById('parseBtn')?.addEventListener('click', async () => {
   document.getElementById('settingsBtn')?.addEventListener('click', () => {
     const toggle = document.getElementById('settingUseProxy') as HTMLInputElement | null;
     if (toggle) toggle.checked = settings.useProxy;
+    const toggleHealth = document.getElementById('settingHealthOnly') as HTMLInputElement | null;
+    if (toggleHealth) toggleHealth.checked = settings.healthOnlyFilter;
     settingsModal.show();
   });
 
   document.getElementById('settingUseProxy')?.addEventListener('change', (e) => {
-    settings.useProxy = (e.target as HTMLInputElement).checked;
-    saveSettings();
+    const value = (e.target as HTMLInputElement).checked;
+    void saveSettings({ useProxy: value });
+  });
+
+  document.getElementById('settingHealthOnly')?.addEventListener('change', (e) => {
+    const value = (e.target as HTMLInputElement).checked;
+    setHealthOnlyFilter(value);
+    // Sync the quick-toggle in channels panel
+    const qToggle = document.getElementById('healthOnlyCheck') as HTMLInputElement | null;
+    if (qToggle) qToggle.checked = value;
+    void saveSettings({ healthOnlyFilter: value });
   });
 })();
 
 // ── Page load initialization ──────────────────────────────────────────────────
 (async () => {
+  // Load server-side settings first so all modules start with correct values.
+  await loadSettings();
+  setHealthOnlyFilter(settings.healthOnlyFilter);
+  const healthToggle = document.getElementById('healthOnlyCheck') as HTMLInputElement | null;
+  if (healthToggle) healthToggle.checked = settings.healthOnlyFilter;
+
   try {
     const res = await apiFetch('/api/tasks');
     if (!res.ok) return;

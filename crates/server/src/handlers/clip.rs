@@ -112,6 +112,8 @@ pub(crate) async fn clip_task(
             "-ss".into(), body.start.to_string(),
             "-i".into(), input_path.to_string_lossy().to_string(),
             "-t".into(), duration.to_string(),
+            "-map".into(), "0".into(),
+            "-avoid_negative_ts".into(), "make_zero".into(),
             "-c".into(), "copy".into(),
             clip_path.to_string_lossy().to_string(),
         ];
@@ -186,6 +188,8 @@ pub(crate) async fn clip_task(
                 "-ss".into(), body.start.to_string(),
                 "-i".into(), raw_path.to_string_lossy().to_string(),
                 "-t".into(), duration.to_string(),
+                "-map".into(), "0".into(),
+                "-avoid_negative_ts".into(), "make_zero".into(),
                 "-c".into(), "copy".into(),
                 clip_path_str,
             ]
@@ -220,6 +224,8 @@ pub(crate) async fn clip_task(
                 "-i".into(), list_file.to_string_lossy().to_string(),
                 "-ss".into(), body.start.to_string(),
                 "-t".into(), duration.to_string(),
+                "-map".into(), "0".into(),
+                "-avoid_negative_ts".into(), "make_zero".into(),
                 "-c".into(), "copy".into(),
                 clip_path_str,
             ]
