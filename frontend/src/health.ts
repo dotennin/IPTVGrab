@@ -111,6 +111,7 @@ export function startHealthPoll(): void {
       const res = await apiFetch('/api/health-check');
       if (!res.ok) return;
       const data = await res.json();
+      debugger
       healthCache = data.cache || {};
       _updateHealthProgress(data);
       updateHealthDots();

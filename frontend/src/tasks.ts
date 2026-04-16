@@ -263,10 +263,7 @@ export function updateTaskCard(taskId: string, task: Task): void {
              class="btn btn-sm btn-success">
             <i class="fas fa-download me-1"></i>${esc(task.output)}${sizeStr}
           </a>
-          ${task.duration_sec ? `<span class="ms-2 text-muted small">${task.duration_sec}s elapsed</span>` : ''}
-          <button class="btn btn-link btn-sm p-0 ms-2 text-info" onclick="window.restartTask('${taskId}')">
-            <i class="fas fa-redo me-1"></i>Restart
-          </button>`;
+          ${task.duration_sec ? `<span class="ms-2 text-muted small">${task.duration_sec}s elapsed</span>` : ''}`;
       } else if (task.status === 'failed') {
         info.innerHTML = `
           <div class="task-error text-danger" title="Click to expand/collapse" onclick="this.classList.toggle('expanded')">Error: ${esc(task.error || 'Unknown error')}</div>

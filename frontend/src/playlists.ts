@@ -110,7 +110,9 @@ function _populateGroupFilter(
   const groups = orderedGroups
     ? orderedGroups
     : [...new Set(channels.map((c) => c.group).filter(Boolean) as string[])].sort();
-  list.innerHTML = `<li class="channel-group-item${_activeGroup === '' ? ' active' : ''}" data-group="">All</li>`;
+  list.innerHTML = `<li class="channel-group-item" data-group="">All</li>`;
+  // default to first group if active group not present in new list
+  if (groups.length > 0 && !_activeGroup) _activeGroup = groups[0];
   for (const g of groups) {
     const li = document.createElement('li');
     li.className = 'channel-group-item' + (g === _activeGroup ? ' active' : '');
@@ -130,8 +132,6 @@ export async function selectPlaylist(id: string): Promise<void> {
   const refreshBtn = document.getElementById('refreshPlaylistBtn') as HTMLButtonElement | null;
   const deleteBtn  = document.getElementById('deletePlaylistBtn') as HTMLButtonElement | null;
 
-  _activeGroup = '';
-  const healthOnlyCheck = document.getElementById('healthOnlyCheck') as HTMLInputElement | null;
 
   if (!id) {
     currentPlaylist = null;
@@ -180,8 +180,8 @@ export async function selectPlaylist(id: string): Promise<void> {
       if (deleteBtn) deleteBtn.disabled = true;
       document.getElementById('editAllPlaylistsBtn')?.classList.remove('d-none');
       document.getElementById('refreshAllPlaylistsBtn')?.classList.remove('d-none');
+      await refreshHealthOnce();
       renderChannels(getFilteredChannels());
-      refreshHealthOnce();
     } catch (e) {
       toast((e as Error).message, 'danger');
     }
@@ -204,8 +204,8 @@ export async function selectPlaylist(id: string): Promise<void> {
     document.getElementById('editAllPlaylistsBtn')?.classList.add('d-none');
     document.getElementById('refreshAllPlaylistsBtn')?.classList.add('d-none');
     if (deleteBtn) deleteBtn.disabled = false;
+    await refreshHealthOnce();
     renderChannels(getFilteredChannels());
-    refreshHealthOnce();
   } catch (e) {
     toast((e as Error).message, 'danger');
   }
@@ -221,6 +221,7 @@ export function getFilteredChannels(): (Channel & { id?: string; playlist_name?:
       (ch.playlist_name || '').toLowerCase().includes(search);
     const matchGroup  = !_activeGroup || ch.group === _activeGroup;
     const matchHealth = !healthOnlyFilter || (healthCache[ch.url] && healthIsAvailable(healthCache[ch.url].status));
+    // return matchSearch && matchGroup;
     return matchSearch && matchGroup && matchHealth;
   });
 }
