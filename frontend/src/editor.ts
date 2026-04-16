@@ -23,13 +23,54 @@ function flashButtonIcon(button: Element, nextClass: string): void {
   }, 1500);
 }
 
-function getFilteredEditorChannels(group: MergedGroup): MergedChannel[] {
-  const channels = group.channels || [];
-  const query = editorChannelFilter.trim().toLowerCase();
-  if (!query) return channels;
-  return channels.filter((ch) => [ch.name, ch.url, ch.source_playlist_name, group.name]
-    .filter(Boolean)
-    .some((value) => String(value).toLowerCase().includes(query)));
+function filterEditorGroups(groups: MergedGroup[], filter: string): MergedGroup[] {
+  const query = filter.trim().toLowerCase();
+  if (!query) return groups;
+  return groups
+    .map((group) => ({
+      ...group,
+      channels: (group.channels || []).filter((ch) => [ch.name, ch.url, ch.source_playlist_name, group.name]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(query))),
+    }))
+    .filter((group) => group.channels.length > 0);
+}
+
+function findEditorChannel(groupId: string | undefined, channelId: string | undefined): {
+  group: MergedGroup;
+  channel: MergedChannel;
+} | null {
+  if (!groupId || !channelId) return null;
+  const group = editorGroups.find((item) => item.id === groupId);
+  if (!group) return null;
+  const channel = (group.channels || []).find((item) => item.id === channelId);
+  return channel ? { group, channel } : null;
+}
+
+function renderEditorChannelItem(ch: MergedChannel, group: MergedGroup): string {
+  return `
+    <div class="editor-channel-item${ch.enabled ? '' : ' disabled-item'}" data-group-id="${group.id}" data-ch-id="${ch.id}">
+      <span class="drag-handle"><i class="fas fa-grip-vertical"></i></span>
+      ${ch.tvg_logo ? `<img src="${esc(ch.tvg_logo)}" class="ch-logo" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">` : ''}
+      <div class="ch-logo-fallback" ${ch.tvg_logo ? 'style="display:none"' : ''}><i class="fas fa-tv"></i></div>
+      <div class="flex-grow-1" style="min-width:0">
+        <div class="editor-item-name" title="${esc(ch.name)}">${esc(ch.name || ch.url)} ${_healthDotInline(ch.url)}</div>
+        <div class="editor-channel-url" title="${esc(ch.url)}">${esc(ch.url)}</div>
+        ${ch.source_playlist_name ? `<div class="editor-channel-source">${esc(ch.source_playlist_name)}</div>` : ''}
+        ${ch.origin_id ? _originLabel(ch.origin_label ?? null) : ''}
+      </div>
+      <span class="editor-item-actions">
+        <div class="form-check form-switch mb-0">
+          <input class="form-check-input editor-ch-toggle" type="checkbox" ${ch.enabled ? 'checked' : ''} data-group-id="${group.id}" data-chid="${ch.id}">
+        </div>
+        ${ch.custom ? `<button class="btn btn-outline-primary btn-xs editor-edit-ch-btn" data-group-id="${group.id}" data-chid="${ch.id}" title="Edit"><i class="fas fa-pencil-alt"></i></button>` : ''}
+        <button class="btn btn-outline-info btn-xs editor-copy-url-btn" data-group-id="${group.id}" data-chid="${ch.id}" title="Copy URL"><i class="fas fa-copy"></i></button>
+        <button class="btn btn-outline-warning btn-xs editor-move-ch-btn" data-group-id="${group.id}" data-chid="${ch.id}" title="Move to group"><i class="fas fa-exchange-alt"></i></button>
+        <button class="btn ${ch.custom ? 'btn-outline-danger' : 'btn-outline-secondary'} btn-xs editor-delete-ch-btn" data-group-id="${group.id}" data-chid="${ch.id}" ${ch.custom ? '' : 'disabled'} title="${ch.custom ? 'Delete' : 'Source channels cannot be deleted'}">
+          <i class="fas fa-trash-alt"></i>
+        </button>
+      </span>
+    </div>`;
 }
 
 function openAllPlaylistsEditor(): void {
@@ -156,36 +197,44 @@ function renderEditorChannels(): void {
   }
   clearBtn?.classList.toggle('d-none', !editorChannelFilter.trim());
 
-  const group = editorGroups.find((g) => g.id === editorSelectedGroupId);
-  if (!group) {
+  const selectedGroup = editorGroups.find((g) => g.id === editorSelectedGroupId);
+  const isFiltering = !!editorChannelFilter.trim();
+  const visibleGroups = isFiltering
+    ? filterEditorGroups(editorGroups, editorChannelFilter)
+    : selectedGroup ? [selectedGroup] : [];
+  const matchedChannels = visibleGroups.reduce((sum, group) => sum + (group.channels?.length || 0), 0);
+
+  filterRow?.classList.toggle('d-none', editorGroups.length === 0);
+  addBtn?.classList.toggle('d-none', !selectedGroup);
+  if (countEl) countEl.textContent = String(matchedChannels);
+  if (nameEl) {
+    if (isFiltering) {
+      nameEl.textContent = visibleGroups.length
+        ? `— ${visibleGroups.length} group${visibleGroups.length === 1 ? '' : 's'} matched`
+        : '— 0 groups matched';
+    } else {
+      nameEl.textContent = selectedGroup ? `— ${selectedGroup.name}` : '';
+    }
+  }
+
+  if (!selectedGroup && !isFiltering) {
     list.classList.add('d-none');
     placeholder.classList.remove('d-none');
     emptyState.classList.add('d-none');
-    filterRow?.classList.add('d-none');
-    addBtn?.classList.add('d-none');
     if (countEl) countEl.textContent = '0';
-    if (nameEl) nameEl.textContent = '';
     return;
   }
 
   placeholder.classList.add('d-none');
   emptyState.classList.add('d-none');
-  filterRow?.classList.remove('d-none');
-  addBtn?.classList.remove('d-none');
-  const allChannels = group.channels || [];
-  const channels = getFilteredEditorChannels(group);
-  if (countEl) countEl.textContent = editorChannelFilter.trim()
-    ? `${channels.length}/${allChannels.length}`
-    : String(allChannels.length);
-  if (nameEl)  nameEl.textContent  = `— ${group.name}`;
 
-  if (!channels.length) {
+  if (!visibleGroups.length) {
     list.classList.add('d-none');
     emptyState.classList.remove('d-none');
     const emptyLabel = emptyState.querySelector('p');
     if (emptyLabel) {
       emptyLabel.textContent = editorChannelFilter.trim()
-        ? `No channels match "${editorChannelFilter.trim()}"`
+        ? `No channels match "${editorChannelFilter.trim()}" across any group`
         : 'No channels in this group';
     }
     if (channelSortable) {
@@ -196,52 +245,34 @@ function renderEditorChannels(): void {
   }
 
   list.classList.remove('d-none');
-  list.innerHTML = channels
-    .map(
-      (ch, i) => `
-    <div class="editor-channel-item${ch.enabled ? '' : ' disabled-item'}" data-ch-id="${ch.id}" data-ch-idx="${i}">
-      <span class="drag-handle"><i class="fas fa-grip-vertical"></i></span>
-      ${ch.tvg_logo ? `<img src="${esc(ch.tvg_logo)}" class="ch-logo" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">` : ''}
-      <div class="ch-logo-fallback" ${ch.tvg_logo ? 'style="display:none"' : ''}><i class="fas fa-tv"></i></div>
-      <div class="flex-grow-1" style="min-width:0">
-        <div class="editor-item-name" title="${esc(ch.name)}">${esc(ch.name || ch.url)} ${_healthDotInline(ch.url)}</div>
-        <div class="editor-channel-url" title="${esc(ch.url)}">${esc(ch.url)}</div>
-        ${ch.source_playlist_name ? `<div class="editor-channel-source">${esc(ch.source_playlist_name)}</div>` : ''}
-        ${ch.origin_id ? _originLabel(ch.origin_label ?? null) : ''}
-      </div>
-      <span class="editor-item-actions">
-        <div class="form-check form-switch mb-0">
-          <input class="form-check-input editor-ch-toggle" type="checkbox" ${ch.enabled ? 'checked' : ''} data-chid="${ch.id}">
-        </div>
-        ${ch.custom ? `<button class="btn btn-outline-primary btn-xs editor-edit-ch-btn" data-chid="${ch.id}" title="Edit"><i class="fas fa-pencil-alt"></i></button>` : ''}
-        <button class="btn btn-outline-info btn-xs editor-copy-url-btn" data-chid="${ch.id}" title="Copy URL"><i class="fas fa-copy"></i></button>
-        <button class="btn btn-outline-warning btn-xs editor-move-ch-btn" data-chid="${ch.id}" title="Move to group"><i class="fas fa-exchange-alt"></i></button>
-        <button class="btn ${ch.custom ? 'btn-outline-danger' : 'btn-outline-secondary'} btn-xs editor-delete-ch-btn" data-chid="${ch.id}" ${ch.custom ? '' : 'disabled'} title="${ch.custom ? 'Delete' : 'Source channels cannot be deleted'}">
-          <i class="fas fa-trash-alt"></i>
-        </button>
-      </span>
-    </div>`,
-    )
+  list.innerHTML = visibleGroups
+    .map((group) => `
+      ${isFiltering ? `<div class="editor-filter-group-label">${esc(group.name)} <span class="badge bg-secondary ms-1">${group.channels.length}</span></div>` : ''}
+      ${(group.channels || []).map((ch) => renderEditorChannelItem(ch, group)).join('')}
+    `)
     .join('');
 
   list.querySelectorAll('.editor-ch-toggle').forEach((cb) => {
     cb.addEventListener('change', (e) => {
       e.stopPropagation();
       const input = cb as HTMLInputElement;
-       const ch = allChannels.find((c) => c.id === input.dataset.chid);
-      if (ch) { ch.enabled = input.checked; editorDirty = true; renderEditorChannels(); }
+      const found = findEditorChannel(input.dataset.groupId, input.dataset.chid);
+      if (found) { found.channel.enabled = input.checked; editorDirty = true; renderEditorChannels(); }
     });
   });
 
   list.querySelectorAll('.editor-edit-ch-btn').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      const ch = allChannels.find((c) => c.id === (btn as HTMLElement).dataset.chid);
-      if (!ch) return;
-      (document.getElementById('editChannelNameInput') as HTMLInputElement).value = ch.name || '';
-      (document.getElementById('editChannelUrlInput')  as HTMLInputElement).value = ch.url  || '';
-      (document.getElementById('editChannelLogoInput') as HTMLInputElement).value = ch.tvg_logo || '';
-      (document.getElementById('editChannelIdInput')   as HTMLInputElement).value = ch.id;
+      const found = findEditorChannel(
+        (btn as HTMLElement).dataset.groupId,
+        (btn as HTMLElement).dataset.chid,
+      );
+      if (!found) return;
+      (document.getElementById('editChannelNameInput') as HTMLInputElement).value = found.channel.name || '';
+      (document.getElementById('editChannelUrlInput')  as HTMLInputElement).value = found.channel.url  || '';
+      (document.getElementById('editChannelLogoInput') as HTMLInputElement).value = found.channel.tvg_logo || '';
+      (document.getElementById('editChannelIdInput')   as HTMLInputElement).value = found.channel.id;
       new Modal(document.getElementById('editChannelModal')!).show();
     });
   });
@@ -249,10 +280,12 @@ function renderEditorChannels(): void {
   list.querySelectorAll('.editor-delete-ch-btn:not([disabled])').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      const chid = (btn as HTMLElement).dataset.chid;
-      const ch = allChannels.find((c) => c.id === chid);
-      if (!ch?.custom) return;
-      group.channels = allChannels.filter((c) => c.id !== chid);
+      const found = findEditorChannel(
+        (btn as HTMLElement).dataset.groupId,
+        (btn as HTMLElement).dataset.chid,
+      );
+      if (!found?.channel.custom) return;
+      found.group.channels = (found.group.channels || []).filter((c) => c.id !== found.channel.id);
       editorDirty = true;
       renderEditorChannels();
     });
@@ -261,25 +294,29 @@ function renderEditorChannels(): void {
   list.querySelectorAll('.editor-move-ch-btn').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      const ch = allChannels.find((c) => c.id === (btn as HTMLElement).dataset.chid);
-      if (!ch) return;
+      const found = findEditorChannel(
+        (btn as HTMLElement).dataset.groupId,
+        (btn as HTMLElement).dataset.chid,
+      );
+      if (!found) return;
 
       const select = document.getElementById('moveChannelTargetSelect') as HTMLSelectElement;
       select.innerHTML = editorGroups
-        .filter((g) => g.id !== editorSelectedGroupId)
+        .filter((g) => g.id !== found.group.id)
         .map((g) => `<option value="${esc(g.id)}">${esc(g.name)}</option>`)
         .join('');
 
       const info       = document.getElementById('moveChannelInfo');
       const confirmBtn = document.getElementById('confirmMoveChannelBtn');
-      if (ch.custom) {
+      if (found.channel.custom) {
         if (info) info.textContent = 'This channel will be removed from the current group and added to the selected group.';
         if (confirmBtn) confirmBtn.innerHTML = '<i class="fas fa-exchange-alt mr-1"></i>Move';
       } else {
         if (info) info.innerHTML = 'The original will remain in this group but be <strong>disabled</strong>. A copy will be added to the selected group.';
         if (confirmBtn) confirmBtn.innerHTML = '<i class="fas fa-copy mr-1"></i>Copy to Group';
       }
-      (document.getElementById('moveChannelIdInput') as HTMLInputElement).value = ch.id;
+      (document.getElementById('moveChannelIdInput') as HTMLInputElement).value = found.channel.id;
+      (document.getElementById('moveChannelSourceGroupId') as HTMLInputElement).value = found.group.id;
       new Modal(document.getElementById('moveChannelModal')!).show();
     });
   });
@@ -287,9 +324,12 @@ function renderEditorChannels(): void {
   list.querySelectorAll('.editor-copy-url-btn').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      const ch = allChannels.find((c) => c.id === (btn as HTMLElement).dataset.chid);
-      if (!ch?.url) return;
-      navigator.clipboard.writeText(ch.url).then(() => {
+      const found = findEditorChannel(
+        (btn as HTMLElement).dataset.groupId,
+        (btn as HTMLElement).dataset.chid,
+      );
+      if (!found?.channel.url) return;
+      navigator.clipboard.writeText(found.channel.url).then(() => {
         flashButtonIcon(btn, 'fas fa-check');
       }).catch(() => toast('Copy failed', 'danger'));
     });
@@ -299,7 +339,8 @@ function renderEditorChannels(): void {
     channelSortable.destroy();
     channelSortable = null;
   }
-  if (!editorChannelFilter.trim()) {
+  if (!isFiltering && selectedGroup) {
+    const allChannels = selectedGroup.channels || [];
     channelSortable = new Sortable(list as HTMLElement, {
       handle: '.drag-handle',
       animation: 150,
@@ -309,7 +350,7 @@ function renderEditorChannels(): void {
         const newOrder = [...list.querySelectorAll('.editor-channel-item')].map(
           (el) => (el as HTMLElement).dataset.chId,
         );
-        group.channels = newOrder
+        selectedGroup.channels = newOrder
           .map((id) => allChannels.find((c) => c.id === id))
           .filter((c): c is MergedChannel => !!c);
         editorDirty = true;
@@ -400,7 +441,8 @@ document.getElementById('editorRefreshAllBtn')?.addEventListener('click', async 
 document.getElementById('editorExportBtn')?.addEventListener('click', async () => {
   const btn = document.getElementById('editorExportBtn') as HTMLButtonElement | null;
   if (!btn) return;
-  const exportUrl = new URL('/api/all-playlists/export.m3u', window.location.origin).toString();
+  const exportUrl = btn.dataset.exportUrl
+    || new URL('/api/all-playlists/export.m3u', window.location.origin).toString();
   try {
     await navigator.clipboard.writeText(exportUrl);
     flashButtonIcon(btn, 'fas fa-check');
@@ -486,10 +528,11 @@ document.getElementById('confirmAddChannelBtn')?.addEventListener('click', () =>
 
 document.getElementById('confirmMoveChannelBtn')?.addEventListener('click', () => {
   const chid      = (document.getElementById('moveChannelIdInput')      as HTMLInputElement).value;
+  const sourceGid = (document.getElementById('moveChannelSourceGroupId') as HTMLInputElement).value;
   const targetGid = (document.getElementById('moveChannelTargetSelect') as HTMLSelectElement).value;
   if (!chid || !targetGid) return;
 
-  const srcGroup = editorGroups.find((g) => g.id === editorSelectedGroupId);
+  const srcGroup = editorGroups.find((g) => g.id === sourceGid);
   const tgtGroup = editorGroups.find((g) => g.id === targetGid);
   if (!srcGroup || !tgtGroup) return;
 

@@ -1183,6 +1183,22 @@ textarea.form-control {
   background: rgba(248, 81, 73, 0.2);
 }
 
+.editor-filter-group-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0.8rem 0.35rem 0.4rem;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #8b949e;
+  text-transform: uppercase;
+}
+
+.editor-filter-group-label:first-child {
+  margin-top: 0.2rem;
+}
+
 .editor-group-item:hover,
 .editor-channel-item:hover {
   border-color: #444c56;
@@ -1573,6 +1589,12 @@ textarea.form-control {
   font-size: 0.78rem;
   color: #8b949e;
   line-height: 1.4;
+}
+
+.settings-number-input {
+  width: 96px;
+  flex-shrink: 0;
+  text-align: right;
 }
 
 /* ── Channel context menu ──────────────────────────────────────────────────── */

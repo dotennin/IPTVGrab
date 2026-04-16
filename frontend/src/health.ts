@@ -92,6 +92,11 @@ export function updateHealthDots(): void {
   }
 }
 
+export function upsertHealthEntry(url: string, entry: HealthEntry): void {
+  healthCache[url] = entry;
+  updateHealthDots();
+}
+
 function _updateHealthProgress(data: { running: boolean; done: number; total: number }): void {
   const badge = document.getElementById('healthProgressBadge');
   const text = document.getElementById('healthProgressText');
@@ -111,7 +116,6 @@ export function startHealthPoll(): void {
       const res = await apiFetch('/api/health-check');
       if (!res.ok) return;
       const data = await res.json();
-      debugger
       healthCache = data.cache || {};
       _updateHealthProgress(data);
       updateHealthDots();

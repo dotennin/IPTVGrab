@@ -3,6 +3,7 @@ import mpegts from 'mpegts.js';
 import Plyr from 'plyr';
 import 'plyr/dist/plyr.css';
 import { apiFetch } from './api';
+import { upsertHealthEntry } from './health';
 import { esc, formatDuration, toast } from './utils';
 import { settings } from './settings';
 import { Modal } from './bootstrap-shim';
@@ -10,6 +11,8 @@ import { addTaskCard, startPolling, currentRequest } from './tasks';
 import type { StreamInfo, Channel } from './types';
 
 export let currentStreamInfo: StreamInfo | null = null;
+let _currentPreviewHealthUrl: string | null = null;
+let _reportedPreviewInvalid = false;
 
 
 
@@ -334,6 +337,22 @@ function _originalUrl(url: string): string {
   return url;
 }
 
+async function _markCurrentPreviewInvalid(): Promise<void> {
+  const url = _currentPreviewHealthUrl;
+  if (!url || _reportedPreviewInvalid) return;
+  _reportedPreviewInvalid = true;
+  upsertHealthEntry(url, { status: 'invalid', checked_at: Date.now() / 1000 });
+  try {
+    await apiFetch('/api/health-check/invalid', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    });
+  } catch (error) {
+    console.warn('failed to persist invalid health state', error);
+  }
+}
+
 function _stopTranscodeSession(): void {
   if (_transcodeSessionId) {
     const id = _transcodeSessionId;
@@ -370,6 +389,8 @@ playerQualitySelect?.addEventListener('change', () => {
 export async function openHLSPlayer(url: string, title = '', isLive = false): Promise<void> {
   setPreviewTitle(title ? esc(title) : 'Watch');
   _currentPreviewTaskId = null;
+  _currentPreviewHealthUrl = _originalUrl(url);
+  _reportedPreviewInvalid = false;
   if (clipToggleBar) clipToggleBar.classList.add('d-none');
   _hidePlayerQuality();
   _destroyPlayers();
@@ -427,6 +448,7 @@ function _loadMpegtsPlayer(url: string, isLive = false): void {
       if (isLive && isEarlyEof) {
         _reconnectTimer = setTimeout(_createInstance, 1000);
       } else {
+        void _markCurrentPreviewInvalid();
         const msg = (errorInfo && errorInfo.msg) || errorDetail || errorType || 'unknown';
         toast('Stream error: ' + msg, 'danger');
       }
@@ -461,6 +483,7 @@ function _loadHlsPlayer(url: string, isLive = false): void {
     });
     hlsInstance.on(Hls.Events.ERROR, (_evt, data) => {
       if (!data.fatal) return;
+      void _markCurrentPreviewInvalid();
       toast('Stream error: ' + (data.details || 'unknown'), 'danger');
     });
   } else if (previewVideo.canPlayType('application/vnd.apple.mpegurl')) {
@@ -474,6 +497,8 @@ function _loadHlsPlayer(url: string, isLive = false): void {
 export function openPreviewDirect(url: string, taskId: string | null = null): void {
   setPreviewTitle('Preview');
   _currentPreviewTaskId = taskId;
+  _currentPreviewHealthUrl = null;
+  _reportedPreviewInvalid = false;
   if (clipToggleBar) clipToggleBar.classList.toggle('d-none', !taskId);
   _hidePlayerQuality();
   if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
@@ -486,6 +511,8 @@ export function openPreviewDirect(url: string, taskId: string | null = null): vo
 export function openPreview(taskId: string): void {
   setPreviewTitle('Preview');
   _currentPreviewTaskId = taskId;
+  _currentPreviewHealthUrl = null;
+  _reportedPreviewInvalid = false;
   if (clipToggleBar) clipToggleBar.classList.toggle('d-none', !taskId);
   _hidePlayerQuality();
   if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
@@ -518,10 +545,19 @@ previewModalEl.addEventListener('hidden.bs.modal', () => {
   previewVideo.load();
   deactivateClipMode();
   _currentPreviewTaskId = null;
+  _currentPreviewHealthUrl = null;
+  _reportedPreviewInvalid = false;
   // Reset TV channel context
   _channelList = [];
   _channelIndex = -1;
   _hideChOsd();
+});
+
+previewVideo.addEventListener('error', () => {
+  if (!isPreviewVisible() || !_currentPreviewHealthUrl || _reportedPreviewInvalid) return;
+  if (previewVideo.error?.code === 1) return;
+  void _markCurrentPreviewInvalid();
+  toast('Stream error: media playback failed', 'danger');
 });
 
 // ── Channel D-pad switching ────────────────────────────────────────────────────

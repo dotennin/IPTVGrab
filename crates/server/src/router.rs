@@ -17,7 +17,7 @@ use tracing::info;
 use crate::auth::auth_middleware;
 use crate::handlers::{
     clip::{clip_task, complete_local_merge},
-    health::{get_health_check, post_health_check},
+    health::{get_health_check, mark_invalid_health, post_health_check},
     merged::{
         add_custom_channel, add_custom_group, delete_custom_channel, delete_custom_group,
         edit_custom_channel, export_m3u, get_all_playlists, put_all_playlists,
@@ -247,6 +247,7 @@ pub(crate) fn build_api_router() -> Router<AppState> {
             "/api/health-check",
             get(get_health_check).post(post_health_check),
         )
+        .route("/api/health-check/invalid", post(mark_invalid_health))
         .route("/api/watch/transcode", post(start_transcode))
         .route("/api/watch/transcode/:id/index.m3u8", get(transcode_playlist))
         .route("/api/watch/transcode/:id/:seg", get(transcode_segment))
@@ -518,6 +519,119 @@ mod tests {
         assert!(response.status().is_success());
         let recents = response.json::<Vec<serde_json::Value>>().await.unwrap();
         assert!(recents.is_empty());
+
+        server.stop().await.unwrap();
+        let _ = std::fs::remove_dir_all(&tmpdir);
+    }
+
+    #[tokio::test]
+    async fn app_settings_round_trip_includes_recent_limit() {
+        let tmpdir = std::env::temp_dir()
+            .join(format!("m3u8-server-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&tmpdir).unwrap();
+        let server = spawn_test_server(&tmpdir).await;
+        let client = reqwest::Client::new();
+
+        let patch = client
+            .patch(format!("{}/api/settings", server.base_url()))
+            .json(&json!({ "recent_limit": 12 }))
+            .send()
+            .await
+            .unwrap();
+        assert!(patch.status().is_success());
+        let patched = patch.json::<serde_json::Value>().await.unwrap();
+        assert_eq!(patched["recent_limit"], 12);
+
+        let get = client
+            .get(format!("{}/api/settings", server.base_url()))
+            .send()
+            .await
+            .unwrap();
+        assert!(get.status().is_success());
+        let current = get.json::<serde_json::Value>().await.unwrap();
+        assert_eq!(current["recent_limit"], 12);
+
+        server.stop().await.unwrap();
+        let _ = std::fs::remove_dir_all(&tmpdir);
+    }
+
+    #[tokio::test]
+    async fn recents_respect_recent_limit_setting() {
+        let tmpdir = std::env::temp_dir()
+            .join(format!("m3u8-server-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&tmpdir).unwrap();
+        let server = spawn_test_server(&tmpdir).await;
+        let client = reqwest::Client::new();
+
+        let patch = client
+            .patch(format!("{}/api/settings", server.base_url()))
+            .json(&json!({ "recent_limit": 2 }))
+            .send()
+            .await
+            .unwrap();
+        assert!(patch.status().is_success());
+
+        for (name, url) in [
+            ("One", "https://example.com/one.m3u8"),
+            ("Two", "https://example.com/two.m3u8"),
+            ("Three", "https://example.com/three.m3u8"),
+        ] {
+            let response = client
+                .post(format!("{}/api/recents", server.base_url()))
+                .json(&json!({
+                    "name": name,
+                    "url": url,
+                    "tvg_logo": "",
+                    "group": "Test"
+                }))
+                .send()
+                .await
+                .unwrap();
+            assert!(response.status().is_success());
+        }
+
+        let response = client
+            .get(format!("{}/api/recents", server.base_url()))
+            .send()
+            .await
+            .unwrap();
+        assert!(response.status().is_success());
+        let recents = response.json::<Vec<serde_json::Value>>().await.unwrap();
+        assert_eq!(recents.len(), 2);
+        assert_eq!(recents[0]["url"], "https://example.com/three.m3u8");
+        assert_eq!(recents[1]["url"], "https://example.com/two.m3u8");
+
+        server.stop().await.unwrap();
+        let _ = std::fs::remove_dir_all(&tmpdir);
+    }
+
+    #[tokio::test]
+    async fn mark_invalid_updates_health_cache() {
+        let tmpdir = std::env::temp_dir()
+            .join(format!("m3u8-server-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&tmpdir).unwrap();
+        let server = spawn_test_server(&tmpdir).await;
+        let client = reqwest::Client::new();
+
+        let response = client
+            .post(format!("{}/api/health-check/invalid", server.base_url()))
+            .json(&json!({ "url": "http://example.com/live.m3u8" }))
+            .send()
+            .await
+            .unwrap();
+        assert!(response.status().is_success());
+
+        let state = client
+            .get(format!("{}/api/health-check", server.base_url()))
+            .send()
+            .await
+            .unwrap();
+        assert!(state.status().is_success());
+        let payload = state.json::<serde_json::Value>().await.unwrap();
+        assert_eq!(
+            payload["cache"]["http://example.com/live.m3u8"]["status"],
+            "invalid"
+        );
 
         server.stop().await.unwrap();
         let _ = std::fs::remove_dir_all(&tmpdir);

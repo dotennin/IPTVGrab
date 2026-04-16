@@ -168,6 +168,8 @@ document.getElementById('parseBtn')?.addEventListener('click', async () => {
     if (toggle) toggle.checked = settings.useProxy;
     const toggleHealth = document.getElementById('settingHealthOnly') as HTMLInputElement | null;
     if (toggleHealth) toggleHealth.checked = settings.healthOnlyFilter;
+    const recentLimitInput = document.getElementById('settingRecentLimit') as HTMLInputElement | null;
+    if (recentLimitInput) recentLimitInput.value = String(settings.recentLimit);
     settingsModal.show();
   });
 
@@ -183,6 +185,16 @@ document.getElementById('parseBtn')?.addEventListener('click', async () => {
     const qToggle = document.getElementById('healthOnlyCheck') as HTMLInputElement | null;
     if (qToggle) qToggle.checked = value;
     void saveSettings({ healthOnlyFilter: value });
+  });
+
+  document.getElementById('settingRecentLimit')?.addEventListener('change', (e) => {
+    const input = e.target as HTMLInputElement;
+    const parsed = Number.parseInt(input.value || '', 10);
+    const value = Number.isFinite(parsed) ? Math.min(200, Math.max(1, parsed)) : settings.recentLimit;
+    input.value = String(value);
+    void saveSettings({ recentLimit: value }).then(() => {
+      renderRecentChannels();
+    });
   });
 })();
 

@@ -120,6 +120,7 @@ export interface StreamInfo {
 export interface Settings {
   useProxy: boolean;
   healthOnlyFilter: boolean;
+  recentLimit: number;
 }
 
 export interface RecentChannel {

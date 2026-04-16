@@ -3,30 +3,12 @@ import { apiFetch } from './api';
 import { _healthDot } from './health';
 import { setChannelContext } from './player';
 import { watchChannel, showChannelContextMenu } from './playlists';
+import { settings } from './settings';
 import type { RecentChannel, Channel } from './types';
 import { toast } from './utils';
 
-export const RECENT_KEY = 'mn_recent_channels';
-const MAX_RECENT = 20;
 let recentCache: RecentChannel[] = [];
 let renderToken = 0;
-
-function _loadRecents(): RecentChannel[] {
-  try {
-    const raw = JSON.parse(localStorage.getItem(RECENT_KEY) || '[]');
-    if (!Array.isArray(raw)) return [];
-    return raw
-      .map((item) => _normalizeRecent(item))
-      .filter((item): item is RecentChannel => !!item)
-      .slice(0, MAX_RECENT);
-  } catch {
-    return [];
-  }
-}
-
-function _saveRecents(list: RecentChannel[]): void {
-  try { localStorage.setItem(RECENT_KEY, JSON.stringify(list)); } catch { /* ignore */ }
-}
 
 function _normalizeRecent(item: unknown): RecentChannel | null {
   if (!item || typeof item !== 'object') return null;
@@ -51,9 +33,9 @@ function _recentPayload(ch: Channel & { tvg_logo?: string }): Record<string, str
   };
 }
 
-function _cacheRecents(list: RecentChannel[]): void {
-  recentCache = list.slice(0, MAX_RECENT);
-  _saveRecents(recentCache);
+function _cacheRecents(list: RecentChannel[]): RecentChannel[] {
+  recentCache = list.slice(0, settings.recentLimit);
+  return recentCache;
 }
 
 async function _fetchServerRecents(): Promise<RecentChannel[]> {
@@ -66,7 +48,7 @@ async function _fetchServerRecents(): Promise<RecentChannel[]> {
     ? data
       .map((item) => _normalizeRecent(item))
       .filter((item): item is RecentChannel => !!item)
-      .slice(0, MAX_RECENT)
+      .slice(0, settings.recentLimit)
     : [];
 }
 
@@ -100,22 +82,9 @@ async function _deleteRecent(id: string): Promise<void> {
 
 async function fetchRecents(): Promise<RecentChannel[]> {
   try {
-    let recents = await _fetchServerRecents();
-    if (!recents.length) {
-      const legacy = _loadRecents();
-      if (legacy.length) {
-        for (const ch of [...legacy].reverse()) {
-          await _postRecent(ch as unknown as Channel & { tvg_logo?: string });
-        }
-        recents = await _fetchServerRecents();
-      }
-    }
-    _cacheRecents(recents);
-    return recents;
+    return _cacheRecents(await _fetchServerRecents());
   } catch {
-    const fallback = _loadRecents();
-    recentCache = fallback;
-    return fallback;
+    return recentCache.slice(0, settings.recentLimit);
   }
 }
 
@@ -124,17 +93,6 @@ async function persistRecent(ch: Channel & { tvg_logo?: string }): Promise<void>
     const recent = await _postRecent(ch);
     _cacheRecents([recent, ...recentCache.filter((item) => item.id !== recent.id)]);
   } catch (error) {
-    const fallback = _loadRecents().filter((item) => item.url !== ch.url);
-    fallback.unshift({
-      id: ch.url,
-      name: ch.name || ch.url,
-      url: ch.url,
-      tvg_logo: ch.tvg_logo || '',
-      group: ch.group || '',
-      watched_at: Date.now(),
-    });
-    if (fallback.length > MAX_RECENT) fallback.length = MAX_RECENT;
-    _cacheRecents(fallback);
     toast((error as Error).message, 'warning');
   }
   renderRecentChannels();
@@ -145,7 +103,6 @@ async function removeRecent(id: string): Promise<void> {
     await _deleteRecent(id);
     _cacheRecents(recentCache.filter((item) => item.id !== id));
   } catch (error) {
-    _cacheRecents(_loadRecents().filter((item) => item.id !== id));
     toast((error as Error).message, 'warning');
   }
   renderRecentChannels();
@@ -219,7 +176,6 @@ document.getElementById('clearRecentBtn')?.addEventListener('click', () => {
       }
       _cacheRecents([]);
     } catch (error) {
-      _cacheRecents([]);
       toast((error as Error).message, 'warning');
     }
     renderRecentChannels();

@@ -135,6 +135,7 @@ pub(crate) struct HealthEntry {
 }
 
 fn default_true() -> bool { true }
+fn default_recent_limit() -> usize { 20 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct AppSettings {
@@ -142,11 +143,13 @@ pub(crate) struct AppSettings {
     pub(crate) use_proxy: bool,
     #[serde(default = "default_true")]
     pub(crate) health_only_filter: bool,
+    #[serde(default = "default_recent_limit")]
+    pub(crate) recent_limit: usize,
 }
 
 impl Default for AppSettings {
     fn default() -> Self {
-        Self { use_proxy: true, health_only_filter: true }
+        Self { use_proxy: true, health_only_filter: true, recent_limit: default_recent_limit() }
     }
 }
 
@@ -172,6 +175,11 @@ pub(crate) struct WatchProxyQuery {
     /// Caller may pass `kind=flv` (learned from `/api/watch/probe`) to skip
     /// the initial content-type detection request.
     pub(crate) kind: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct MarkInvalidRequest {
+    pub(crate) url: String,
 }
 
 // ── Request/Response models ───────────────────────────────────────────────────

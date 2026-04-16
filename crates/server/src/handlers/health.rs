@@ -10,7 +10,7 @@ use serde::Deserialize;
 use tokio::sync::Semaphore;
 
 use crate::state::AppState;
-use crate::types::HealthEntry;
+use crate::types::{HealthEntry, MarkInvalidRequest};
 
 pub(crate) async fn get_health_check(State(state): State<AppState>) -> impl IntoResponse {
     let hs = state.health_state.read().await.clone();
@@ -123,6 +123,41 @@ pub(crate) async fn post_health_check(
     };
     trigger_health_check(state, urls, query.deep).await;
     Json(serde_json::json!({"ok": true, "total": total, "deep": query.deep})).into_response()
+}
+
+fn now_ts() -> f64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs_f64()
+}
+
+pub(crate) async fn mark_invalid_health(
+    State(state): State<AppState>,
+    Json(body): Json<MarkInvalidRequest>,
+) -> impl IntoResponse {
+    let url = body.url.trim();
+    if url.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"detail":"url is required"})),
+        )
+            .into_response();
+    }
+
+    {
+        let mut cache = state.health_cache.write().await;
+        cache.insert(
+            url.to_string(),
+            HealthEntry {
+                status: "invalid".into(),
+                checked_at: now_ts(),
+                latency_ms: None,
+            },
+        );
+    }
+    state.save_health_cache().await;
+    Json(serde_json::json!({"ok": true})).into_response()
 }
 
 /// Quick reachability check: any HTTP 2xx/3xx response = "ok".
@@ -239,4 +274,3 @@ fn build_client(timeout_secs: u64) -> reqwest::Client {
         .build()
         .unwrap_or_default()
 }
-

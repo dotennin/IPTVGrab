@@ -9,6 +9,7 @@ pub(crate) async fn get_settings(State(state): State<AppState>) -> impl IntoResp
     Json(serde_json::json!({
         "use_proxy": s.use_proxy,
         "health_only_filter": s.health_only_filter,
+        "recent_limit": s.recent_limit,
     }))
     .into_response()
 }
@@ -17,6 +18,7 @@ pub(crate) async fn get_settings(State(state): State<AppState>) -> impl IntoResp
 pub(crate) struct PatchSettings {
     pub(crate) use_proxy: Option<bool>,
     pub(crate) health_only_filter: Option<bool>,
+    pub(crate) recent_limit: Option<usize>,
 }
 
 /// PATCH /api/settings — merge-update settings and persist.
@@ -32,6 +34,9 @@ pub(crate) async fn patch_settings(
         if let Some(v) = body.health_only_filter {
             s.health_only_filter = v;
         }
+        if let Some(v) = body.recent_limit {
+            s.recent_limit = v.clamp(1, 200);
+        }
     }
     state.save_app_settings().await;
     let s = state.app_settings.read().await;
@@ -40,6 +45,7 @@ pub(crate) async fn patch_settings(
         Json(serde_json::json!({
             "use_proxy": s.use_proxy,
             "health_only_filter": s.health_only_filter,
+            "recent_limit": s.recent_limit,
         })),
     )
         .into_response()

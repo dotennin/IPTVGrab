@@ -13,9 +13,12 @@ async function initAuth(): Promise<void> {
         if (tr.ok) {
           const { token } = await tr.json();
           if (token) {
-            const exportBtn = document.getElementById('editorExportBtn') as HTMLAnchorElement | null;
+            const exportBtn = document.getElementById('editorExportBtn') as HTMLButtonElement | null;
             if (exportBtn) {
-              exportBtn.href = `/api/all-playlists/export.m3u?token=${encodeURIComponent(token)}`;
+              exportBtn.dataset.exportUrl = new URL(
+                `/api/all-playlists/export.m3u?token=${encodeURIComponent(token)}`,
+                window.location.origin,
+              ).toString();
             }
           }
         }

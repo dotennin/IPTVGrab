@@ -11,8 +11,6 @@ use sha2::{Digest, Sha256};
 use crate::state::AppState;
 use crate::types::{AddRecentRequest, RecentChannel};
 
-const MAX_RECENTS: usize = 20;
-
 fn recent_id(url: &str) -> String {
     let mut h = Sha256::new();
     h.update(url);
@@ -53,6 +51,11 @@ pub(crate) async fn add_recent(
         watched_at: now_ts(),
     };
 
+    let recent_limit = {
+        let settings = state.app_settings.read().await;
+        settings.recent_limit
+    };
+
     {
         let mut recents = state.recents.write().await;
         recents.retain(|existing| existing.id != item.id);
@@ -62,8 +65,8 @@ pub(crate) async fn add_recent(
                 .partial_cmp(&a.watched_at)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
-        if recents.len() > MAX_RECENTS {
-            recents.truncate(MAX_RECENTS);
+        if recents.len() > recent_limit {
+            recents.truncate(recent_limit);
         }
     }
 
