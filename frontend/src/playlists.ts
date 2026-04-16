@@ -88,11 +88,11 @@ export async function loadPlaylists({ autoSelect = false } = {}): Promise<void> 
       opt.textContent = `${pl.name} (${pl.channel_count})`;
       sel.appendChild(opt);
     }
-    if (prev && [...sel.options].some((o) => o.value === prev)) {
-      sel.value = prev;
-    } else if (autoSelect && list.length > 0 && !currentPlaylist) {
+    if (autoSelect && list.length > 0) {
       sel.value = '__all__';
       await selectPlaylist('__all__');
+    } else if (prev && [...sel.options].some((o) => o.value === prev)) {
+      sel.value = prev;
     }
   } catch { /* ignore */ }
 }

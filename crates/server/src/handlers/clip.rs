@@ -183,16 +183,58 @@ pub(crate) async fn clip_task(
                     let _ = f.write_all(&std::fs::read(sf).unwrap_or_default());
                 }
             }
-            vec![
+
+            // Check for separate audio rendition in tmpdir/audio/
+            let audio_dir = tmpdir.join("audio");
+            let raw_audio_path: Option<std::path::PathBuf> = if audio_dir.is_dir() {
+                let mut audio_segs: Vec<_> = std::fs::read_dir(&audio_dir)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|e| e.ok().map(|e| e.path()))
+                    .filter(|p| p.extension().and_then(|e| e.to_str()) == Some(&seg_ext as &str))
+                    .collect();
+                audio_segs.sort();
+                if !audio_segs.is_empty() {
+                    let p = tmpdir.join("clip_raw_audio.mp4");
+                    if let Ok(mut f) = std::fs::File::create(&p) {
+                        use std::io::Write;
+                        let audio_init = audio_dir.join("init.mp4");
+                        if audio_init.exists() {
+                            let _ = f.write_all(&std::fs::read(&audio_init).unwrap_or_default());
+                        }
+                        for sf in &audio_segs {
+                            let _ = f.write_all(&std::fs::read(sf).unwrap_or_default());
+                        }
+                    }
+                    Some(p)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            let mut args: Vec<String> = vec![
                 "-y".into(),
                 "-ss".into(), body.start.to_string(),
                 "-i".into(), raw_path.to_string_lossy().to_string(),
+            ];
+            if let Some(ref ap) = raw_audio_path {
+                args.extend([
+                    "-i".into(), ap.to_string_lossy().to_string(),
+                    "-map".into(), "0:v".into(),
+                    "-map".into(), "1:a".into(),
+                ]);
+            } else {
+                args.extend(["-map".into(), "0".into()]);
+            }
+            args.extend([
                 "-t".into(), duration.to_string(),
-                "-map".into(), "0".into(),
                 "-avoid_negative_ts".into(), "make_zero".into(),
                 "-c".into(), "copy".into(),
                 clip_path_str,
-            ]
+            ]);
+            args
         } else {
             let mut seg_files: Vec<_> = std::fs::read_dir(&tmpdir)
                 .into_iter()
@@ -217,18 +259,63 @@ pub(crate) async fn clip_task(
                 })
                 .collect();
             let _ = std::fs::write(&list_file, &list_content);
-            vec![
+
+            // Check for separate audio rendition in tmpdir/audio/
+            let audio_dir = tmpdir.join("audio");
+            let audio_list_file: Option<std::path::PathBuf> = if audio_dir.is_dir() {
+                let mut audio_segs: Vec<_> = std::fs::read_dir(&audio_dir)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|e| e.ok().map(|e| e.path()))
+                    .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("ts"))
+                    .collect();
+                audio_segs.sort();
+                if !audio_segs.is_empty() {
+                    let lf = tmpdir.join("clip_audio_concat.txt");
+                    let lc: String = audio_segs
+                        .iter()
+                        .map(|p| {
+                            let abs = std::fs::canonicalize(p).unwrap_or_else(|_| p.clone());
+                            format!("file '{}'\n", abs.display())
+                        })
+                        .collect();
+                    let _ = std::fs::write(&lf, &lc);
+                    Some(lf)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            let mut args: Vec<String> = vec![
                 "-y".into(),
                 "-f".into(), "concat".into(),
                 "-safe".into(), "0".into(),
                 "-i".into(), list_file.to_string_lossy().to_string(),
+            ];
+            if let Some(ref alf) = audio_list_file {
+                args.extend([
+                    "-f".into(), "concat".into(),
+                    "-safe".into(), "0".into(),
+                    "-i".into(), alf.to_string_lossy().to_string(),
+                ]);
+            }
+            args.extend([
                 "-ss".into(), body.start.to_string(),
                 "-t".into(), duration.to_string(),
-                "-map".into(), "0".into(),
+            ]);
+            if audio_list_file.is_some() {
+                args.extend(["-map".into(), "0:v".into(), "-map".into(), "1:a".into()]);
+            } else {
+                args.extend(["-map".into(), "0".into()]);
+            }
+            args.extend([
                 "-avoid_negative_ts".into(), "make_zero".into(),
                 "-c".into(), "copy".into(),
                 clip_path_str,
-            ]
+            ]);
+            args
         };
         (clip_name, args)
     };
