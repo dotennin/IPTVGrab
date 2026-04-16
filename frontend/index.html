@@ -428,9 +428,9 @@
             <button class="inline-flex items-center px-2 py-1 border border-[#388bfd]/60 text-gh-blue-light hover:bg-[#388bfd]/10 rounded text-sm transition-colors" id="editorRefreshAllBtn" title="Refresh all sources">
               <i class="fas fa-sync-alt mr-1"></i>Refresh All
             </button>
-            <a class="inline-flex items-center px-2 py-1 border border-[#3fb950]/60 text-gh-green hover:bg-[#3fb950]/10 rounded text-sm transition-colors" id="editorExportBtn" href="/api/all-playlists/export.m3u" target="_blank">
-              <i class="fas fa-file-export mr-1"></i>Export M3U
-            </a>
+            <button type="button" class="inline-flex items-center px-2 py-1 border border-[#3fb950]/60 text-gh-green hover:bg-[#3fb950]/10 rounded text-sm transition-colors" id="editorExportBtn" title="Copy M3U export URL">
+              <i class="fas fa-link mr-1"></i>Copy M3U Url
+            </button>
             <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
           </div>
         </div>
@@ -456,9 +456,20 @@
                 <i class="fas fa-plus mr-1"></i>Add Channel
               </button>
             </div>
+            <div class="editor-filter-row d-none" id="editorChannelFilterRow">
+              <div class="editor-filter-input-wrap">
+                <i class="fas fa-search editor-filter-icon"></i>
+                <input type="search" id="editorChannelFilterInput" class="editor-filter-input" placeholder="Filter channels by name, URL, or source">
+              </div>
+              <button type="button" class="editor-filter-clear-btn d-none" id="editorChannelFilterClearBtn">Clear</button>
+            </div>
             <div class="text-center text-gh-muted py-16" id="editorChannelPlaceholder">
               <i class="fas fa-arrow-left fa-2x mb-2 d-block opacity-25"></i>
               <p class="mb-0 text-sm">Select a group to edit channels</p>
+            </div>
+            <div class="text-center text-gh-muted py-12 d-none" id="editorChannelEmptyState">
+              <i class="fas fa-search fa-2x mb-2 d-block opacity-25"></i>
+              <p class="mb-0 text-sm">No channels match the current filter</p>
             </div>
             <div id="editorChannelList" class="editor-sortable-list d-none"></div>
           </div>

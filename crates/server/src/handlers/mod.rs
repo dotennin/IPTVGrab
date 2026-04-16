@@ -2,6 +2,7 @@ pub(crate) mod clip;
 pub(crate) mod health;
 pub(crate) mod merged;
 pub(crate) mod playlists;
+pub(crate) mod recents;
 pub(crate) mod settings;
 pub(crate) mod tasks;
 pub(crate) mod transcode;

@@ -13,6 +13,9 @@ import type { Channel } from './types';
 export interface ChannelCardOptions {
   /** Show the playlist_name tag (merged / all-playlists view) */
   showPlaylistTag?: boolean;
+  hideHealthDot?: boolean;
+  topLeftContent?: string;
+  topRightContent?: string;
 }
 
 export type OnWatchFn       = (ch: Channel, idx: number) => void;
@@ -32,6 +35,8 @@ export function renderChannelCard(
   opts: ChannelCardOptions = {},
 ): string {
   const chJson = esc(JSON.stringify(ch));
+  const classes = ['channel-card'];
+  if (opts.topLeftContent || opts.topRightContent) classes.push('channel-card-has-corners');
   const logo = ch.tvg_logo
     ? `<img src="${esc(ch.tvg_logo)}" class="channel-logo" alt=""
            onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" />
@@ -39,14 +44,16 @@ export function renderChannelCard(
     : `<div class="channel-logo-fallback"><i class="fas fa-tv"></i></div>`;
 
   return `
-    <div class="channel-card" id="channel-${ch.id || i}"
+    <div class="${classes.join(' ')}" id="channel-${ch.id || i}"
          tabindex="0" role="button"
          aria-label="${esc(ch.name || ch.url)}"
          data-ch-json="${chJson}">
-      ${_healthDot(ch.url)}
-      <div class="channel-logo-wrap">${logo}</div>
-      <div class="channel-name" title="${esc(ch.name)}">${esc(ch.name || ch.url)}</div>
-      ${ch.group ? `<div class="channel-group">${esc(ch.group)}</div>` : ''}
+       ${opts.hideHealthDot ? '' : _healthDot(ch.url)}
+       ${opts.topLeftContent ? `<div class="channel-card-corner channel-card-corner-left">${opts.topLeftContent}</div>` : ''}
+       ${opts.topRightContent ? `<div class="channel-card-corner channel-card-corner-right">${opts.topRightContent}</div>` : ''}
+       <div class="channel-logo-wrap">${logo}</div>
+       <div class="channel-name" title="${esc(ch.name)}">${esc(ch.name || ch.url)}</div>
+       ${ch.group ? `<div class="channel-group">${esc(ch.group)}</div>` : ''}
       ${opts.showPlaylistTag && ch.playlist_name
         ? `<div class="channel-playlist-tag" title="${esc(ch.playlist_name)}">${esc(ch.playlist_name)}</div>`
         : ''}
@@ -93,7 +100,7 @@ export function bindChannelGrid(
 
     // Card body click (not action buttons) → watch WITHOUT auto-fullscreen
     card.addEventListener('click', (e) => {
-      if ((e.target as Element).closest('.channel-actions')) return;
+      if ((e.target as Element).closest('.channel-actions, .channel-card-corner')) return;
       opts.onWatch(ch, i);
     });
 

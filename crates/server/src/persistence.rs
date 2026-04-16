@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::types::{AppSettings, HealthEntry, MergedConfig, SavedPlaylist, Task};
+use crate::types::{AppSettings, HealthEntry, MergedConfig, RecentChannel, SavedPlaylist, Task};
 
 // ── Load persisted state ───────────────────────────────────────────────────────
 
@@ -26,6 +26,14 @@ pub(crate) fn load_playlists(dir: &Path) -> HashMap<String, SavedPlaylist> {
     let path = dir.join("playlists.json");
     let Ok(content) = std::fs::read_to_string(&path) else {
         return HashMap::new();
+    };
+    serde_json::from_str(&content).unwrap_or_default()
+}
+
+pub(crate) fn load_recents(dir: &Path) -> Vec<RecentChannel> {
+    let path = dir.join("recents.json");
+    let Ok(content) = std::fs::read_to_string(&path) else {
+        return Vec::new();
     };
     serde_json::from_str(&content).unwrap_or_default()
 }

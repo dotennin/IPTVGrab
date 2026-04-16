@@ -1,51 +1,193 @@
 import { renderChannelCard, bindChannelGrid } from './channel-card';
+import { apiFetch } from './api';
+import { _healthDot } from './health';
 import { setChannelContext } from './player';
 import { watchChannel, showChannelContextMenu } from './playlists';
 import type { RecentChannel, Channel } from './types';
+import { toast } from './utils';
 
 export const RECENT_KEY = 'mn_recent_channels';
 const MAX_RECENT = 20;
+let recentCache: RecentChannel[] = [];
+let renderToken = 0;
 
 function _loadRecents(): RecentChannel[] {
-  try { return JSON.parse(localStorage.getItem(RECENT_KEY) || '[]'); } catch { return []; }
+  try {
+    const raw = JSON.parse(localStorage.getItem(RECENT_KEY) || '[]');
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .map((item) => _normalizeRecent(item))
+      .filter((item): item is RecentChannel => !!item)
+      .slice(0, MAX_RECENT);
+  } catch {
+    return [];
+  }
 }
 
 function _saveRecents(list: RecentChannel[]): void {
   try { localStorage.setItem(RECENT_KEY, JSON.stringify(list)); } catch { /* ignore */ }
 }
 
-export function addToRecents(ch: Channel & { tvg_logo?: string }): void {
-  const list = _loadRecents().filter((r) => r.url !== ch.url);
-  list.unshift({
-    name: ch.name,
+function _normalizeRecent(item: unknown): RecentChannel | null {
+  if (!item || typeof item !== 'object') return null;
+  const recent = item as Partial<RecentChannel>;
+  if (!recent.url || typeof recent.url !== 'string') return null;
+  return {
+    id: typeof recent.id === 'string' && recent.id ? recent.id : recent.url,
+    name: typeof recent.name === 'string' && recent.name ? recent.name : recent.url,
+    url: recent.url,
+    tvg_logo: typeof recent.tvg_logo === 'string' ? recent.tvg_logo : '',
+    group: typeof recent.group === 'string' ? recent.group : '',
+    watched_at: typeof recent.watched_at === 'number' ? recent.watched_at : Date.now(),
+  };
+}
+
+function _recentPayload(ch: Channel & { tvg_logo?: string }): Record<string, string> {
+  return {
+    name: ch.name || ch.url,
+    url: ch.url,
+    tvg_logo: ch.tvg_logo || '',
+    group: ch.group || '',
+  };
+}
+
+function _cacheRecents(list: RecentChannel[]): void {
+  recentCache = list.slice(0, MAX_RECENT);
+  _saveRecents(recentCache);
+}
+
+async function _fetchServerRecents(): Promise<RecentChannel[]> {
+  const response = await apiFetch('/api/recents');
+  const data = await response.json().catch(() => []);
+  if (!response.ok) {
+    throw new Error((data as { detail?: string }).detail || 'Failed to load recents');
+  }
+  return Array.isArray(data)
+    ? data
+      .map((item) => _normalizeRecent(item))
+      .filter((item): item is RecentChannel => !!item)
+      .slice(0, MAX_RECENT)
+    : [];
+}
+
+async function _postRecent(ch: Channel & { tvg_logo?: string }): Promise<RecentChannel> {
+  const response = await apiFetch('/api/recents', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify(_recentPayload(ch)),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error((data as { detail?: string }).detail || 'Failed to save recent');
+  }
+  return _normalizeRecent(data) || {
+    id: ch.url,
+    name: ch.name || ch.url,
     url: ch.url,
     tvg_logo: ch.tvg_logo || '',
     group: ch.group || '',
     watched_at: Date.now(),
-  });
-  if (list.length > MAX_RECENT) list.length = MAX_RECENT;
-  _saveRecents(list);
+  };
+}
+
+async function _deleteRecent(id: string): Promise<void> {
+  const response = await apiFetch(`/api/recents/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error((data as { detail?: string }).detail || 'Failed to delete recent');
+  }
+}
+
+async function fetchRecents(): Promise<RecentChannel[]> {
+  try {
+    let recents = await _fetchServerRecents();
+    if (!recents.length) {
+      const legacy = _loadRecents();
+      if (legacy.length) {
+        for (const ch of [...legacy].reverse()) {
+          await _postRecent(ch as unknown as Channel & { tvg_logo?: string });
+        }
+        recents = await _fetchServerRecents();
+      }
+    }
+    _cacheRecents(recents);
+    return recents;
+  } catch {
+    const fallback = _loadRecents();
+    recentCache = fallback;
+    return fallback;
+  }
+}
+
+async function persistRecent(ch: Channel & { tvg_logo?: string }): Promise<void> {
+  try {
+    const recent = await _postRecent(ch);
+    _cacheRecents([recent, ...recentCache.filter((item) => item.id !== recent.id)]);
+  } catch (error) {
+    const fallback = _loadRecents().filter((item) => item.url !== ch.url);
+    fallback.unshift({
+      id: ch.url,
+      name: ch.name || ch.url,
+      url: ch.url,
+      tvg_logo: ch.tvg_logo || '',
+      group: ch.group || '',
+      watched_at: Date.now(),
+    });
+    if (fallback.length > MAX_RECENT) fallback.length = MAX_RECENT;
+    _cacheRecents(fallback);
+    toast((error as Error).message, 'warning');
+  }
+  renderRecentChannels();
+}
+
+async function removeRecent(id: string): Promise<void> {
+  try {
+    await _deleteRecent(id);
+    _cacheRecents(recentCache.filter((item) => item.id !== id));
+  } catch (error) {
+    _cacheRecents(_loadRecents().filter((item) => item.id !== id));
+    toast((error as Error).message, 'warning');
+  }
+  renderRecentChannels();
+}
+
+export function addToRecents(ch: Channel & { tvg_logo?: string }): void {
+  void persistRecent(ch);
 }
 
 export function renderRecentChannels(): void {
-  const recents = _loadRecents();
-  const grid    = document.getElementById('recentChannelGrid');
-  const empty   = document.getElementById('recentEmptyState');
-  const badge   = document.getElementById('recentCountBadge');
-  if (badge) badge.textContent = String(recents.length);
-  if (!recents.length) {
-    if (grid) grid.innerHTML = '';
-    empty?.classList.remove('d-none');
-    return;
-  }
-  empty?.classList.add('d-none');
-  if (grid) {
+  const token = ++renderToken;
+  void (async () => {
+    const recents = await fetchRecents();
+    if (token !== renderToken) return;
+
+    const grid    = document.getElementById('recentChannelGrid');
+    const empty   = document.getElementById('recentEmptyState');
+    const badge   = document.getElementById('recentCountBadge');
+    if (badge) badge.textContent = String(recents.length);
+    if (!recents.length) {
+      if (grid) grid.innerHTML = '';
+      empty?.classList.remove('d-none');
+      return;
+    }
+
+    empty?.classList.add('d-none');
+    if (!grid) return;
+
     grid.innerHTML = recents
-      .map((ch, i) => renderChannelCard(ch as unknown as Channel, i))
+      .map((ch, i) => renderChannelCard(ch as unknown as Channel, i, {
+        hideHealthDot: true,
+        topLeftContent: _healthDot(ch.url),
+        topRightContent: `
+          <button class="recent-remove-btn" data-recent-id="${ch.id}" title="Remove from history" aria-label="Remove ${ch.name}">
+            <i class="fas fa-times"></i>
+          </button>`,
+      }))
       .join('');
+
     bindChannelGrid(grid, recents as unknown as Channel[], {
       onWatch: (ch, idx) => {
-        addToRecents(ch as unknown as RecentChannel & { tvg_logo?: string });
+        addToRecents(ch as Channel & { tvg_logo?: string });
         setChannelContext(recents as unknown as Channel[], idx);
         watchChannel(ch);
       },
@@ -56,10 +198,30 @@ export function renderRecentChannels(): void {
         showChannelContextMenu(ch as unknown as import('./types').MergedChannel, x, y);
       },
     });
-  }
+
+    grid.querySelectorAll<HTMLElement>('.recent-remove-btn').forEach((btn) => {
+      btn.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const id = btn.dataset.recentId;
+        if (!id) return;
+        void removeRecent(id);
+      });
+    });
+  })();
 }
 
 document.getElementById('clearRecentBtn')?.addEventListener('click', () => {
-  _saveRecents([]);
-  renderRecentChannels();
+  void (async () => {
+    const recents = await fetchRecents();
+    try {
+      for (const recent of recents) {
+        await _deleteRecent(recent.id);
+      }
+      _cacheRecents([]);
+    } catch (error) {
+      _cacheRecents([]);
+      toast((error as Error).message, 'warning');
+    }
+    renderRecentChannels();
+  })();
 });

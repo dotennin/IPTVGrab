@@ -58,6 +58,18 @@ pub(crate) struct Channel {
     pub(crate) tvg_type: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct RecentChannel {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) url: String,
+    #[serde(default)]
+    pub(crate) tvg_logo: String,
+    #[serde(default)]
+    pub(crate) group: String,
+    pub(crate) watched_at: f64,
+}
+
 pub(crate) fn bool_true() -> bool {
     true
 }
@@ -217,6 +229,16 @@ pub(crate) struct EditPlaylistRequest {
 #[derive(Deserialize)]
 pub(crate) struct AddGroupRequest {
     pub(crate) name: String,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct AddRecentRequest {
+    pub(crate) name: String,
+    pub(crate) url: String,
+    #[serde(default)]
+    pub(crate) tvg_logo: String,
+    #[serde(default)]
+    pub(crate) group: String,
 }
 
 #[derive(Deserialize)]

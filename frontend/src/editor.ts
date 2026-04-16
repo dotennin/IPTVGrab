@@ -11,9 +11,30 @@ let editorSelectedGroupId: string | null = null;
 let groupSortable: Sortable | null = null;
 let channelSortable: Sortable | null = null;
 let editorDirty = false;
+let editorChannelFilter = '';
+
+function flashButtonIcon(button: Element, nextClass: string): void {
+  const icon = button.querySelector('i');
+  if (!icon) return;
+  const originalClass = icon.className;
+  icon.className = nextClass;
+  window.setTimeout(() => {
+    icon.className = originalClass;
+  }, 1500);
+}
+
+function getFilteredEditorChannels(group: MergedGroup): MergedChannel[] {
+  const channels = group.channels || [];
+  const query = editorChannelFilter.trim().toLowerCase();
+  if (!query) return channels;
+  return channels.filter((ch) => [ch.name, ch.url, ch.source_playlist_name, group.name]
+    .filter(Boolean)
+    .some((value) => String(value).toLowerCase().includes(query)));
+}
 
 function openAllPlaylistsEditor(): void {
   editorDirty = false;
+  editorChannelFilter = '';
   apiFetch('/api/all-playlists')
     .then((r) => r.json())
     .then((data) => {
@@ -121,15 +142,26 @@ function renderEditorGroups(): void {
 function renderEditorChannels(): void {
   const list        = document.getElementById('editorChannelList');
   const placeholder = document.getElementById('editorChannelPlaceholder');
+  const emptyState  = document.getElementById('editorChannelEmptyState');
   const addBtn      = document.getElementById('editorAddChannelBtn');
   const countEl     = document.getElementById('editorChannelCount');
   const nameEl      = document.getElementById('editorSelectedGroupName');
-  if (!list || !placeholder) return;
+  const filterRow   = document.getElementById('editorChannelFilterRow');
+  const filterInput = document.getElementById('editorChannelFilterInput') as HTMLInputElement | null;
+  const clearBtn    = document.getElementById('editorChannelFilterClearBtn') as HTMLButtonElement | null;
+  if (!list || !placeholder || !emptyState) return;
+
+  if (filterInput && filterInput.value !== editorChannelFilter) {
+    filterInput.value = editorChannelFilter;
+  }
+  clearBtn?.classList.toggle('d-none', !editorChannelFilter.trim());
 
   const group = editorGroups.find((g) => g.id === editorSelectedGroupId);
   if (!group) {
     list.classList.add('d-none');
     placeholder.classList.remove('d-none');
+    emptyState.classList.add('d-none');
+    filterRow?.classList.add('d-none');
     addBtn?.classList.add('d-none');
     if (countEl) countEl.textContent = '0';
     if (nameEl) nameEl.textContent = '';
@@ -137,12 +169,33 @@ function renderEditorChannels(): void {
   }
 
   placeholder.classList.add('d-none');
-  list.classList.remove('d-none');
+  emptyState.classList.add('d-none');
+  filterRow?.classList.remove('d-none');
   addBtn?.classList.remove('d-none');
-  if (countEl) countEl.textContent = String(group.channels?.length || 0);
+  const allChannels = group.channels || [];
+  const channels = getFilteredEditorChannels(group);
+  if (countEl) countEl.textContent = editorChannelFilter.trim()
+    ? `${channels.length}/${allChannels.length}`
+    : String(allChannels.length);
   if (nameEl)  nameEl.textContent  = `— ${group.name}`;
 
-  const channels = group.channels || [];
+  if (!channels.length) {
+    list.classList.add('d-none');
+    emptyState.classList.remove('d-none');
+    const emptyLabel = emptyState.querySelector('p');
+    if (emptyLabel) {
+      emptyLabel.textContent = editorChannelFilter.trim()
+        ? `No channels match "${editorChannelFilter.trim()}"`
+        : 'No channels in this group';
+    }
+    if (channelSortable) {
+      channelSortable.destroy();
+      channelSortable = null;
+    }
+    return;
+  }
+
+  list.classList.remove('d-none');
   list.innerHTML = channels
     .map(
       (ch, i) => `
@@ -175,7 +228,7 @@ function renderEditorChannels(): void {
     cb.addEventListener('change', (e) => {
       e.stopPropagation();
       const input = cb as HTMLInputElement;
-      const ch = channels.find((c) => c.id === input.dataset.chid);
+       const ch = allChannels.find((c) => c.id === input.dataset.chid);
       if (ch) { ch.enabled = input.checked; editorDirty = true; renderEditorChannels(); }
     });
   });
@@ -183,7 +236,7 @@ function renderEditorChannels(): void {
   list.querySelectorAll('.editor-edit-ch-btn').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      const ch = channels.find((c) => c.id === (btn as HTMLElement).dataset.chid);
+      const ch = allChannels.find((c) => c.id === (btn as HTMLElement).dataset.chid);
       if (!ch) return;
       (document.getElementById('editChannelNameInput') as HTMLInputElement).value = ch.name || '';
       (document.getElementById('editChannelUrlInput')  as HTMLInputElement).value = ch.url  || '';
@@ -197,9 +250,9 @@ function renderEditorChannels(): void {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       const chid = (btn as HTMLElement).dataset.chid;
-      const ch = channels.find((c) => c.id === chid);
+      const ch = allChannels.find((c) => c.id === chid);
       if (!ch?.custom) return;
-      group.channels = channels.filter((c) => c.id !== chid);
+      group.channels = allChannels.filter((c) => c.id !== chid);
       editorDirty = true;
       renderEditorChannels();
     });
@@ -208,7 +261,7 @@ function renderEditorChannels(): void {
   list.querySelectorAll('.editor-move-ch-btn').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      const ch = channels.find((c) => c.id === (btn as HTMLElement).dataset.chid);
+      const ch = allChannels.find((c) => c.id === (btn as HTMLElement).dataset.chid);
       if (!ch) return;
 
       const select = document.getElementById('moveChannelTargetSelect') as HTMLSelectElement;
@@ -234,31 +287,35 @@ function renderEditorChannels(): void {
   list.querySelectorAll('.editor-copy-url-btn').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      const ch = channels.find((c) => c.id === (btn as HTMLElement).dataset.chid);
+      const ch = allChannels.find((c) => c.id === (btn as HTMLElement).dataset.chid);
       if (!ch?.url) return;
       navigator.clipboard.writeText(ch.url).then(() => {
-        const icon = btn.querySelector('i');
-        if (icon) { icon.className = 'fas fa-check'; setTimeout(() => { icon.className = 'fas fa-copy'; }, 1500); }
-      });
+        flashButtonIcon(btn, 'fas fa-check');
+      }).catch(() => toast('Copy failed', 'danger'));
     });
   });
 
-  if (channelSortable) channelSortable.destroy();
-  channelSortable = new Sortable(list as HTMLElement, {
-    handle: '.drag-handle',
-    animation: 150,
-    ghostClass: 'sortable-ghost',
-    chosenClass: 'sortable-chosen',
-    onEnd: () => {
-      const newOrder = [...list.querySelectorAll('.editor-channel-item')].map(
-        (el) => (el as HTMLElement).dataset.chId,
-      );
-      group.channels = newOrder
-        .map((id) => channels.find((c) => c.id === id))
-        .filter((c): c is MergedChannel => !!c);
-      editorDirty = true;
-    },
-  });
+  if (channelSortable) {
+    channelSortable.destroy();
+    channelSortable = null;
+  }
+  if (!editorChannelFilter.trim()) {
+    channelSortable = new Sortable(list as HTMLElement, {
+      handle: '.drag-handle',
+      animation: 150,
+      ghostClass: 'sortable-ghost',
+      chosenClass: 'sortable-chosen',
+      onEnd: () => {
+        const newOrder = [...list.querySelectorAll('.editor-channel-item')].map(
+          (el) => (el as HTMLElement).dataset.chId,
+        );
+        group.channels = newOrder
+          .map((id) => allChannels.find((c) => c.id === id))
+          .filter((c): c is MergedChannel => !!c);
+        editorDirty = true;
+      },
+    });
+  }
 }
 
 document.getElementById('editAllPlaylistsBtn')?.addEventListener('click', openAllPlaylistsEditor);
@@ -337,6 +394,20 @@ document.getElementById('editorRefreshAllBtn')?.addEventListener('click', async 
   } finally {
     btn.disabled = false;
     btn.innerHTML = '<i class="fas fa-sync-alt me-1"></i>Refresh All';
+  }
+});
+
+document.getElementById('editorExportBtn')?.addEventListener('click', async () => {
+  const btn = document.getElementById('editorExportBtn') as HTMLButtonElement | null;
+  if (!btn) return;
+  const exportUrl = new URL('/api/all-playlists/export.m3u', window.location.origin).toString();
+  try {
+    await navigator.clipboard.writeText(exportUrl);
+    flashButtonIcon(btn, 'fas fa-check');
+    toast('M3U URL copied', 'success');
+  } catch {
+    window.prompt('Copy M3U URL', exportUrl);
+    toast('Clipboard unavailable; copy the URL manually', 'warning');
   }
 });
 
@@ -459,6 +530,16 @@ document.getElementById('confirmEditChannelBtn')?.addEventListener('click', () =
     if (ch && ch.custom) { ch.name = name; ch.url = url; ch.tvg_logo = logo; editorDirty = true; break; }
   }
   Modal.getInstance(document.getElementById('editChannelModal')!)?.hide();
+  renderEditorChannels();
+});
+
+document.getElementById('editorChannelFilterInput')?.addEventListener('input', (e) => {
+  editorChannelFilter = (e.target as HTMLInputElement).value;
+  renderEditorChannels();
+});
+
+document.getElementById('editorChannelFilterClearBtn')?.addEventListener('click', () => {
+  editorChannelFilter = '';
   renderEditorChannels();
 });
 

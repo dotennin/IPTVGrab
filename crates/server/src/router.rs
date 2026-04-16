@@ -26,6 +26,7 @@ use crate::handlers::{
         add_playlist, delete_playlist, edit_playlist, get_playlist, list_channels, list_playlists,
         refresh_all_playlists, refresh_playlist,
     },
+    recents::{add_recent, delete_recent, list_recents},
     settings::{get_settings, patch_settings},
     tasks::{
         cancel_task, fork_recording, get_task, list_tasks, parse_stream, pause_task,
@@ -39,7 +40,10 @@ use crate::handlers::{
     },
 };
 use crate::auth::{api_login, api_logout, auth_status, get_export_token, login_page};
-use crate::persistence::{load_app_settings, load_health_cache, load_merged_config, load_playlists, load_tasks};
+use crate::persistence::{
+    load_app_settings, load_health_cache, load_merged_config, load_playlists, load_recents,
+    load_tasks,
+};
 use crate::state::AppState;
 use crate::types::{HealthState, WatchCacheEntry};
 
@@ -177,6 +181,7 @@ pub(crate) fn build_state(
         auth_password,
         sessions: Arc::new(tokio::sync::RwLock::new(HashSet::new())),
         playlists: Arc::new(tokio::sync::RwLock::new(load_playlists(&downloads_dir))),
+        recents: Arc::new(tokio::sync::RwLock::new(load_recents(&downloads_dir))),
         merged_config: Arc::new(tokio::sync::RwLock::new(load_merged_config(&downloads_dir))),
         health_cache: Arc::new(tokio::sync::RwLock::new(load_health_cache(&downloads_dir))),
         health_state: Arc::new(tokio::sync::RwLock::new(HealthState::default())),
@@ -223,6 +228,8 @@ pub(crate) fn build_api_router() -> Router<AppState> {
         )
         .route("/api/playlists/:id/refresh", post(refresh_playlist))
         .route("/api/channels", get(list_channels))
+        .route("/api/recents", get(list_recents).post(add_recent))
+        .route("/api/recents/:id", delete(delete_recent))
         .route("/api/all-playlists/refresh", post(refresh_all_playlists))
         .route(
             "/api/all-playlists",
@@ -401,6 +408,13 @@ pub async fn run_from_env() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+
+    async fn spawn_test_server(tmpdir: &std::path::Path) -> EmbeddedServer {
+        start_embedded_server(EmbeddedServerConfig::local_device(tmpdir.to_path_buf()))
+            .await
+            .unwrap()
+    }
 
     #[tokio::test]
     async fn embedded_server_serves_auth_status_on_localhost() {
@@ -408,9 +422,7 @@ mod tests {
             .join(format!("m3u8-server-test-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&tmpdir).unwrap();
 
-        let server = start_embedded_server(EmbeddedServerConfig::local_device(tmpdir.clone()))
-            .await
-            .unwrap();
+        let server = spawn_test_server(&tmpdir).await;
 
         let response = reqwest::get(format!("{}/api/auth/status", server.base_url()))
             .await
@@ -420,6 +432,92 @@ mod tests {
             .unwrap();
 
         assert_eq!(response["auth_required"], false);
+
+        server.stop().await.unwrap();
+        let _ = std::fs::remove_dir_all(&tmpdir);
+    }
+
+    #[tokio::test]
+    async fn recents_post_dedupes_and_sorts_latest_first() {
+        let tmpdir = std::env::temp_dir()
+            .join(format!("m3u8-server-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&tmpdir).unwrap();
+        let server = spawn_test_server(&tmpdir).await;
+        let client = reqwest::Client::new();
+
+        let alpha = json!({
+            "name": "Alpha",
+            "url": "https://example.com/a.m3u8",
+            "tvg_logo": "",
+            "group": "News"
+        });
+        let beta = json!({
+            "name": "Beta",
+            "url": "https://example.com/b.m3u8",
+            "tvg_logo": "",
+            "group": "Sports"
+        });
+
+        client.post(format!("{}/api/recents", server.base_url())).json(&alpha).send().await.unwrap();
+        client.post(format!("{}/api/recents", server.base_url())).json(&beta).send().await.unwrap();
+        client.post(format!("{}/api/recents", server.base_url())).json(&alpha).send().await.unwrap();
+
+        let response = client
+            .get(format!("{}/api/recents", server.base_url()))
+            .send()
+            .await
+            .unwrap();
+        assert!(response.status().is_success());
+        let recents = response.json::<Vec<serde_json::Value>>().await.unwrap();
+
+        assert_eq!(recents.len(), 2);
+        assert_eq!(recents[0]["url"], "https://example.com/a.m3u8");
+        assert_eq!(recents[1]["url"], "https://example.com/b.m3u8");
+
+        server.stop().await.unwrap();
+        let _ = std::fs::remove_dir_all(&tmpdir);
+    }
+
+    #[tokio::test]
+    async fn recents_delete_removes_one_entry() {
+        let tmpdir = std::env::temp_dir()
+            .join(format!("m3u8-server-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&tmpdir).unwrap();
+        let server = spawn_test_server(&tmpdir).await;
+        let client = reqwest::Client::new();
+
+        let payload = json!({
+            "name": "Gamma",
+            "url": "https://example.com/gamma.m3u8",
+            "tvg_logo": "",
+            "group": "Movies"
+        });
+
+        let create = client
+            .post(format!("{}/api/recents", server.base_url()))
+            .json(&payload)
+            .send()
+            .await
+            .unwrap();
+        assert!(create.status().is_success());
+        let created = create.json::<serde_json::Value>().await.unwrap();
+        let id = created["id"].as_str().unwrap();
+
+        let delete = client
+            .delete(format!("{}/api/recents/{}", server.base_url(), id))
+            .send()
+            .await
+            .unwrap();
+        assert!(delete.status().is_success());
+
+        let response = client
+            .get(format!("{}/api/recents", server.base_url()))
+            .send()
+            .await
+            .unwrap();
+        assert!(response.status().is_success());
+        let recents = response.json::<Vec<serde_json::Value>>().await.unwrap();
+        assert!(recents.is_empty());
 
         server.stop().await.unwrap();
         let _ = std::fs::remove_dir_all(&tmpdir);

@@ -618,9 +618,56 @@ textarea.form-control {
   transition: border-color 0.15s ease;
 }
 
+.channel-card.channel-card-has-corners {
+  padding-top: 18px;
+}
+
 .channel-card:hover {
   border-color: #388bfd;
   box-shadow: 0 0 0 1px rgba(56, 139, 253, 0.1), 0 4px 12px rgba(56, 139, 253, 0.08);
+}
+
+.channel-card-corner {
+  position: absolute;
+  top: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1;
+}
+
+.channel-card-corner-left {
+  left: 6px;
+}
+
+.channel-card-corner-right {
+  right: 6px;
+}
+
+.channel-card-corner .health-dot {
+  position: static;
+}
+
+.recent-remove-btn {
+  width: 20px;
+  height: 20px;
+  border: 1px solid rgba(248, 81, 73, 0.35);
+  border-radius: 999px;
+  background: rgba(248, 81, 73, 0.12);
+  color: #f85149;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font-size: 0.65rem;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.recent-remove-btn:hover {
+  background: rgba(248, 81, 73, 0.22);
+  border-color: rgba(248, 81, 73, 0.55);
+  color: #ff938a;
 }
 
 .channel-logo-wrap {
@@ -1082,6 +1129,58 @@ textarea.form-control {
   cursor: grab;
   transition: border-color 0.15s, background-color 0.15s;
   user-select: none;
+}
+
+.editor-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #30363d;
+}
+
+.editor-filter-input-wrap {
+  position: relative;
+  flex: 1;
+}
+
+.editor-filter-icon {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.editor-filter-input {
+  width: 100%;
+  padding: 7px 10px 7px 30px;
+  border-radius: 6px;
+  border: 1px solid var(--card-border);
+  background-color: #0d1117;
+  color: var(--text);
+  font-size: 0.78rem;
+}
+
+.editor-filter-input:focus {
+  outline: none;
+  border-color: #388bfd;
+  box-shadow: 0 0 0 3px rgba(56, 139, 253, 0.18);
+}
+
+.editor-filter-clear-btn {
+  border: 1px solid rgba(248, 81, 73, 0.35);
+  border-radius: 6px;
+  background: rgba(248, 81, 73, 0.12);
+  color: #ff7b72;
+  padding: 6px 10px;
+  font-size: 0.74rem;
+  line-height: 1;
+}
+
+.editor-filter-clear-btn:hover {
+  background: rgba(248, 81, 73, 0.2);
 }
 
 .editor-group-item:hover,

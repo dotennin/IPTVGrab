@@ -89,6 +89,54 @@ extract() {
     python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('$1',''))" 2>/dev/null || echo ""
 }
 
+health_field() {
+  local field="$1"
+  curl_api GET /api/health-check
+  echo "$RESPONSE" | grep -v '^HTTP_CODE:' | python3 -c \
+    "import sys,json; d=json.load(sys.stdin); v=d.get('$field',''); print(str(v).lower() if isinstance(v,bool) else v)" \
+    2>/dev/null || echo ""
+}
+
+wait_for_health_idle() {
+  local label="$1"
+  local attempts="${2:-20}"
+  local running=""
+  for ((i=1; i<=attempts; i++)); do
+    running=$(health_field running)
+    if [[ "$running" == "false" ]]; then
+      green "$label"
+      ((PASS++))
+      return 0
+    fi
+    sleep 1
+  done
+  red "$label — timed out waiting for health check to go idle"
+  ((FAIL++))
+  return 1
+}
+
+wait_for_health_started() {
+  local label="$1"
+  local attempts="${2:-20}"
+  local total="" started=""
+  for ((i=1; i<=attempts; i++)); do
+    curl_api GET /api/health-check
+    total=$(echo "$RESPONSE" | grep -v '^HTTP_CODE:' | python3 -c \
+      "import sys,json; d=json.load(sys.stdin); print(d.get('total',0))" 2>/dev/null || echo "0")
+    started=$(echo "$RESPONSE" | grep -v '^HTTP_CODE:' | python3 -c \
+      "import sys,json; d=json.load(sys.stdin); print(d.get('started_at',0))" 2>/dev/null || echo "0")
+    if [[ "$total" != "0" && "$started" != "0" && "$started" != "0.0" ]]; then
+      green "$label (total=$total started_at=$started)"
+      ((PASS++))
+      return 0
+    fi
+    sleep 1
+  done
+  red "$label — health state did not update (total=$total started_at=$started)"
+  ((FAIL++))
+  return 1
+}
+
 # ── Server lifecycle ──────────────────────────────────────────────────────────
 
 start_server() {
@@ -238,6 +286,7 @@ fi
 # Refresh all
 curl_api POST /api/all-playlists/refresh
 assert_http "POST /api/all-playlists/refresh" 200
+wait_for_health_idle "health check idle after all-playlists refresh"
 
 # ── Health Check ──────────────────────────────────────────────────────────────
 echo ""
@@ -246,8 +295,8 @@ echo "[ Health Check ]"
 curl_api GET /api/health-check
 assert_http "GET /api/health-check" 200
 RUNNING=$(echo "$RESPONSE" | grep -v '^HTTP_CODE:' | python3 -c \
-  "import sys,json; d=json.load(sys.stdin); print(d.get('state',{}).get('running',False))" 2>/dev/null || echo "")
-if [[ "$RUNNING" == "False" ]]; then
+  "import sys,json; d=json.load(sys.stdin); v=d.get('running',False); print(str(v).lower() if isinstance(v,bool) else v)" 2>/dev/null || echo "")
+if [[ "$RUNNING" == "false" ]]; then
   green "GET /api/health-check (state.running=false)"
   ((PASS++))
 else
@@ -259,20 +308,7 @@ curl_api POST /api/health-check
 assert_http "POST /api/health-check (trigger)" 200
 assert_json "health trigger ok" ok true
 
-sleep 1
-curl_api GET /api/health-check
-assert_http "GET /api/health-check (after trigger)" 200
-HEALTH_TOTAL=$(echo "$RESPONSE" | grep -v '^HTTP_CODE:' | python3 -c \
-  "import sys,json; d=json.load(sys.stdin); print(d.get('state',{}).get('total',0))" 2>/dev/null || echo "0")
-HEALTH_STARTED=$(echo "$RESPONSE" | grep -v '^HTTP_CODE:' | python3 -c \
-  "import sys,json; d=json.load(sys.stdin); print(d.get('state',{}).get('started_at',0))" 2>/dev/null || echo "0")
-if [[ "$HEALTH_TOTAL" != "0" && "$HEALTH_STARTED" != "0" && "$HEALTH_STARTED" != "0.0" ]]; then
-  green "health state updated (total=$HEALTH_TOTAL started_at=$HEALTH_STARTED)"
-  ((PASS++))
-else
-  red "health state did not update after trigger (total=$HEALTH_TOTAL started_at=$HEALTH_STARTED)"
-  ((FAIL++))
-fi
+wait_for_health_started "health state updated after trigger"
 
 # ── Tasks ────────────────────────────────────────────────────────────────────
 echo ""

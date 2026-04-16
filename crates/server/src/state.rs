@@ -5,7 +5,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use tokio::sync::{mpsc, RwLock};
 
-use crate::types::{AppSettings, HealthEntry, HealthState, MergedConfig, SavedPlaylist, Task, WatchCacheEntry};
+use crate::types::{
+    AppSettings, HealthEntry, HealthState, MergedConfig, RecentChannel, SavedPlaylist, Task,
+    WatchCacheEntry,
+};
 
 // ── Transcode session (FLV → HLS via FFmpeg) ─────────────────────────────────
 
@@ -65,6 +68,7 @@ pub(crate) struct AppState {
     pub(crate) auth_password: Option<String>,
     pub(crate) sessions: Arc<RwLock<HashSet<String>>>,
     pub(crate) playlists: Arc<RwLock<HashMap<String, SavedPlaylist>>>,
+    pub(crate) recents: Arc<RwLock<Vec<RecentChannel>>>,
     pub(crate) merged_config: Arc<RwLock<MergedConfig>>,
     pub(crate) health_cache: Arc<RwLock<HashMap<String, HealthEntry>>>,
     pub(crate) health_state: Arc<RwLock<HealthState>>,
@@ -90,6 +94,13 @@ impl AppState {
         let path = self.downloads_dir.join("playlists.json");
         let pl = self.playlists.read().await;
         let _ = tokio::fs::write(&path, serde_json::to_vec_pretty(&*pl).unwrap_or_default()).await;
+    }
+
+    pub(crate) async fn save_recents(&self) {
+        let path = self.downloads_dir.join("recents.json");
+        let recents = self.recents.read().await;
+        let _ =
+            tokio::fs::write(&path, serde_json::to_vec_pretty(&*recents).unwrap_or_default()).await;
     }
 
     pub(crate) async fn save_merged_config(&self) {

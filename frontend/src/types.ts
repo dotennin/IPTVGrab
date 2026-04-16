@@ -123,6 +123,7 @@ export interface Settings {
 }
 
 export interface RecentChannel {
+  id: string;
   name: string;
   url: string;
   tvg_logo: string;
