@@ -132,7 +132,7 @@ pub(crate) async fn clip_task(
         };
         if !matches!(
             source_task.status.as_str(),
-            "downloading" | "recording" | "stopping" | "merging"
+            "downloading" | "recording" | "stopping" | "merging" | "interrupted"
         ) {
             return (
                 StatusCode::BAD_REQUEST,
