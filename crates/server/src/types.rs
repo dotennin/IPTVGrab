@@ -145,11 +145,18 @@ pub(crate) struct AppSettings {
     pub(crate) health_only_filter: bool,
     #[serde(default = "default_recent_limit")]
     pub(crate) recent_limit: usize,
+    #[serde(default)]
+    pub(crate) auto_fullscreen: bool,
 }
 
 impl Default for AppSettings {
     fn default() -> Self {
-        Self { use_proxy: true, health_only_filter: true, recent_limit: default_recent_limit() }
+        Self {
+            use_proxy: true,
+            health_only_filter: true,
+            recent_limit: default_recent_limit(),
+            auto_fullscreen: false,
+        }
     }
 }
 

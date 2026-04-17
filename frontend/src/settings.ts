@@ -1,7 +1,12 @@
 import type { Settings } from './types';
 import { apiFetch } from './api';
 
-export const DEFAULT_SETTINGS: Settings = { useProxy: true, healthOnlyFilter: true, recentLimit: 20 };
+export const DEFAULT_SETTINGS: Settings = {
+  useProxy: true,
+  healthOnlyFilter: true,
+  recentLimit: 20,
+  autoFullscreen: false,
+};
 export let settings: Settings = { ...DEFAULT_SETTINGS };
 
 function normalizeRecentLimit(value: unknown): number {
@@ -20,6 +25,7 @@ export async function loadSettings(): Promise<void> {
         useProxy: data.use_proxy ?? DEFAULT_SETTINGS.useProxy,
         healthOnlyFilter: data.health_only_filter ?? DEFAULT_SETTINGS.healthOnlyFilter,
         recentLimit: normalizeRecentLimit(data.recent_limit),
+        autoFullscreen: data.auto_fullscreen ?? DEFAULT_SETTINGS.autoFullscreen,
       };
     }
   } catch { /* network error — keep defaults */ }
@@ -30,6 +36,7 @@ export async function saveSettings(patch: Partial<Settings>): Promise<void> {
   if ('useProxy' in patch) settings.useProxy = patch.useProxy!;
   if ('healthOnlyFilter' in patch) settings.healthOnlyFilter = patch.healthOnlyFilter!;
   if ('recentLimit' in patch) settings.recentLimit = normalizeRecentLimit(patch.recentLimit);
+  if ('autoFullscreen' in patch) settings.autoFullscreen = patch.autoFullscreen!;
   try {
     await apiFetch('/api/settings', {
       method: 'PATCH',
@@ -38,6 +45,7 @@ export async function saveSettings(patch: Partial<Settings>): Promise<void> {
         use_proxy: settings.useProxy,
         health_only_filter: settings.healthOnlyFilter,
         recent_limit: settings.recentLimit,
+        auto_fullscreen: settings.autoFullscreen,
       }),
     });
   } catch { /* ignore — in-memory value already updated */ }

@@ -7,6 +7,19 @@
   --muted: #8b949e;
 }
 
+html,
+body {
+  min-height: 100%;
+}
+
+.app-shell {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 /* ── Form components ─────────────────────────────────────────────────────── */
 .form-control {
   display: block;
@@ -1841,7 +1854,9 @@ textarea.form-control {
   border-top: 1px solid #30363d;
   height: 68px;
   flex-shrink: 0;
-  position: relative;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  position: sticky;
+  bottom: 0;
   z-index: 30;
 }
 
@@ -1923,7 +1938,7 @@ textarea.form-control {
 
 /* ── Toast: float above bottom nav ─────────────────────────────────────── */
 #toastContainer {
-  bottom: calc(68px + 12px) !important;
+  bottom: calc(68px + 12px + env(safe-area-inset-bottom, 0px)) !important;
 }
 
 /* ── Grid: slightly larger cards for TV comfort ─────────────────────────── */
@@ -1933,7 +1948,7 @@ textarea.form-control {
 
 /* ── URL settings section scrollable area ───────────────────────────────── */
 #urlSettingsSection .flex-shrink-0.overflow-y-auto {
-  max-height: calc(100vh - 44px - 68px - 40px); /* topbar + bottomnav + tab-nav */
+  max-height: calc(100dvh - 44px - 68px - 40px - env(safe-area-inset-bottom, 0px)); /* topbar + bottomnav + tab-nav */
 }
 
 

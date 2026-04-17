@@ -12,6 +12,8 @@ let groupSortable: Sortable | null = null;
 let channelSortable: Sortable | null = null;
 let editorDirty = false;
 let editorChannelFilter = '';
+const EDITOR_FILTER_DEBOUNCE_MS = 120;
+let editorFilterRenderTimer: ReturnType<typeof window.setTimeout> | null = null;
 
 function flashButtonIcon(button: Element, nextClass: string): void {
   const icon = button.querySelector('i');
@@ -73,9 +75,22 @@ function renderEditorChannelItem(ch: MergedChannel, group: MergedGroup): string 
     </div>`;
 }
 
+function scheduleEditorFilterRender(value: string): void {
+  editorChannelFilter = value;
+  if (editorFilterRenderTimer) window.clearTimeout(editorFilterRenderTimer);
+  editorFilterRenderTimer = window.setTimeout(() => {
+    editorFilterRenderTimer = null;
+    renderEditorChannels();
+  }, EDITOR_FILTER_DEBOUNCE_MS);
+}
+
 function openAllPlaylistsEditor(): void {
   editorDirty = false;
   editorChannelFilter = '';
+  if (editorFilterRenderTimer) {
+    window.clearTimeout(editorFilterRenderTimer);
+    editorFilterRenderTimer = null;
+  }
   apiFetch('/api/all-playlists')
     .then((r) => r.json())
     .then((data) => {
@@ -577,16 +592,21 @@ document.getElementById('confirmEditChannelBtn')?.addEventListener('click', () =
 });
 
 document.getElementById('editorChannelFilterInput')?.addEventListener('input', (e) => {
-  editorChannelFilter = (e.target as HTMLInputElement).value;
-  renderEditorChannels();
+  scheduleEditorFilterRender((e.target as HTMLInputElement).value);
 });
 
 document.getElementById('editorChannelFilterClearBtn')?.addEventListener('click', () => {
+  if (editorFilterRenderTimer) window.clearTimeout(editorFilterRenderTimer);
+  editorFilterRenderTimer = null;
   editorChannelFilter = '';
   renderEditorChannels();
 });
 
 document.getElementById('allPlaylistsEditorModal')?.addEventListener('hide.bs.modal', (e) => {
+  if (editorFilterRenderTimer) {
+    window.clearTimeout(editorFilterRenderTimer);
+    editorFilterRenderTimer = null;
+  }
   if (editorDirty) {
     if (!confirm('You have unsaved changes. Close without saving?')) {
       e.preventDefault();

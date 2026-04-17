@@ -337,6 +337,13 @@ function _originalUrl(url: string): string {
   return url;
 }
 
+function maybeAutoEnterFullscreen(): void {
+  if (!settings.autoFullscreen || isPreviewFullscreen()) return;
+  try {
+    enterPreviewFullscreen();
+  } catch { /* fullscreen is best-effort only */ }
+}
+
 async function _markCurrentPreviewInvalid(): Promise<void> {
   const url = _currentPreviewHealthUrl;
   if (!url || _reportedPreviewInvalid) return;
@@ -398,6 +405,7 @@ export async function openHLSPlayer(url: string, title = '', isLive = false): Pr
   previewVideo.pause();
   previewVideo.removeAttribute('src');
   previewModal.show();
+  maybeAutoEnterFullscreen();
 
   let isFLV = false;
   let probeResult: { kind?: string; final_url?: string } | null = null;

@@ -556,6 +556,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn app_settings_round_trip_includes_auto_fullscreen() {
+        let tmpdir = std::env::temp_dir()
+            .join(format!("m3u8-server-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&tmpdir).unwrap();
+        let server = spawn_test_server(&tmpdir).await;
+        let client = reqwest::Client::new();
+
+        let patch = client
+            .patch(format!("{}/api/settings", server.base_url()))
+            .json(&json!({ "auto_fullscreen": true }))
+            .send()
+            .await
+            .unwrap();
+        assert!(patch.status().is_success());
+        let patched = patch.json::<serde_json::Value>().await.unwrap();
+        assert_eq!(patched["auto_fullscreen"], true);
+
+        let get = client
+            .get(format!("{}/api/settings", server.base_url()))
+            .send()
+            .await
+            .unwrap();
+        assert!(get.status().is_success());
+        let current = get.json::<serde_json::Value>().await.unwrap();
+        assert_eq!(current["auto_fullscreen"], true);
+
+        server.stop().await.unwrap();
+        let _ = std::fs::remove_dir_all(&tmpdir);
+    }
+
+    #[tokio::test]
     async fn recents_respect_recent_limit_setting() {
         let tmpdir = std::env::temp_dir()
             .join(format!("m3u8-server-test-{}", uuid::Uuid::new_v4()));

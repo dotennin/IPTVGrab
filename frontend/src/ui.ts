@@ -166,6 +166,8 @@ document.getElementById('parseBtn')?.addEventListener('click', async () => {
   document.getElementById('settingsBtn')?.addEventListener('click', () => {
     const toggle = document.getElementById('settingUseProxy') as HTMLInputElement | null;
     if (toggle) toggle.checked = settings.useProxy;
+    const toggleAutoFullscreen = document.getElementById('settingAutoFullscreen') as HTMLInputElement | null;
+    if (toggleAutoFullscreen) toggleAutoFullscreen.checked = settings.autoFullscreen;
     const toggleHealth = document.getElementById('settingHealthOnly') as HTMLInputElement | null;
     if (toggleHealth) toggleHealth.checked = settings.healthOnlyFilter;
     const recentLimitInput = document.getElementById('settingRecentLimit') as HTMLInputElement | null;
@@ -176,6 +178,11 @@ document.getElementById('parseBtn')?.addEventListener('click', async () => {
   document.getElementById('settingUseProxy')?.addEventListener('change', (e) => {
     const value = (e.target as HTMLInputElement).checked;
     void saveSettings({ useProxy: value });
+  });
+
+  document.getElementById('settingAutoFullscreen')?.addEventListener('change', (e) => {
+    const value = (e.target as HTMLInputElement).checked;
+    void saveSettings({ autoFullscreen: value });
   });
 
   document.getElementById('settingHealthOnly')?.addEventListener('change', (e) => {

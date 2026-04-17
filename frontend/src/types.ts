@@ -121,6 +121,7 @@ export interface Settings {
   useProxy: boolean;
   healthOnlyFilter: boolean;
   recentLimit: number;
+  autoFullscreen: boolean;
 }
 
 export interface RecentChannel {

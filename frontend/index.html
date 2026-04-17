@@ -11,7 +11,7 @@
   <link rel="manifest" href="/site.webmanifest" />
   <meta name="theme-color" content="#0b1220" />
 </head>
-<body class="bg-gh-bg text-gh-text h-screen flex flex-col overflow-hidden">
+<body class="app-shell bg-gh-bg text-gh-text">
 
   <!-- Minimal topbar (logo + top-right signout) -->
   <nav class="tv-topbar flex items-center px-4 shrink-0" id="navbar">
@@ -652,6 +652,16 @@
               </div>
               <div class="form-check form-switch mb-0">
                 <input class="form-check-input" type="checkbox" role="switch" id="settingUseProxy" />
+              </div>
+            </div>
+
+            <div class="settings-row">
+              <div class="settings-row-info">
+                <div class="settings-row-label">Auto fullscreen on playback</div>
+                <div class="settings-row-desc">When enabled, opening the web player tries to enter fullscreen automatically after playback starts.</div>
+              </div>
+              <div class="form-check form-switch mb-0">
+                <input class="form-check-input" type="checkbox" role="switch" id="settingAutoFullscreen" />
               </div>
             </div>
           </div>
