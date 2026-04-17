@@ -35,9 +35,10 @@ cargo run -p server
 ## Flutter desktop quick start (macOS)
 
 ```bash
-make flutter-prepare
 make flutter-run-macos
 ```
+
+For Android, iOS, and macOS native artifacts, use `make flutter-prepare`.
 
 ## Build and test
 
