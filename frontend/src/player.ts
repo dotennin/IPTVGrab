@@ -35,9 +35,9 @@ let _chOsdTimer: ReturnType<typeof setTimeout> | null = null;
 // ── Stream info panel ─────────────────────────────────────────────────────────
 function resetStreamInfo(): void {
   const badge = document.getElementById('streamTypeBadge');
-  const body  = document.getElementById('streamInfoBody');
+  const body = document.getElementById('streamInfoBody');
   if (badge) badge.innerHTML = '';
-  if (body)  body.innerHTML = `
+  if (body) body.innerHTML = `
     <div class="text-center text-muted py-5" id="streamPlaceholder">
       <i class="fas fa-play-circle fa-3x mb-3 d-block opacity-25"></i>
       <p class="mb-0">Stream info will appear here after parsing</p>
@@ -56,7 +56,7 @@ function showError(msg: string): void {
 export function showStreamInfo(info: StreamInfo): void {
   currentStreamInfo = info;
   const badge = document.getElementById('streamTypeBadge');
-  const body  = document.getElementById('streamInfoBody');
+  const body = document.getElementById('streamInfoBody');
   if (!badge || !body) return;
 
   if (info.kind === 'master' && info.streams) {
@@ -89,16 +89,15 @@ export function showStreamInfo(info: StreamInfo): void {
     body.innerHTML = `
       <dl class="stat-grid mb-3">
         ${isLive
-          ? `<dt>Status</dt><dd><span class="text-danger fw-semibold">Live — records until stopped</span></dd>`
-          : `<dt>Segments</dt><dd>${info.segments ?? ''}</dd>
+        ? `<dt>Status</dt><dd><span class="text-danger fw-semibold">Live — records until stopped</span></dd>`
+        : `<dt>Segments</dt><dd>${info.segments ?? ''}</dd>
              <dt>Duration</dt><dd>${formatDuration(info.duration ?? 0)}</dd>`
-        }
+      }
         <dt>Encryption</dt>
-        <dd>${
-          info.encrypted
-            ? '<span class="badge bg-warning text-dark">AES-128</span>'
-            : '<span class="text-muted">None</span>'
-        }</dd>
+        <dd>${info.encrypted
+        ? '<span class="badge bg-warning text-dark">AES-128</span>'
+        : '<span class="text-muted">None</span>'
+      }</dd>
       </dl>` + downloadButton(isLive);
   }
 
@@ -159,11 +158,11 @@ export async function startDownload(): Promise<void> {
     return;
   }
 
-  const outputNameEl  = document.getElementById('outputName') as HTMLInputElement | null;
+  const outputNameEl = document.getElementById('outputName') as HTMLInputElement | null;
   const concurrencyEl = document.getElementById('concurrency') as HTMLInputElement | null;
-  const outputName    = outputNameEl?.value.trim() || null;
-  const concurrency   = parseInt(concurrencyEl?.value || '8', 10);
-  const isLive        = currentStreamInfo?.is_live === true;
+  const outputName = outputNameEl?.value.trim() || null;
+  const concurrency = parseInt(concurrencyEl?.value || '8', 10);
+  const isLive = currentStreamInfo?.is_live === true;
   const recordingIntervalEl = document.getElementById('recordingIntervalInput') as HTMLInputElement | null;
   const recordingAutoRestartEl = document.getElementById('recordingAutoRestartInput') as HTMLInputElement | null;
   const recordingIntervalMinutes = isLive
@@ -187,8 +186,8 @@ export async function startDownload(): Promise<void> {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        url:         currentRequest.url,
-        headers:     currentRequest.headers,
+        url: currentRequest.url,
+        headers: currentRequest.headers,
         output_name: outputName,
         quality,
         concurrency,
@@ -207,11 +206,11 @@ export async function startDownload(): Promise<void> {
   } catch (e) {
     toast((e as Error).message, 'danger');
   } finally {
-      if (btn) {
-        btn.disabled = false;
-        btn.innerHTML = isLive
-          ? '<i class="fas fa-circle me-2"></i>Start recording'
-          : '<i class="fas fa-download me-2"></i>Start download';
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = isLive
+        ? '<i class="fas fa-circle me-2"></i>Start recording'
+        : '<i class="fas fa-download me-2"></i>Start download';
     }
   }
 }
@@ -227,12 +226,12 @@ let hlsInstance: Hls | null = null;
 let mpegtsPlayer: any = null;
 let _transcodeSessionId: string | null = null;
 
-const previewModalEl    = document.getElementById('previewModal')!;
-const previewViewportEl  = document.getElementById('previewViewport')!;
-const previewVideo      = document.getElementById('previewVideo') as HTMLVideoElement;
-const previewTitleEl    = document.getElementById('previewModalTitle');
-const previewModal      = Modal.getOrCreateInstance(previewModalEl)!;
-const playerQualityBar    = document.getElementById('playerQualityBar');
+const previewModalEl = document.getElementById('previewModal')!;
+const previewViewportEl = document.getElementById('previewViewport')!;
+const previewVideo = document.getElementById('previewVideo') as HTMLVideoElement;
+const previewTitleEl = document.getElementById('previewModalTitle');
+const previewModal = Modal.getOrCreateInstance(previewModalEl)!;
+const playerQualityBar = document.getElementById('playerQualityBar');
 const playerQualitySelect = document.getElementById('playerQualitySelect') as HTMLSelectElement | null;
 
 // Plyr wraps the video element and provides polished controls (fullscreen button, etc.).
@@ -389,7 +388,7 @@ function _stopTranscodeSession(): void {
   if (_transcodeSessionId) {
     const id = _transcodeSessionId;
     _transcodeSessionId = null;
-    fetch(`/api/watch/transcode/${id}`, { method: 'DELETE' }).catch(() => {});
+    fetch(`/api/watch/transcode/${id}`, { method: 'DELETE' }).catch(() => { });
   }
 }
 
@@ -400,7 +399,7 @@ function _setupPlayerQuality(): void {
   let opts = '<option value="-1">Auto</option>';
   levels.forEach((lvl, i) => {
     const res = lvl.height ? `${lvl.height}p` : '';
-    const bw  = lvl.bitrate ? ` · ${Math.round(lvl.bitrate / 1000)} kbps` : '';
+    const bw = lvl.bitrate ? ` · ${Math.round(lvl.bitrate / 1000)} kbps` : '';
     opts += `<option value="${i}">${res ? res + bw : `Level ${i + 1}${bw}`}</option>`;
   });
   playerQualitySelect.innerHTML = opts;
@@ -473,7 +472,7 @@ function _loadMpegtsPlayer(url: string, isLive = false): void {
     );
     mpegtsPlayer.attachMediaElement(previewVideo);
     mpegtsPlayer.load();
-    previewVideo.play().catch(() => {});
+    previewVideo.play().catch(() => { });
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     mpegtsPlayer.on((mpegts.Events as any).ERROR, (errorType: string, errorDetail: string, errorInfo: { msg?: string }) => {
@@ -498,7 +497,7 @@ function _loadHlsPlayer(url: string, isLive = false): void {
     hlsInstance.loadSource(url);
     hlsInstance.attachMedia(previewVideo);
     hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
-      previewVideo.play().catch(() => {});
+      previewVideo.play().catch(() => { });
       _setupPlayerQuality();
     });
     hlsInstance.on(Hls.Events.LEVEL_SWITCHED, (_evt, data) => {
@@ -521,7 +520,7 @@ function _loadHlsPlayer(url: string, isLive = false): void {
     });
   } else if (previewVideo.canPlayType('application/vnd.apple.mpegurl')) {
     previewVideo.src = url;
-    previewVideo.play().catch(() => {});
+    previewVideo.play().catch(() => { });
   } else {
     toast('HLS playback not supported in this browser', 'danger');
   }
@@ -538,7 +537,7 @@ export function openPreviewDirect(url: string, taskId: string | null = null): vo
   previewVideo.pause();
   previewVideo.src = url;
   previewModal.show();
-  previewVideo.play().catch(() => {});
+  previewVideo.play().catch(() => { });
 }
 
 export function openPreview(taskId: string): void {
@@ -557,10 +556,10 @@ export function openPreview(taskId: string): void {
     hlsInstance = new Hls({ enableWorker: false });
     hlsInstance.loadSource(src);
     hlsInstance.attachMedia(previewVideo);
-    hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => previewVideo.play().catch(() => {}));
+    hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => previewVideo.play().catch(() => { }));
   } else if (previewVideo.canPlayType('application/vnd.apple.mpegurl')) {
     previewVideo.src = src;
-    previewVideo.play().catch(() => {});
+    previewVideo.play().catch(() => { });
   } else {
     toast('HLS preview requires Chrome with hls.js loaded', 'danger');
     return;
@@ -594,14 +593,14 @@ previewVideo.addEventListener('error', () => {
 });
 
 // ── Channel D-pad switching ────────────────────────────────────────────────────
-const _chOsdEl       = document.getElementById('chOsd');
-const _chOsdName     = document.getElementById('chOsdName');
-const _chOsdIndex    = document.getElementById('chOsdIndex');
+const _chOsdEl = document.getElementById('chOsd');
+const _chOsdName = document.getElementById('chOsdName');
+const _chOsdIndex = document.getElementById('chOsdIndex');
 const _chOsdPrevName = document.getElementById('chOsdPrevName');
 const _chOsdNextName = document.getElementById('chOsdNextName');
-const _chOsdPrevBtn  = document.getElementById('chOsdPrevBtn');
-const _chOsdNextBtn  = document.getElementById('chOsdNextBtn');
-const _chOsdCurLogo  = document.getElementById('chOsdCurLogo')  as HTMLImageElement | null;
+const _chOsdPrevBtn = document.getElementById('chOsdPrevBtn');
+const _chOsdNextBtn = document.getElementById('chOsdNextBtn');
+const _chOsdCurLogo = document.getElementById('chOsdCurLogo') as HTMLImageElement | null;
 const _chOsdPrevLogo = document.getElementById('chOsdPrevLogo') as HTMLImageElement | null;
 const _chOsdNextLogo = document.getElementById('chOsdNextLogo') as HTMLImageElement | null;
 
@@ -638,19 +637,19 @@ function _setOsdLogo(img: HTMLImageElement | null, src: string | null | undefine
 
 function _showChOsd(): void {
   if (!_chOsdEl || !_chOsdName || !_chOsdIndex) return;
-  const ch     = _channelList[_channelIndex];
+  const ch = _channelList[_channelIndex];
   const prevCh = _channelList[_channelIndex - 1];
   const nextCh = _channelList[_channelIndex + 1];
 
-  _chOsdName.textContent  = ch?.name || ch?.url || '';
+  _chOsdName.textContent = ch?.name || ch?.url || '';
   _chOsdIndex.textContent = `${_channelIndex + 1} / ${_channelList.length}`;
   if (_chOsdPrevName) _chOsdPrevName.textContent = prevCh?.name || '';
-  if (_chOsdNextName) _chOsdNextName.textContent = nextCh?.name  || '';
+  if (_chOsdNextName) _chOsdNextName.textContent = nextCh?.name || '';
 
   // Populate channel logos
-  _setOsdLogo(_chOsdCurLogo,  ch?.tvg_logo     || ch?.logo     || null);
-  _setOsdLogo(_chOsdPrevLogo, prevCh?.tvg_logo  || prevCh?.logo || null);
-  _setOsdLogo(_chOsdNextLogo, nextCh?.tvg_logo  || nextCh?.logo || null);
+  _setOsdLogo(_chOsdCurLogo, ch?.tvg_logo || ch?.logo || null);
+  _setOsdLogo(_chOsdPrevLogo, prevCh?.tvg_logo || prevCh?.logo || null);
+  _setOsdLogo(_chOsdNextLogo, nextCh?.tvg_logo || nextCh?.logo || null);
 
   // Show/dim prev-next buttons at list boundaries
   if (_chOsdPrevBtn) (_chOsdPrevBtn as HTMLButtonElement).disabled = _channelIndex <= 0;
@@ -684,27 +683,27 @@ let _currentPreviewTaskId: string | null = null;
 let _clipTaskId: string | null = null;
 let _clipMode = false;
 
-const clipToolbar       = document.getElementById('clipToolbar');
-const clipToggleBar     = document.getElementById('clipToggleBar');
-const toggleClipBtn     = document.getElementById('toggleClipBtn');
-const clipStartInput    = document.getElementById('clipStart') as HTMLInputElement | null;
-const clipEndInput      = document.getElementById('clipEnd') as HTMLInputElement | null;
-const clipSelection     = document.getElementById('clipSelection');
-const clipStartLabel    = document.getElementById('clipStartLabel');
-const clipEndLabel      = document.getElementById('clipEndLabel');
+const clipToolbar = document.getElementById('clipToolbar');
+const clipToggleBar = document.getElementById('clipToggleBar');
+const toggleClipBtn = document.getElementById('toggleClipBtn');
+const clipStartInput = document.getElementById('clipStart') as HTMLInputElement | null;
+const clipEndInput = document.getElementById('clipEnd') as HTMLInputElement | null;
+const clipSelection = document.getElementById('clipSelection');
+const clipStartLabel = document.getElementById('clipStartLabel');
+const clipEndLabel = document.getElementById('clipEndLabel');
 const clipDurationLabel = document.getElementById('clipDurationLabel');
-const clipDownloadBtn   = document.getElementById('clipDownloadBtn') as HTMLButtonElement | null;
-const clipCancelBtn     = document.getElementById('clipCancelBtn');
+const clipDownloadBtn = document.getElementById('clipDownloadBtn') as HTMLButtonElement | null;
+const clipCancelBtn = document.getElementById('clipCancelBtn');
 
 function deactivateClipMode(): void {
-  _clipMode   = false;
+  _clipMode = false;
   _clipTaskId = null;
-  if (clipToolbar)   clipToolbar.classList.add('d-none');
+  if (clipToolbar) clipToolbar.classList.add('d-none');
   if (clipToggleBar) clipToggleBar.classList.toggle('d-none', !_currentPreviewTaskId);
 }
 
 function _activateClipUI(): void {
-  if (clipToolbar)   clipToolbar.classList.remove('d-none');
+  if (clipToolbar) clipToolbar.classList.remove('d-none');
   if (clipToggleBar) clipToggleBar.classList.add('d-none');
 }
 
@@ -713,27 +712,27 @@ function initClipSlider(): void {
   if (!isFinite(duration) || duration <= 0) duration = 3600;
   const maxVal = String(Math.round(duration * 10) / 10);
   if (clipStartInput) { clipStartInput.max = maxVal; clipStartInput.value = '0'; }
-  if (clipEndInput)   { clipEndInput.max = maxVal;   clipEndInput.value = maxVal; }
+  if (clipEndInput) { clipEndInput.max = maxVal; clipEndInput.value = maxVal; }
   updateClipUI();
 }
 
 function updateClipUI(): void {
   if (!clipStartInput || !clipEndInput) return;
   const start = parseFloat(clipStartInput.value);
-  const end   = parseFloat(clipEndInput.value);
-  const max   = parseFloat(clipStartInput.max) || 1;
-  if (clipStartLabel)    clipStartLabel.textContent    = formatDuration(start);
-  if (clipEndLabel)      clipEndLabel.textContent      = formatDuration(end);
+  const end = parseFloat(clipEndInput.value);
+  const max = parseFloat(clipStartInput.max) || 1;
+  if (clipStartLabel) clipStartLabel.textContent = formatDuration(start);
+  if (clipEndLabel) clipEndLabel.textContent = formatDuration(end);
   if (clipDurationLabel) clipDurationLabel.textContent = `Clip: ${formatDuration(end - start)}`;
   if (clipSelection) {
-    (clipSelection as HTMLElement).style.left  = `${(start / max) * 100}%`;
+    (clipSelection as HTMLElement).style.left = `${(start / max) * 100}%`;
     (clipSelection as HTMLElement).style.width = `${((end - start) / max) * 100}%`;
   }
 }
 
 export function openClipMode(taskId: string, outputUrl: string | null = null): void {
   _clipTaskId = taskId;
-  _clipMode   = true;
+  _clipMode = true;
   if (!isPreviewVisible()) {
     if (outputUrl) {
       openPreviewDirect(outputUrl, taskId);
@@ -754,7 +753,7 @@ function _pauseForScrub(): void {
   if (!previewVideo.paused) previewVideo.pause();
 }
 clipStartInput?.addEventListener('pointerdown', _pauseForScrub);
-clipEndInput?.addEventListener('pointerdown',   _pauseForScrub);
+clipEndInput?.addEventListener('pointerdown', _pauseForScrub);
 
 clipStartInput?.addEventListener('input', () => {
   if (!clipStartInput || !clipEndInput) return;
@@ -784,7 +783,7 @@ clipCancelBtn?.addEventListener('click', deactivateClipMode);
 
 toggleClipBtn?.addEventListener('click', () => {
   _clipTaskId = _currentPreviewTaskId;
-  _clipMode   = true;
+  _clipMode = true;
   _activateClipUI();
   if (previewVideo.readyState >= 1 && isFinite(previewVideo.duration)) {
     initClipSlider();
@@ -796,14 +795,14 @@ toggleClipBtn?.addEventListener('click', () => {
 clipDownloadBtn?.addEventListener('click', async () => {
   if (!_clipTaskId || !clipStartInput || !clipEndInput) return;
   const start = parseFloat(clipStartInput.value);
-  const end   = parseFloat(clipEndInput.value);
+  const end = parseFloat(clipEndInput.value);
   clipDownloadBtn.disabled = true;
   clipDownloadBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Starting…';
   try {
     const res = await apiFetch(`/api/tasks/${_clipTaskId}/clip`, {
-      method:  'POST',
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ start, end }),
+      body: JSON.stringify({ start, end }),
     });
     const d = await res.json();
     if (!res.ok) throw new Error(d.detail || 'Clip failed');
@@ -821,8 +820,9 @@ clipDownloadBtn?.addEventListener('click', async () => {
     }
   } catch (e) {
     toast((e as Error).message, 'danger');
+  } finally {
     clipDownloadBtn.disabled = false;
-    clipDownloadBtn.innerHTML = '<i class="fas fa-cut me-1"></i>Clip & Save';
+    clipDownloadBtn.innerHTML = '<i class="fas fa-download me-1"></i>Download Clip';
   }
 });
 
