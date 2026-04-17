@@ -145,11 +145,16 @@ impl Downloader {
         let content =
             String::from_utf8(bytes.to_vec()).map_err(|e| DownloadError::Parse(e.to_string()))?;
         let playlist = parse_playlist(&content)?;
-        Ok(crate::parser::playlist_to_info(
-            &playlist,
-            &content,
-            &self.config.url,
-        ))
+        let mut info = crate::parser::playlist_to_info(&playlist, &content, &self.config.url);
+        if let Playlist::MasterPlaylist(master) = &playlist {
+            let chosen_url = pick_quality(master, &content, &Quality::Best, &self.config.url);
+            if let Ok(media_content) = fetch_text_retry(&client, &chosen_url, self.config.retry).await {
+                if let Ok(Playlist::MediaPlaylist(media)) = parse_playlist(&media_content) {
+                    info.is_live = !media.end_list;
+                }
+            }
+        }
+        Ok(info)
     }
 
     // ── Main download entry point ─────────────────────────────────────────────
@@ -1185,6 +1190,10 @@ impl Downloader {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     #[test]
     fn stop_recording_does_not_mark_cancelled() {
@@ -1259,6 +1268,72 @@ mod tests {
         let dl = Downloader::new(config);
         // should still succeed — bad header is skipped
         assert!(dl.make_client().is_ok());
+    }
+
+    async fn spawn_static_http_server(
+        routes: HashMap<&'static str, &'static str>,
+    ) -> (String, tokio::task::JoinHandle<()>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test server");
+        let addr = listener.local_addr().expect("test server addr");
+        let routes = Arc::new(routes);
+
+        let task = tokio::spawn(async move {
+            loop {
+                let Ok((mut stream, _)) = listener.accept().await else {
+                    break;
+                };
+                let routes = routes.clone();
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 4096];
+                    let Ok(n) = stream.read(&mut buf).await else {
+                        return;
+                    };
+                    let req = String::from_utf8_lossy(&buf[..n]);
+                    let path = req
+                        .lines()
+                        .next()
+                        .and_then(|line| line.split_whitespace().nth(1))
+                        .unwrap_or("/");
+                    let (status, body) = match routes.get(path) {
+                        Some(body) => ("200 OK", *body),
+                        None => ("404 Not Found", "# not found"),
+                    };
+                    let response = format!(
+                        "HTTP/1.1 {status}\r\nContent-Type: application/vnd.apple.mpegurl\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        body.len(),
+                        body
+                    );
+                    let _ = stream.write_all(response.as_bytes()).await;
+                    let _ = stream.shutdown().await;
+                });
+            }
+        });
+
+        (format!("http://{addr}"), task)
+    }
+
+    #[tokio::test]
+    async fn parse_detects_live_master_playlist_by_fetching_variant_playlist() {
+        let master = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=2000000\nvideo.m3u8\n";
+        let media = "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6.0,\nseg0.m4s\n";
+        let (base_url, server) = spawn_static_http_server(HashMap::from([
+            ("/master.m3u8", master),
+            ("/video.m3u8", media),
+        ]))
+        .await;
+
+        let mut config = DownloadConfig::default();
+        config.url = format!("{base_url}/master.m3u8");
+        let dl = Downloader::new(config);
+
+        let info = dl.parse().await.expect("parse master playlist");
+
+        server.abort();
+
+        assert!(matches!(info.kind, StreamKind::Master));
+        assert!(info.is_live, "master playlist should inherit live state from its variant");
     }
 }
 

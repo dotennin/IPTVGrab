@@ -175,10 +175,21 @@ fn build_clip_ffmpeg_args(
         }
         args.extend([
             "-t".into(), duration.to_string(),
-            "-avoid_negative_ts".into(), "make_zero".into(),
-            "-c".into(), "copy".into(),
-            clip_path_str,
         ]);
+        if raw_audio_path.is_some() {
+            args.extend([
+                "-reset_timestamps".into(), "1".into(),
+                "-c:v".into(), "copy".into(),
+                "-c:a".into(), "aac".into(),
+            ]);
+        } else {
+            args.extend([
+                "-avoid_negative_ts".into(), "make_zero".into(),
+                "-reset_timestamps".into(), "1".into(),
+                "-c".into(), "copy".into(),
+            ]);
+        }
+        args.push(clip_path_str);
         return Ok(args);
     }
 
@@ -251,11 +262,20 @@ fn build_clip_ffmpeg_args(
     } else {
         args.extend(["-map".into(), "0".into()]);
     }
-    args.extend([
-        "-avoid_negative_ts".into(), "make_zero".into(),
-        "-c".into(), "copy".into(),
-        clip_path_str,
-    ]);
+    if audio_list_file.is_some() {
+        args.extend([
+            "-reset_timestamps".into(), "1".into(),
+            "-c:v".into(), "copy".into(),
+            "-c:a".into(), "aac".into(),
+        ]);
+    } else {
+        args.extend([
+            "-avoid_negative_ts".into(), "make_zero".into(),
+            "-reset_timestamps".into(), "1".into(),
+            "-c".into(), "copy".into(),
+        ]);
+    }
+    args.push(clip_path_str);
     Ok(args)
 }
 
@@ -541,4 +561,192 @@ pub(crate) async fn complete_local_merge(
         "filename": body.filename,
     }))
     .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ffmpeg_available(binary: &str) -> bool {
+        std::process::Command::new(binary)
+            .arg("-version")
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false)
+    }
+
+    fn temp_test_dir(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "iptvgrab-{name}-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp test dir");
+        dir
+    }
+
+    fn sample_in_progress_cmaf_task(tmpdir: &Path) -> Task {
+        Task {
+            id: "task-1".into(),
+            url: "https://example.com/live/master.m3u8".into(),
+            status: "downloading".into(),
+            progress: 0,
+            total: 0,
+            downloaded: 0,
+            failed: 0,
+            speed_mbps: 0.0,
+            bytes_downloaded: 0,
+            output: None,
+            size: 0,
+            error: None,
+            created_at: 0.0,
+            req_headers: HashMap::new(),
+            output_name: Some("sample".into()),
+            quality: "best".into(),
+            concurrency: 1,
+            tmpdir: Some(tmpdir.to_string_lossy().to_string()),
+            is_cmaf: Some(true),
+            seg_ext: Some(".m4s".into()),
+            target_duration: Some(2.0),
+            duration_sec: None,
+            recorded_segments: None,
+            elapsed_sec: None,
+            task_type: None,
+            recording_interval_minutes: None,
+            recording_auto_restart: false,
+            recording_output_base: None,
+        }
+    }
+
+    fn generate_split_cmaf_fixture(tmpdir: &Path) {
+        let fixture_dir = temp_test_dir("clip-cmaf-fixture");
+        let output_pattern = fixture_dir.join("out_%v.m3u8");
+        let status = std::process::Command::new("ffmpeg")
+            .args([
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=size=128x128:rate=25",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=1000:sample_rate=48000",
+                "-t",
+                "12",
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+                "-c:a",
+                "aac",
+                "-f",
+                "hls",
+                "-hls_time",
+                "2",
+                "-hls_playlist_type",
+                "vod",
+                "-hls_segment_type",
+                "fmp4",
+                "-master_pl_name",
+                "master.m3u8",
+                "-var_stream_map",
+                "v:0,agroup:aud,name:video a:0,agroup:aud,language:und,name:audio",
+            ])
+            .arg(&output_pattern)
+            .status()
+            .expect("generate split CMAF fixture");
+        assert!(status.success(), "ffmpeg should generate CMAF fixture");
+
+        let audio_dir = tmpdir.join("audio");
+        std::fs::create_dir_all(&audio_dir).expect("create audio dir");
+        std::fs::copy(fixture_dir.join("init_0.mp4"), tmpdir.join("init.mp4")).expect("copy video init");
+        std::fs::copy(fixture_dir.join("init_1.mp4"), audio_dir.join("init.mp4")).expect("copy audio init");
+
+        let mut video_segments: Vec<_> = std::fs::read_dir(&fixture_dir)
+            .expect("read fixture dir")
+            .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+            .filter(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .map(|name| name.starts_with("out_video") && name.ends_with(".m4s"))
+                    .unwrap_or(false)
+            })
+            .collect();
+        video_segments.sort();
+        for (index, path) in video_segments.iter().enumerate() {
+            std::fs::copy(path, tmpdir.join(format!("seg_{index:06}.m4s"))).expect("copy video segment");
+        }
+
+        let mut audio_segments: Vec<_> = std::fs::read_dir(&fixture_dir)
+            .expect("read fixture dir")
+            .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+            .filter(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .map(|name| name.starts_with("out_audio") && name.ends_with(".m4s"))
+                    .unwrap_or(false)
+            })
+            .collect();
+        audio_segments.sort();
+        for (index, path) in audio_segments.iter().enumerate() {
+            std::fs::copy(path, audio_dir.join(format!("seg_{index:06}.m4s"))).expect("copy audio segment");
+        }
+
+        let _ = std::fs::remove_dir_all(fixture_dir);
+    }
+
+    fn first_audio_pts_seconds(path: &Path) -> f64 {
+        let output = std::process::Command::new("ffprobe")
+            .args([
+                "-v",
+                "error",
+                "-select_streams",
+                "a:0",
+                "-show_entries",
+                "packet=pts_time",
+                "-of",
+                "csv=p=0",
+            ])
+            .arg(path)
+            .output()
+            .expect("run ffprobe");
+        assert!(output.status.success(), "ffprobe should inspect clip output");
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .find_map(|line| line.trim().parse::<f64>().ok())
+            .expect("audio packet pts")
+    }
+
+    #[test]
+    fn cmaf_clip_resets_audio_timestamps_to_zero() {
+        if !ffmpeg_available("ffmpeg") || !ffmpeg_available("ffprobe") {
+            return;
+        }
+
+        let tmpdir = temp_test_dir("clip-cmaf-task");
+        let downloads_dir = temp_test_dir("clip-cmaf-downloads");
+        generate_split_cmaf_fixture(&tmpdir);
+        let task = sample_in_progress_cmaf_task(&tmpdir);
+
+        let args = build_clip_ffmpeg_args(&task, &downloads_dir, "clip.mp4", 2.0, 3.0)
+            .expect("build clip ffmpeg args");
+        let status = std::process::Command::new("ffmpeg")
+            .args(&args)
+            .status()
+            .expect("run clip ffmpeg");
+        assert!(status.success(), "ffmpeg should create clip output");
+
+        let clip_path = downloads_dir.join("clip.mp4");
+        let audio_pts = first_audio_pts_seconds(&clip_path);
+
+        let _ = std::fs::remove_dir_all(tmpdir);
+        let _ = std::fs::remove_dir_all(downloads_dir);
+
+        assert!(
+            audio_pts < 0.1,
+            "expected clipped audio to start near zero, got {audio_pts}"
+        );
+    }
 }

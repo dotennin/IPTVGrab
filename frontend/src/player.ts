@@ -60,9 +60,12 @@ export function showStreamInfo(info: StreamInfo): void {
   if (!badge || !body) return;
 
   if (info.kind === 'master' && info.streams) {
-    badge.innerHTML = `<span class="badge bg-info">Master playlist</span>`;
+    const isLive = info.is_live === true;
+    badge.innerHTML = isLive
+      ? `<span class="badge bg-danger live-badge"><i class="fas fa-circle me-1" style="font-size:.6em"></i>LIVE master</span>`
+      : `<span class="badge bg-info">Master playlist</span>`;
     let html = `<p class="text-muted small mb-3">
-      <i class="fas fa-layer-group me-1"></i>${info.streams.length} quality option(s). Select a stream to download:
+      <i class="fas fa-layer-group me-1"></i>${info.streams.length} quality option(s). Select a stream to ${isLive ? 'record' : 'download'}:
     </p>`;
     info.streams.forEach((s, i) => {
       const checked = i === 0 ? 'checked' : '';
@@ -77,10 +80,10 @@ export function showStreamInfo(info: StreamInfo): void {
               ${s.codecs ? ` · ${esc(s.codecs)}` : ''}
             </div>
           </div>
-          ${i === 0 ? '<span class="badge bg-success">Best</span>' : ''}
+            ${i === 0 ? '<span class="badge bg-success">Best</span>' : ''}
         </label>`;
     });
-    body.innerHTML = html + downloadButton();
+    body.innerHTML = html + downloadButton(isLive);
   } else {
     const isLive = info.is_live === true;
     badge.innerHTML = isLive
