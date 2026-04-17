@@ -32,7 +32,7 @@ make frontend-build
 cargo run -p server
 ```
 
-## Flutter quick start
+## Flutter desktop quick start (macOS)
 
 ```bash
 make flutter-prepare
