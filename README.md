@@ -59,7 +59,3 @@ make test
 ```
 
 Use `make test-rust` for Rust/web contributor checks. `make test` runs the full stack, including Flutter tests.
-
-## Should this project use Pretext?
-
-No — not for the current frontend. The browser app uses imperative DOM updates and `IntersectionObserver`-based batching rather than custom multiline text layout, canvas rendering, or DOM-measurement-heavy text virtualisation. Revisit Pretext only if the UI evolves toward text-heavy pre-layout or manual rendering.
