@@ -24,6 +24,9 @@ export interface Task {
   recorded_segments: number | null;
   elapsed_sec: number | null;
   task_type?: string;
+  recording_interval_minutes?: number | null;
+  recording_auto_restart?: boolean;
+  recording_output_base?: string | null;
 }
 
 export interface Channel {
@@ -122,6 +125,8 @@ export interface Settings {
   healthOnlyFilter: boolean;
   recentLimit: number;
   autoFullscreen: boolean;
+  recordingIntervalMinutes: number;
+  recordingAutoRestart: boolean;
 }
 
 export interface RecentChannel {

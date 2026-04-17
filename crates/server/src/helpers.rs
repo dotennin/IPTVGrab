@@ -534,6 +534,9 @@ mod tests {
             recorded_segments: None,
             elapsed_sec: None,
             task_type: None,
+            recording_interval_minutes: None,
+            recording_auto_restart: false,
+            recording_output_base: None,
         };
 
         assert_eq!(
@@ -579,6 +582,9 @@ mod tests {
             recorded_segments: None,
             elapsed_sec: None,
             task_type: None,
+            recording_interval_minutes: None,
+            recording_auto_restart: false,
+            recording_output_base: None,
         };
 
         assert_eq!(

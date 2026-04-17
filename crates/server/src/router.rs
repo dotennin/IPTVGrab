@@ -409,12 +409,60 @@ pub async fn run_from_env() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{collections::HashMap, io::Write, time::Duration};
+
     use serde_json::json;
+
+    use crate::types::Task;
 
     async fn spawn_test_server(tmpdir: &std::path::Path) -> EmbeddedServer {
         start_embedded_server(EmbeddedServerConfig::local_device(tmpdir.to_path_buf()))
             .await
             .unwrap()
+    }
+
+    fn sample_task(task_id: &str, tmpdir: Option<String>) -> Task {
+        Task {
+            id: task_id.to_string(),
+            url: "https://example.com/live.m3u8".into(),
+            status: "recording".into(),
+            progress: 0,
+            total: 0,
+            downloaded: 0,
+            failed: 0,
+            speed_mbps: 0.0,
+            bytes_downloaded: 0,
+            output: None,
+            size: 0,
+            error: None,
+            created_at: 1.0,
+            req_headers: HashMap::new(),
+            output_name: Some("Demo Channel".into()),
+            quality: "best".into(),
+            concurrency: 8,
+            tmpdir,
+            is_cmaf: Some(true),
+            seg_ext: Some("m4s".into()),
+            target_duration: Some(6.0),
+            duration_sec: None,
+            recorded_segments: Some(1),
+            elapsed_sec: Some(61),
+            task_type: None,
+            recording_interval_minutes: Some(60),
+            recording_auto_restart: true,
+            recording_output_base: Some("Demo Channel".into()),
+        }
+    }
+
+    fn looks_like_timestamped_name(value: &str, base: &str) -> bool {
+        let Some(suffix) = value.strip_prefix(&format!("{base}_")) else {
+            return false;
+        };
+        let parts: Vec<_> = suffix.split('-').collect();
+        parts.len() == 3
+            && parts
+                .iter()
+                .all(|part| part.len() == 2 && part.chars().all(|ch| ch.is_ascii_digit()))
     }
 
     #[tokio::test]
@@ -634,6 +682,156 @@ mod tests {
 
         server.stop().await.unwrap();
         let _ = std::fs::remove_dir_all(&tmpdir);
+    }
+
+    #[tokio::test]
+    async fn live_clip_returns_before_segment_snapshot_finishes() {
+        let tmpdir = std::env::temp_dir()
+            .join(format!("m3u8-server-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&tmpdir).unwrap();
+
+        let recording_tmpdir = tmpdir.join("recording-task");
+        std::fs::create_dir_all(&recording_tmpdir).unwrap();
+        let fifo_path = recording_tmpdir.join("0001.m4s");
+        let status = std::process::Command::new("mkfifo")
+            .arg(&fifo_path)
+            .status()
+            .unwrap();
+        assert!(status.success());
+
+        let task_id = uuid::Uuid::new_v4().to_string();
+        let tasks = HashMap::from([(
+            task_id.clone(),
+            sample_task(&task_id, Some(recording_tmpdir.to_string_lossy().to_string())),
+        )]);
+        std::fs::write(
+            tmpdir.join("tasks.json"),
+            serde_json::to_vec(&tasks).unwrap(),
+        )
+        .unwrap();
+
+        let fifo_writer = fifo_path.clone();
+        let writer = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .open(fifo_writer)
+                .unwrap();
+            file.write_all(b"not-a-real-fragment").unwrap();
+        });
+
+        let server = spawn_test_server(&tmpdir).await;
+        let client = reqwest::Client::new();
+        let response = tokio::time::timeout(
+            Duration::from_millis(150),
+            client
+                .post(format!("{}/api/tasks/{}/clip", server.base_url(), task_id))
+                .json(&json!({ "start": 0.0, "end": 8.0 }))
+                .send(),
+        )
+        .await
+        .expect("clip response should not block on segment preparation")
+        .unwrap();
+        assert!(response.status().is_success());
+
+        let payload = response.json::<serde_json::Value>().await.unwrap();
+        assert!(payload["clip_task_id"].as_str().is_some());
+
+        writer.join().unwrap();
+        server.stop().await.unwrap();
+        let _ = std::fs::remove_dir_all(&tmpdir);
+    }
+
+    #[tokio::test]
+    async fn app_settings_round_trip_includes_recording_interval_fields() {
+        let tmpdir = std::env::temp_dir()
+            .join(format!("m3u8-server-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&tmpdir).unwrap();
+        let server = spawn_test_server(&tmpdir).await;
+        let client = reqwest::Client::new();
+
+        let patch = client
+            .patch(format!("{}/api/settings", server.base_url()))
+            .json(&json!({
+                "recording_interval_minutes": 90,
+                "recording_auto_restart": true
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert!(patch.status().is_success());
+        let patched = patch.json::<serde_json::Value>().await.unwrap();
+        assert_eq!(patched["recording_interval_minutes"], 90);
+        assert_eq!(patched["recording_auto_restart"], true);
+
+        let get = client
+            .get(format!("{}/api/settings", server.base_url()))
+            .send()
+            .await
+            .unwrap();
+        assert!(get.status().is_success());
+        let current = get.json::<serde_json::Value>().await.unwrap();
+        assert_eq!(current["recording_interval_minutes"], 90);
+        assert_eq!(current["recording_auto_restart"], true);
+
+        server.stop().await.unwrap();
+        let _ = std::fs::remove_dir_all(&tmpdir);
+    }
+
+    #[tokio::test]
+    async fn start_download_persists_recording_preferences_and_timestamps_name() {
+        let tmpdir = std::env::temp_dir()
+            .join(format!("m3u8-server-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&tmpdir).unwrap();
+        let server = spawn_test_server(&tmpdir).await;
+        let client = reqwest::Client::new();
+
+        let response = client
+            .post(format!("{}/api/download", server.base_url()))
+            .json(&json!({
+                "url": "https://example.com/live.m3u8",
+                "headers": {},
+                "output_name": "Demo Channel",
+                "quality": "best",
+                "concurrency": 8,
+                "recording_interval_minutes": 60,
+                "recording_auto_restart": true
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert!(response.status().is_success());
+        let task_id = response.json::<serde_json::Value>().await.unwrap()["task_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let task = client
+            .get(format!("{}/api/tasks/{}", server.base_url(), task_id))
+            .send()
+            .await
+            .unwrap()
+            .json::<serde_json::Value>()
+            .await
+            .unwrap();
+
+        assert_eq!(task["recording_interval_minutes"], 60);
+        assert_eq!(task["recording_auto_restart"], true);
+        assert_eq!(task["recording_output_base"], "Demo Channel");
+        let output_name = task["output_name"].as_str().unwrap_or_default();
+        assert!(looks_like_timestamped_name(output_name, "Demo Channel"));
+
+        server.stop().await.unwrap();
+        let _ = std::fs::remove_dir_all(&tmpdir);
+    }
+
+    #[test]
+    fn recording_successor_task_gets_fresh_timestamped_output_name() {
+        let source = sample_task("source-task", None);
+        let next = crate::handlers::tasks::make_task("next-task", &source, 1.0);
+        let output_name = next.output_name.as_deref().unwrap_or_default();
+        assert!(looks_like_timestamped_name(output_name, "Demo Channel"));
+        assert_ne!(output_name, "Demo Channel");
     }
 
     #[tokio::test]

@@ -24,7 +24,7 @@ import { Modal } from './bootstrap-shim';
 import { renderChannelCard, bindChannelGrid } from './channel-card';
 import type { BindOptions } from './channel-card';
 import type { SavedPlaylist, Channel, MergedChannel, StreamInfo } from './types';
-import { saveSettings } from './settings';
+import { normalizeRecordingIntervalMinutes, saveSettings, settings } from './settings';
 
 const PAGE_SIZE = 60;
 
@@ -388,15 +388,25 @@ export async function downloadChannel(
     });
     const streamInfo: StreamInfo | null = parseRes.ok ? await parseRes.json() : null;
 
-    let quality = 'best';
-    if (streamInfo && streamInfo.kind === 'master' && streamInfo.streams && streamInfo.streams.length > 0) {
-      quality = await pickQuality(ch, streamInfo);
+    let downloadOptions: { quality: string; recordingIntervalMinutes?: number; recordingAutoRestart: boolean } = {
+      quality: 'best',
+      recordingAutoRestart: false,
+    };
+    if (streamInfo && (streamInfo.is_live || (streamInfo.kind === 'master' && streamInfo.streams && streamInfo.streams.length > 0))) {
+      downloadOptions = await pickDownloadOptions(ch, streamInfo);
     }
 
     const res  = await apiFetch('/api/download', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ url: ch.url, output_name: ch.name || null, quality, concurrency: 8 }),
+      body:    JSON.stringify({
+        url: ch.url,
+        output_name: ch.name || null,
+        quality: downloadOptions.quality,
+        concurrency: 8,
+        recording_interval_minutes: streamInfo?.is_live ? downloadOptions.recordingIntervalMinutes : undefined,
+        recording_auto_restart: streamInfo?.is_live ? downloadOptions.recordingAutoRestart : false,
+      }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || 'Failed to start download');
@@ -421,36 +431,64 @@ function showDownloadsTab(): void {
   (window as unknown as Record<string, Function>).showDownloadsTab?.();
 }
 
-function pickQuality(
+function pickDownloadOptions(
   ch: Channel,
   streamInfo: StreamInfo,
-): Promise<string> {
+): Promise<{ quality: string; recordingIntervalMinutes?: number; recordingAutoRestart: boolean }> {
   return new Promise((resolve, reject) => {
     const modalEl = document.getElementById('qualitySelectModal');
     const body    = document.getElementById('qualitySelectBody');
-    if (!modalEl || !body) { resolve('0'); return; }
+    if (!modalEl || !body) {
+      resolve({ quality: 'best', recordingAutoRestart: false });
+      return;
+    }
     const titleEl = modalEl.querySelector('.tw-modal-title');
     if (titleEl) titleEl.innerHTML = `<i class="fas fa-layer-group mr-2 text-gh-blue-light"></i>${esc(ch.name || 'Select Quality')}`;
 
-    let html = `<p class="text-gh-muted text-sm mb-3">
-      <i class="fas fa-layer-group mr-1"></i>${streamInfo.streams!.length} quality option(s) — choose one to download:
-    </p>`;
-    streamInfo.streams!.forEach((s, i) => {
-      const checked = i === 0 ? 'checked' : '';
+    let html = '';
+    if (streamInfo.kind === 'master' && streamInfo.streams && streamInfo.streams.length > 0) {
+      html += `<p class="text-gh-muted text-sm mb-3">
+        <i class="fas fa-layer-group mr-1"></i>${streamInfo.streams.length} quality option(s) — choose one to ${streamInfo.is_live ? 'record' : 'download'}:
+      </p>`;
+      streamInfo.streams.forEach((s, i) => {
+        const checked = i === 0 ? 'checked' : '';
+        html += `
+          <label class="quality-option d-flex align-items-center gap-3 w-100">
+            <input type="radio" name="qs-quality" value="${i}" ${checked} class="flex-shrink-0" />
+            <div class="flex-grow-1">
+              <div class="fw-semibold">${esc(s.label)}</div>
+              <div class="text-muted small">
+                ${s.resolution ? `${esc(s.resolution)} · ` : ''}
+                ${Math.round(s.bandwidth / 1000)} kbps
+                ${s.codecs ? ` · ${esc(s.codecs)}` : ''}
+              </div>
+            </div>
+            ${i === 0 ? '<span class="badge bg-success">Best</span>' : ''}
+          </label>`;
+      });
+    } else {
+      html += `<p class="text-gh-muted text-sm mb-3">
+        <i class="fas fa-circle mr-1 text-gh-red"></i>Live stream — recording starts immediately after confirmation.
+      </p>`;
+    }
+    if (streamInfo.is_live) {
       html += `
-        <label class="quality-option d-flex align-items-center gap-3 w-100">
-          <input type="radio" name="qs-quality" value="${i}" ${checked} class="flex-shrink-0" />
-          <div class="flex-grow-1">
-            <div class="fw-semibold">${esc(s.label)}</div>
-            <div class="text-muted small">
-              ${s.resolution ? `${esc(s.resolution)} · ` : ''}
-              ${Math.round(s.bandwidth / 1000)} kbps
-              ${s.codecs ? ` · ${esc(s.codecs)}` : ''}
+        <div class="border-top border-gh-border mt-3 pt-3">
+          <div class="grid grid-cols-12 gap-3">
+            <div class="col-span-6">
+              <label class="form-label text-gh-muted text-sm">Recording interval (minutes)</label>
+              <input type="number" class="form-control" id="qsRecordingInterval" min="1" max="1440" step="1" value="${settings.recordingIntervalMinutes}" />
+            </div>
+            <div class="col-span-6">
+              <label class="form-label text-gh-muted text-sm d-block">After each interval</label>
+              <label class="inline-flex items-center gap-2 text-sm mt-2">
+                <input type="checkbox" id="qsRecordingAutoRestart" ${settings.recordingAutoRestart ? 'checked' : ''} />
+                <span>Save and start a new recording</span>
+              </label>
             </div>
           </div>
-          ${i === 0 ? '<span class="badge bg-success">Best</span>' : ''}
-        </label>`;
-    });
+        </div>`;
+    }
     body.innerHTML = html;
 
     body.querySelectorAll('.quality-option').forEach((label) => {
@@ -462,6 +500,11 @@ function pickQuality(
 
     const modal      = Modal.getOrCreateInstance(modalEl)!;
     const confirmBtn = document.getElementById('qualitySelectConfirmBtn');
+    if (confirmBtn) {
+      confirmBtn.innerHTML = streamInfo.is_live
+        ? '<i class="fas fa-circle mr-1"></i>Start recording'
+        : '<i class="fas fa-download mr-1"></i>Download';
+    }
 
     function cleanup(): void {
       confirmBtn?.removeEventListener('click', onConfirm);
@@ -469,9 +512,19 @@ function pickQuality(
     }
     function onConfirm(): void {
       const sel = body!.querySelector('input[name="qs-quality"]:checked') as HTMLInputElement | null;
+      const recordingIntervalEl = body!.querySelector('#qsRecordingInterval') as HTMLInputElement | null;
+      const recordingAutoRestartEl = body!.querySelector('#qsRecordingAutoRestart') as HTMLInputElement | null;
       cleanup();
       modal.hide();
-      resolve(sel ? sel.value : '0');
+      resolve({
+        quality: sel ? sel.value : 'best',
+        recordingIntervalMinutes: streamInfo.is_live
+          ? normalizeRecordingIntervalMinutes(recordingIntervalEl?.value || settings.recordingIntervalMinutes)
+          : undefined,
+        recordingAutoRestart: streamInfo.is_live
+          ? (recordingAutoRestartEl?.checked ?? settings.recordingAutoRestart)
+          : false,
+      });
     }
     function onCancel(): void { cleanup(); reject(new Error('cancelled')); }
 

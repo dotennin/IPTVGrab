@@ -32,6 +32,233 @@ fn now_secs() -> f64 {
         .as_secs_f64()
 }
 
+fn clip_name_for_task(source_task: &Task, task_id: &str, suffix: &str) -> Result<String, String> {
+    if source_task.status == "completed" {
+        let output = source_task
+            .output
+            .as_deref()
+            .ok_or_else(|| "No output file".to_string())?;
+        let stem = Path::new(output)
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        Ok(format!("{stem}_clip_{suffix}.mp4"))
+    } else {
+        let stem = source_task
+            .output_name
+            .as_deref()
+            .unwrap_or(&task_id[..8.min(task_id.len())])
+            .trim_end_matches(".mp4")
+            .to_string();
+        Ok(format!("{stem}_clip_{suffix}.mp4"))
+    }
+}
+
+fn build_clip_ffmpeg_args(
+    source_task: &Task,
+    downloads_dir: &Path,
+    clip_name: &str,
+    start: f64,
+    duration: f64,
+) -> Result<Vec<String>, String> {
+    if source_task.status == "completed" {
+        let output = source_task
+            .output
+            .as_deref()
+            .ok_or_else(|| "No output file".to_string())?;
+        let input_path = downloads_dir.join(output);
+        if !input_path.exists() {
+            return Err("Output file not found".into());
+        }
+        let clip_path = downloads_dir.join(clip_name);
+        return Ok(vec![
+            "-y".into(),
+            "-ss".into(), start.to_string(),
+            "-i".into(), input_path.to_string_lossy().to_string(),
+            "-t".into(), duration.to_string(),
+            "-map".into(), "0".into(),
+            "-avoid_negative_ts".into(), "make_zero".into(),
+            "-c".into(), "copy".into(),
+            clip_path.to_string_lossy().to_string(),
+        ]);
+    }
+
+    let tmpdir = source_task
+        .tmpdir
+        .as_deref()
+        .filter(|d| Path::new(d).exists())
+        .map(std::path::PathBuf::from)
+        .ok_or_else(|| "Task cannot be clipped in its current state".to_string())?;
+    if !matches!(
+        source_task.status.as_str(),
+        "downloading" | "recording" | "stopping" | "merging" | "interrupted"
+    ) {
+        return Err("Task cannot be clipped in its current state".into());
+    }
+
+    let is_cmaf = source_task.is_cmaf.unwrap_or(false);
+    let seg_ext = source_task
+        .seg_ext
+        .as_deref()
+        .unwrap_or(".ts")
+        .trim_start_matches('.')
+        .to_string();
+    let clip_path = downloads_dir.join(clip_name);
+    let clip_path_str = clip_path.to_string_lossy().to_string();
+
+    if is_cmaf {
+        let mut seg_files: Vec<_> = std::fs::read_dir(&tmpdir)
+            .into_iter()
+            .flatten()
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| p.extension().and_then(|e| e.to_str()) == Some(&seg_ext as &str))
+            .collect();
+        seg_files.sort();
+        if seg_files.is_empty() {
+            return Err("No segments available yet".into());
+        }
+        let raw_path = tmpdir.join("clip_raw.mp4");
+        let init_file = tmpdir.join("init.mp4");
+        if let Ok(mut f) = std::fs::File::create(&raw_path) {
+            use std::io::Write;
+            if init_file.exists() {
+                let _ = f.write_all(&std::fs::read(&init_file).unwrap_or_default());
+            }
+            for sf in &seg_files {
+                let _ = f.write_all(&std::fs::read(sf).unwrap_or_default());
+            }
+        }
+
+        let audio_dir = tmpdir.join("audio");
+        let raw_audio_path: Option<std::path::PathBuf> = if audio_dir.is_dir() {
+            let mut audio_segs: Vec<_> = std::fs::read_dir(&audio_dir)
+                .into_iter()
+                .flatten()
+                .filter_map(|e| e.ok().map(|e| e.path()))
+                .filter(|p| p.extension().and_then(|e| e.to_str()) == Some(&seg_ext as &str))
+                .collect();
+            audio_segs.sort();
+            if !audio_segs.is_empty() {
+                let p = tmpdir.join("clip_raw_audio.mp4");
+                if let Ok(mut f) = std::fs::File::create(&p) {
+                    use std::io::Write;
+                    let audio_init = audio_dir.join("init.mp4");
+                    if audio_init.exists() {
+                        let _ = f.write_all(&std::fs::read(&audio_init).unwrap_or_default());
+                    }
+                    for sf in &audio_segs {
+                        let _ = f.write_all(&std::fs::read(sf).unwrap_or_default());
+                    }
+                }
+                Some(p)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let mut args: Vec<String> = vec![
+            "-y".into(),
+            "-ss".into(), start.to_string(),
+            "-i".into(), raw_path.to_string_lossy().to_string(),
+        ];
+        if let Some(ref ap) = raw_audio_path {
+            args.extend([
+                "-i".into(), ap.to_string_lossy().to_string(),
+                "-map".into(), "0:v".into(),
+                "-map".into(), "1:a".into(),
+            ]);
+        } else {
+            args.extend(["-map".into(), "0".into()]);
+        }
+        args.extend([
+            "-t".into(), duration.to_string(),
+            "-avoid_negative_ts".into(), "make_zero".into(),
+            "-c".into(), "copy".into(),
+            clip_path_str,
+        ]);
+        return Ok(args);
+    }
+
+    let mut seg_files: Vec<_> = std::fs::read_dir(&tmpdir)
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("ts"))
+        .collect();
+    seg_files.sort();
+    if seg_files.is_empty() {
+        return Err("No segments available yet".into());
+    }
+    let list_file = tmpdir.join("clip_concat.txt");
+    let list_content: String = seg_files
+        .iter()
+        .map(|p| {
+            let abs = std::fs::canonicalize(p).unwrap_or_else(|_| p.clone());
+            format!("file '{}'\n", abs.display())
+        })
+        .collect();
+    let _ = std::fs::write(&list_file, &list_content);
+
+    let audio_dir = tmpdir.join("audio");
+    let audio_list_file: Option<std::path::PathBuf> = if audio_dir.is_dir() {
+        let mut audio_segs: Vec<_> = std::fs::read_dir(&audio_dir)
+            .into_iter()
+            .flatten()
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("ts"))
+            .collect();
+        audio_segs.sort();
+        if !audio_segs.is_empty() {
+            let lf = tmpdir.join("clip_audio_concat.txt");
+            let lc: String = audio_segs
+                .iter()
+                .map(|p| {
+                    let abs = std::fs::canonicalize(p).unwrap_or_else(|_| p.clone());
+                    format!("file '{}'\n", abs.display())
+                })
+                .collect();
+            let _ = std::fs::write(&lf, &lc);
+            Some(lf)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let mut args: Vec<String> = vec![
+        "-y".into(),
+        "-f".into(), "concat".into(),
+        "-safe".into(), "0".into(),
+        "-i".into(), list_file.to_string_lossy().to_string(),
+    ];
+    if let Some(ref alf) = audio_list_file {
+        args.extend([
+            "-f".into(), "concat".into(),
+            "-safe".into(), "0".into(),
+            "-i".into(), alf.to_string_lossy().to_string(),
+        ]);
+    }
+    args.extend([
+        "-ss".into(), start.to_string(),
+        "-t".into(), duration.to_string(),
+    ]);
+    if audio_list_file.is_some() {
+        args.extend(["-map".into(), "0:v".into(), "-map".into(), "1:a".into()]);
+    } else {
+        args.extend(["-map".into(), "0".into()]);
+    }
+    args.extend([
+        "-avoid_negative_ts".into(), "make_zero".into(),
+        "-c".into(), "copy".into(),
+        clip_path_str,
+    ]);
+    Ok(args)
+}
+
 /// Broadcast the current state of `task_id` to all WebSocket subscribers.
 async fn broadcast_task(state: &AppState, task_id: &str) {
     let json = {
@@ -75,13 +302,29 @@ pub(crate) async fn clip_task(
     };
     let duration = body.end - body.start;
     let suffix = format!("{}-{}", fmt_hms(body.start), fmt_hms(body.end));
+    let clip_start = body.start;
 
     let downloads_dir =
         std::fs::canonicalize(&state.downloads_dir).unwrap_or_else(|_| state.downloads_dir.clone());
 
-    // ── Build the ffmpeg command (must happen synchronously so we can capture
-    //    tmpdir contents before they change) ─────────────────────────────────
-    let (clip_name, ffmpeg_args): (String, Vec<String>) = if source_task.status == "completed" {
+    let clip_name = match clip_name_for_task(&source_task, &task_id, &suffix) {
+        Ok(name) => name,
+        Err(detail) if detail == "No output file" => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"detail": detail})),
+            )
+                .into_response()
+        }
+        Err(detail) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"detail": detail})),
+            )
+                .into_response()
+        }
+    };
+    if source_task.status == "completed" {
         let output = match &source_task.output {
             Some(o) => o.clone(),
             None => {
@@ -92,233 +335,29 @@ pub(crate) async fn clip_task(
                     .into_response()
             }
         };
-        let input_path = downloads_dir.join(&output);
-        if !input_path.exists() {
+        if !downloads_dir.join(output).exists() {
             return (
                 StatusCode::NOT_FOUND,
                 Json(serde_json::json!({"detail":"Output file not found"})),
             )
                 .into_response();
         }
-        let stem = Path::new(&output)
-            .file_stem()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string();
-        let clip_name = format!("{stem}_clip_{suffix}.mp4");
-        let clip_path = downloads_dir.join(&clip_name);
-        let args = vec![
-            "-y".into(),
-            "-ss".into(), body.start.to_string(),
-            "-i".into(), input_path.to_string_lossy().to_string(),
-            "-t".into(), duration.to_string(),
-            "-map".into(), "0".into(),
-            "-avoid_negative_ts".into(), "make_zero".into(),
-            "-c".into(), "copy".into(),
-            clip_path.to_string_lossy().to_string(),
-        ];
-        (clip_name, args)
-    } else {
-        // In-progress task (downloading / recording / stopping / merging)
-        let tmpdir = match source_task.tmpdir.as_deref().filter(|d| Path::new(d).exists()) {
-            Some(d) => std::path::PathBuf::from(d),
-            None => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(serde_json::json!({"detail":"Task cannot be clipped in its current state"})),
-                )
-                    .into_response()
-            }
-        };
-        if !matches!(
+    } else if source_task
+        .tmpdir
+        .as_deref()
+        .filter(|d| Path::new(d).exists())
+        .is_none()
+        || !matches!(
             source_task.status.as_str(),
             "downloading" | "recording" | "stopping" | "merging" | "interrupted"
-        ) {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"detail":"Task cannot be clipped in its current state"})),
-            )
-                .into_response();
-        }
-        let stem = source_task
-            .output_name
-            .as_deref()
-            .unwrap_or(&task_id[..8.min(task_id.len())])
-            .trim_end_matches(".mp4")
-            .to_string();
-        let clip_name = format!("{stem}_clip_{suffix}.mp4");
-        let is_cmaf = source_task.is_cmaf.unwrap_or(false);
-        let seg_ext = source_task
-            .seg_ext
-            .as_deref()
-            .unwrap_or(".ts")
-            .trim_start_matches('.')
-            .to_string();
-        let clip_path = downloads_dir.join(&clip_name);
-        let clip_path_str = clip_path.to_string_lossy().to_string();
-
-        let args = if is_cmaf {
-            let mut seg_files: Vec<_> = std::fs::read_dir(&tmpdir)
-                .into_iter()
-                .flatten()
-                .filter_map(|e| e.ok().map(|e| e.path()))
-                .filter(|p| p.extension().and_then(|e| e.to_str()) == Some(&seg_ext as &str))
-                .collect();
-            seg_files.sort();
-            if seg_files.is_empty() {
-                return (
-                    StatusCode::NOT_FOUND,
-                    Json(serde_json::json!({"detail":"No segments available yet"})),
-                )
-                    .into_response();
-            }
-            let raw_path = tmpdir.join("clip_raw.mp4");
-            let init_file = tmpdir.join("init.mp4");
-            if let Ok(mut f) = std::fs::File::create(&raw_path) {
-                use std::io::Write;
-                if init_file.exists() {
-                    let _ = f.write_all(&std::fs::read(&init_file).unwrap_or_default());
-                }
-                for sf in &seg_files {
-                    let _ = f.write_all(&std::fs::read(sf).unwrap_or_default());
-                }
-            }
-
-            // Check for separate audio rendition in tmpdir/audio/
-            let audio_dir = tmpdir.join("audio");
-            let raw_audio_path: Option<std::path::PathBuf> = if audio_dir.is_dir() {
-                let mut audio_segs: Vec<_> = std::fs::read_dir(&audio_dir)
-                    .into_iter()
-                    .flatten()
-                    .filter_map(|e| e.ok().map(|e| e.path()))
-                    .filter(|p| p.extension().and_then(|e| e.to_str()) == Some(&seg_ext as &str))
-                    .collect();
-                audio_segs.sort();
-                if !audio_segs.is_empty() {
-                    let p = tmpdir.join("clip_raw_audio.mp4");
-                    if let Ok(mut f) = std::fs::File::create(&p) {
-                        use std::io::Write;
-                        let audio_init = audio_dir.join("init.mp4");
-                        if audio_init.exists() {
-                            let _ = f.write_all(&std::fs::read(&audio_init).unwrap_or_default());
-                        }
-                        for sf in &audio_segs {
-                            let _ = f.write_all(&std::fs::read(sf).unwrap_or_default());
-                        }
-                    }
-                    Some(p)
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-
-            let mut args: Vec<String> = vec![
-                "-y".into(),
-                "-ss".into(), body.start.to_string(),
-                "-i".into(), raw_path.to_string_lossy().to_string(),
-            ];
-            if let Some(ref ap) = raw_audio_path {
-                args.extend([
-                    "-i".into(), ap.to_string_lossy().to_string(),
-                    "-map".into(), "0:v".into(),
-                    "-map".into(), "1:a".into(),
-                ]);
-            } else {
-                args.extend(["-map".into(), "0".into()]);
-            }
-            args.extend([
-                "-t".into(), duration.to_string(),
-                "-avoid_negative_ts".into(), "make_zero".into(),
-                "-c".into(), "copy".into(),
-                clip_path_str,
-            ]);
-            args
-        } else {
-            let mut seg_files: Vec<_> = std::fs::read_dir(&tmpdir)
-                .into_iter()
-                .flatten()
-                .filter_map(|e| e.ok().map(|e| e.path()))
-                .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("ts"))
-                .collect();
-            seg_files.sort();
-            if seg_files.is_empty() {
-                return (
-                    StatusCode::NOT_FOUND,
-                    Json(serde_json::json!({"detail":"No segments available yet"})),
-                )
-                    .into_response();
-            }
-            let list_file = tmpdir.join("clip_concat.txt");
-            let list_content: String = seg_files
-                .iter()
-                .map(|p| {
-                    let abs = std::fs::canonicalize(p).unwrap_or_else(|_| p.clone());
-                    format!("file '{}'\n", abs.display())
-                })
-                .collect();
-            let _ = std::fs::write(&list_file, &list_content);
-
-            // Check for separate audio rendition in tmpdir/audio/
-            let audio_dir = tmpdir.join("audio");
-            let audio_list_file: Option<std::path::PathBuf> = if audio_dir.is_dir() {
-                let mut audio_segs: Vec<_> = std::fs::read_dir(&audio_dir)
-                    .into_iter()
-                    .flatten()
-                    .filter_map(|e| e.ok().map(|e| e.path()))
-                    .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("ts"))
-                    .collect();
-                audio_segs.sort();
-                if !audio_segs.is_empty() {
-                    let lf = tmpdir.join("clip_audio_concat.txt");
-                    let lc: String = audio_segs
-                        .iter()
-                        .map(|p| {
-                            let abs = std::fs::canonicalize(p).unwrap_or_else(|_| p.clone());
-                            format!("file '{}'\n", abs.display())
-                        })
-                        .collect();
-                    let _ = std::fs::write(&lf, &lc);
-                    Some(lf)
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-
-            let mut args: Vec<String> = vec![
-                "-y".into(),
-                "-f".into(), "concat".into(),
-                "-safe".into(), "0".into(),
-                "-i".into(), list_file.to_string_lossy().to_string(),
-            ];
-            if let Some(ref alf) = audio_list_file {
-                args.extend([
-                    "-f".into(), "concat".into(),
-                    "-safe".into(), "0".into(),
-                    "-i".into(), alf.to_string_lossy().to_string(),
-                ]);
-            }
-            args.extend([
-                "-ss".into(), body.start.to_string(),
-                "-t".into(), duration.to_string(),
-            ]);
-            if audio_list_file.is_some() {
-                args.extend(["-map".into(), "0:v".into(), "-map".into(), "1:a".into()]);
-            } else {
-                args.extend(["-map".into(), "0".into()]);
-            }
-            args.extend([
-                "-avoid_negative_ts".into(), "make_zero".into(),
-                "-c".into(), "copy".into(),
-                clip_path_str,
-            ]);
-            args
-        };
-        (clip_name, args)
-    };
+        )
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"detail":"Task cannot be clipped in its current state"})),
+        )
+            .into_response();
+    }
 
     // ── Create a clip task entry ─────────────────────────────────────────────
     let clip_task_id = Uuid::new_v4().to_string();
@@ -349,6 +388,9 @@ pub(crate) async fn clip_task(
         duration_sec: Some(duration),
         recorded_segments: None,
         elapsed_sec: None,
+        recording_interval_minutes: None,
+        recording_auto_restart: false,
+        recording_output_base: None,
     };
     {
         let mut tasks = state.tasks.write().await;
@@ -361,7 +403,50 @@ pub(crate) async fn clip_task(
     let state_bg = state.clone();
     let clip_task_id_bg = clip_task_id.clone();
     let clip_name_bg = clip_name.clone();
+    let source_task_bg = source_task.clone();
+    let downloads_dir_bg = downloads_dir.clone();
+    let clip_name_prep = clip_name_bg.clone();
     tokio::spawn(async move {
+        let ffmpeg_args = match tokio::task::spawn_blocking(move || {
+            build_clip_ffmpeg_args(
+                &source_task_bg,
+                &downloads_dir_bg,
+                &clip_name_prep,
+                clip_start,
+                duration,
+            )
+        })
+        .await
+        {
+            Ok(Ok(args)) => args,
+            Ok(Err(error)) => {
+                {
+                    let mut tasks = state_bg.tasks.write().await;
+                    if let Some(t) = tasks.get_mut(&clip_task_id_bg) {
+                        t.status = "failed".into();
+                        t.progress = 100;
+                        t.error = Some(error);
+                    }
+                }
+                state_bg.save_tasks().await;
+                broadcast_task(&state_bg, &clip_task_id_bg).await;
+                return;
+            }
+            Err(error) => {
+                {
+                    let mut tasks = state_bg.tasks.write().await;
+                    if let Some(t) = tasks.get_mut(&clip_task_id_bg) {
+                        t.status = "failed".into();
+                        t.progress = 100;
+                        t.error = Some(format!("clip preparation failed: {error}"));
+                    }
+                }
+                state_bg.save_tasks().await;
+                broadcast_task(&state_bg, &clip_task_id_bg).await;
+                return;
+            }
+        };
+
         let result = tokio::process::Command::new("ffmpeg")
             .args(&ffmpeg_args)
             .stdout(std::process::Stdio::null())

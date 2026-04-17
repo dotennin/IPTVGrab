@@ -11,6 +11,8 @@ pub(crate) async fn get_settings(State(state): State<AppState>) -> impl IntoResp
         "health_only_filter": s.health_only_filter,
         "recent_limit": s.recent_limit,
         "auto_fullscreen": s.auto_fullscreen,
+        "recording_interval_minutes": s.recording_interval_minutes,
+        "recording_auto_restart": s.recording_auto_restart,
     }))
     .into_response()
 }
@@ -21,6 +23,8 @@ pub(crate) struct PatchSettings {
     pub(crate) health_only_filter: Option<bool>,
     pub(crate) recent_limit: Option<usize>,
     pub(crate) auto_fullscreen: Option<bool>,
+    pub(crate) recording_interval_minutes: Option<usize>,
+    pub(crate) recording_auto_restart: Option<bool>,
 }
 
 /// PATCH /api/settings — merge-update settings and persist.
@@ -42,6 +46,12 @@ pub(crate) async fn patch_settings(
         if let Some(v) = body.auto_fullscreen {
             s.auto_fullscreen = v;
         }
+        if let Some(v) = body.recording_interval_minutes {
+            s.recording_interval_minutes = v.max(1);
+        }
+        if let Some(v) = body.recording_auto_restart {
+            s.recording_auto_restart = v;
+        }
     }
     state.save_app_settings().await;
     let s = state.app_settings.read().await;
@@ -52,6 +62,8 @@ pub(crate) async fn patch_settings(
             "health_only_filter": s.health_only_filter,
             "recent_limit": s.recent_limit,
             "auto_fullscreen": s.auto_fullscreen,
+            "recording_interval_minutes": s.recording_interval_minutes,
+            "recording_auto_restart": s.recording_auto_restart,
         })),
     )
         .into_response()

@@ -6,12 +6,109 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Json},
 };
+use chrono::TimeZone;
 use m3u8_core::{DownloadConfig, DownloadError, Downloader, ProgressEvent, Quality};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use crate::state::AppState;
 use crate::types::{DownloadRequest, ParseRequest, Task};
+
+fn now_secs() -> f64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs_f64()
+}
+
+fn normalized_recording_interval_minutes(value: Option<usize>) -> Option<usize> {
+    value.filter(|minutes| *minutes > 0)
+}
+
+fn strip_recording_timestamp_suffix(value: &str) -> &str {
+    let stem = value.trim().trim_end_matches(".mp4");
+    let Some((base, suffix)) = stem.rsplit_once('_') else {
+        return stem;
+    };
+    let parts: Vec<_> = suffix.split('-').collect();
+    if parts.len() == 3
+        && parts
+            .iter()
+            .all(|part| part.len() == 2 && part.chars().all(|ch| ch.is_ascii_digit()))
+    {
+        base
+    } else {
+        stem
+    }
+}
+
+fn sanitize_recording_output_base(value: &str) -> String {
+    let sanitized: String = strip_recording_timestamp_suffix(value)
+        .chars()
+        .map(|ch| match ch {
+            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            _ => ch,
+        })
+        .collect();
+    let trimmed = sanitized
+        .trim()
+        .trim_end_matches(".mp4")
+        .trim_end_matches(".m3u8")
+        .trim_end_matches(".m3u")
+        .trim_end_matches(".flv")
+        .trim();
+    if trimmed.is_empty() {
+        "recording".into()
+    } else {
+        trimmed.into()
+    }
+}
+
+fn fallback_output_base_from_url(url: &str) -> String {
+    let candidate = url
+        .rsplit('/')
+        .next()
+        .and_then(|segment| segment.split('?').next())
+        .filter(|segment| !segment.is_empty())
+        .unwrap_or("recording");
+    sanitize_recording_output_base(candidate)
+}
+
+fn recording_output_base(requested: Option<&str>, url: &str) -> String {
+    match requested {
+        Some(value) if !value.trim().is_empty() => sanitize_recording_output_base(value),
+        _ => fallback_output_base_from_url(url),
+    }
+}
+
+fn timestamped_recording_output_name(base: &str, now: f64) -> String {
+    let timestamp = chrono::Local
+        .timestamp_opt(now as i64, 0)
+        .single()
+        .unwrap_or_else(chrono::Local::now)
+        .format("%H-%M-%S")
+        .to_string();
+    format!("{}_{}", sanitize_recording_output_base(base), timestamp)
+}
+
+fn successor_output_name(task: &Task, now: f64) -> Option<String> {
+    task.recording_interval_minutes.map(|_| {
+        let base = task
+            .recording_output_base
+            .clone()
+            .unwrap_or_else(|| recording_output_base(task.output_name.as_deref(), &task.url));
+        timestamped_recording_output_name(&base, now)
+    })
+}
+
+fn auto_restart_delay(task: &Task) -> Option<tokio::time::Duration> {
+    if task.recording_auto_restart {
+        task.recording_interval_minutes
+            .map(|minutes| tokio::time::Duration::from_secs(minutes as u64 * 60))
+    } else {
+        None
+    }
+}
 
 pub(crate) async fn parse_stream(
     State(_state): State<AppState>,
@@ -45,26 +142,30 @@ pub(crate) async fn start_download(
     Json(body): Json<DownloadRequest>,
 ) -> impl IntoResponse {
     let task_id = Uuid::new_v4().to_string();
+    let recording_interval_minutes = normalized_recording_interval_minutes(body.recording_interval_minutes);
     let quality = match body.quality.as_str() {
         "worst" => Quality::Worst,
         s if s.parse::<usize>().is_ok() => Quality::Index(s.parse().unwrap()),
         _ => Quality::Best,
     };
+    let recording_output_base = recording_interval_minutes
+        .map(|_| recording_output_base(body.output_name.as_deref(), &body.url));
+    let output_name = recording_output_base
+        .as_deref()
+        .map(|base| timestamped_recording_output_name(base, now_secs()))
+        .or_else(|| body.output_name.clone());
     let config = DownloadConfig {
         url: body.url.clone(),
         headers: body.headers.clone(),
         output_dir: state.downloads_dir.clone(),
-        output_name: body.output_name.clone(),
+        output_name: output_name.clone(),
         quality,
         concurrency: body.concurrency,
         task_id: task_id.clone(),
         ..Default::default()
     };
 
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs_f64();
+    let now = now_secs();
 
     let task = Task {
         id: task_id.clone(),
@@ -81,7 +182,7 @@ pub(crate) async fn start_download(
         error: None,
         created_at: now,
         req_headers: body.headers,
-        output_name: body.output_name,
+        output_name,
         quality: body.quality,
         concurrency: body.concurrency,
         tmpdir: None,
@@ -92,6 +193,9 @@ pub(crate) async fn start_download(
         recorded_segments: None,
         elapsed_sec: None,
         task_type: None,
+        recording_interval_minutes,
+        recording_auto_restart: body.recording_auto_restart,
+        recording_output_base,
     };
 
     state.tasks.write().await.insert(task_id.clone(), task);
@@ -109,6 +213,7 @@ pub(crate) async fn start_download(
     tokio::spawn(async move {
         run_download(state_clone, tid, dl).await;
     });
+    schedule_recording_interval_if_needed(&state, &task_id);
 
     Json(serde_json::json!({"task_id": task_id}))
 }
@@ -447,13 +552,92 @@ pub(crate) async fn resume_task(
     let state_clone = state.clone();
     let tid = task_id.clone();
     tokio::spawn(async move { run_download(state_clone, tid, dl).await });
+    schedule_recording_interval_if_needed(&state, &task_id);
 
     Json(serde_json::json!({"task_id": task_id, "status": "queued"})).into_response()
 }
 
 // ── Task action helpers ────────────────────────────────────────────────────────
 
+fn schedule_recording_interval_if_needed(state: &AppState, task_id: &str) {
+    let state_clone = state.clone();
+    let task_id = task_id.to_string();
+    tokio::spawn(async move {
+        let Some(delay) = ({
+            let tasks = state_clone.tasks.read().await;
+            tasks.get(&task_id).and_then(auto_restart_delay)
+        }) else {
+            return;
+        };
+
+        tokio::time::sleep(delay).await;
+
+        let should_fork = {
+            let tasks = state_clone.tasks.read().await;
+            matches!(
+                tasks.get(&task_id),
+                Some(task)
+                    if task.status == "recording"
+                        && task.recording_auto_restart
+                        && task.recording_interval_minutes.is_some()
+            )
+        };
+        if should_fork {
+            let _ = fork_recording_task(&state_clone, &task_id).await;
+        }
+    });
+}
+
+async fn queue_recording_successor(state: &AppState, task: &Task) -> String {
+    let now = now_secs();
+    let new_id = Uuid::new_v4().to_string();
+    state
+        .tasks
+        .write()
+        .await
+        .insert(new_id.clone(), make_task(&new_id, task, now));
+    state.save_tasks().await;
+    spawn_task(state, &new_id).await;
+    new_id
+}
+
+async fn fork_recording_task(state: &AppState, task_id: &str) -> Result<(String, String), &'static str> {
+    let task = {
+        let tasks = state.tasks.read().await;
+        match tasks.get(task_id) {
+            Some(task) if task.status == "recording" => task.clone(),
+            Some(_) => return Err("Not recording"),
+            None => return Err("Not found"),
+        }
+    };
+
+    if let Some(dl) = state.downloaders.read().await.get(task_id) {
+        dl.stop();
+    }
+    {
+        let mut tasks = state.tasks.write().await;
+        let Some(current) = tasks.get_mut(task_id) else {
+            return Err("Not found");
+        };
+        if current.status != "recording" {
+            return Err("Not recording");
+        }
+        current.status = "stopping".into();
+    }
+    state.save_tasks().await;
+
+    let new_id = queue_recording_successor(state, &task).await;
+    Ok((new_id, task.url))
+}
+
 pub(crate) fn make_task(id: &str, task: &Task, now: f64) -> Task {
+    let recording_interval_minutes = normalized_recording_interval_minutes(task.recording_interval_minutes);
+    let recording_output_base = recording_interval_minutes
+        .map(|_| {
+            task.recording_output_base
+                .clone()
+                .unwrap_or_else(|| recording_output_base(task.output_name.as_deref(), &task.url))
+        });
     Task {
         id: id.to_string(),
         url: task.url.clone(),
@@ -469,7 +653,7 @@ pub(crate) fn make_task(id: &str, task: &Task, now: f64) -> Task {
         error: None,
         created_at: now,
         req_headers: task.req_headers.clone(),
-        output_name: task.output_name.clone(),
+        output_name: successor_output_name(task, now).or_else(|| task.output_name.clone()),
         quality: task.quality.clone(),
         concurrency: task.concurrency,
         tmpdir: None,
@@ -480,6 +664,9 @@ pub(crate) fn make_task(id: &str, task: &Task, now: f64) -> Task {
         recorded_segments: None,
         elapsed_sec: None,
         task_type: None,
+        recording_interval_minutes,
+        recording_auto_restart: task.recording_auto_restart,
+        recording_output_base,
     }
 }
 
@@ -513,6 +700,7 @@ pub(crate) async fn spawn_task(state: &AppState, task_id: &str) {
     let state_clone = state.clone();
     let tid = task_id.to_string();
     tokio::spawn(async move { run_download(state_clone, tid, dl).await });
+    schedule_recording_interval_if_needed(state, task_id);
 }
 
 pub(crate) async fn recording_restart(
@@ -547,18 +735,7 @@ pub(crate) async fn recording_restart(
     state.downloaders.write().await.remove(&task_id);
     state.save_tasks().await;
 
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs_f64();
-    let new_id = Uuid::new_v4().to_string();
-    state
-        .tasks
-        .write()
-        .await
-        .insert(new_id.clone(), make_task(&new_id, &task, now));
-    state.save_tasks().await;
-    spawn_task(&state, &new_id).await;
+    let new_id = queue_recording_successor(&state, &task).await;
     Json(serde_json::json!({"new_task_id": new_id, "url": task.url})).into_response()
 }
 
@@ -566,50 +743,21 @@ pub(crate) async fn fork_recording(
     State(state): State<AppState>,
     AxumPath(task_id): AxumPath<String>,
 ) -> impl IntoResponse {
-    let task = {
-        let tasks = state.tasks.read().await;
-        match tasks.get(&task_id) {
-            None => {
-                return (
-                    StatusCode::NOT_FOUND,
-                    Json(serde_json::json!({"detail":"Not found"})),
-                )
-                    .into_response()
-            }
-            Some(t) if t.status != "recording" => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(serde_json::json!({"detail":"Not recording"})),
-                )
-                    .into_response()
-            }
-            Some(t) => t.clone(),
+    match fork_recording_task(&state, &task_id).await {
+        Ok((new_id, url)) => {
+            Json(serde_json::json!({"new_task_id": new_id, "url": url})).into_response()
         }
-    };
-    if let Some(dl) = state.downloaders.read().await.get(&task_id) {
-        dl.stop();
+        Err("Not found") => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"detail":"Not found"})),
+        )
+            .into_response(),
+        Err(_) => (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"detail":"Not recording"})),
+        )
+            .into_response(),
     }
-    state
-        .tasks
-        .write()
-        .await
-        .get_mut(&task_id)
-        .map(|t| t.status = "stopping".into());
-    state.save_tasks().await;
-
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs_f64();
-    let new_id = Uuid::new_v4().to_string();
-    state
-        .tasks
-        .write()
-        .await
-        .insert(new_id.clone(), make_task(&new_id, &task, now));
-    state.save_tasks().await;
-    spawn_task(&state, &new_id).await;
-    Json(serde_json::json!({"new_task_id": new_id, "url": task.url})).into_response()
 }
 
 pub(crate) async fn restart_task(
@@ -665,6 +813,9 @@ pub(crate) async fn restart_task(
             t.size = 0;
             t.error = None;
             t.tmpdir = None;
+            if let Some(output_name) = successor_output_name(t, now_secs()) {
+                t.output_name = Some(output_name);
+            }
         }
     }
     state.save_tasks().await;

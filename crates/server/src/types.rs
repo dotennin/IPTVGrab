@@ -33,6 +33,12 @@ pub(crate) struct Task {
     /// "download" | "clip" — None is treated as "download" for backward compat.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) task_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) recording_interval_minutes: Option<usize>,
+    #[serde(default)]
+    pub(crate) recording_auto_restart: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) recording_output_base: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -136,6 +142,7 @@ pub(crate) struct HealthEntry {
 
 fn default_true() -> bool { true }
 fn default_recent_limit() -> usize { 20 }
+fn default_recording_interval_minutes() -> usize { 60 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct AppSettings {
@@ -147,6 +154,10 @@ pub(crate) struct AppSettings {
     pub(crate) recent_limit: usize,
     #[serde(default)]
     pub(crate) auto_fullscreen: bool,
+    #[serde(default = "default_recording_interval_minutes")]
+    pub(crate) recording_interval_minutes: usize,
+    #[serde(default)]
+    pub(crate) recording_auto_restart: bool,
 }
 
 impl Default for AppSettings {
@@ -156,6 +167,8 @@ impl Default for AppSettings {
             health_only_filter: true,
             recent_limit: default_recent_limit(),
             auto_fullscreen: false,
+            recording_interval_minutes: default_recording_interval_minutes(),
+            recording_auto_restart: false,
         }
     }
 }
@@ -209,6 +222,10 @@ pub(crate) struct DownloadRequest {
     pub(crate) quality: String,
     #[serde(default = "default_concurrency")]
     pub(crate) concurrency: usize,
+    #[serde(default)]
+    pub(crate) recording_interval_minutes: Option<usize>,
+    #[serde(default)]
+    pub(crate) recording_auto_restart: bool,
 }
 
 pub(crate) fn default_quality() -> String {
@@ -328,6 +345,9 @@ mod tests {
             recorded_segments: None,
             elapsed_sec: None,
             task_type: None,
+            recording_interval_minutes: None,
+            recording_auto_restart: false,
+            recording_output_base: None,
         };
         let json = serde_json::to_string(&task).unwrap();
         let back: Task = serde_json::from_str(&json).unwrap();

@@ -5,7 +5,7 @@ import 'plyr/dist/plyr.css';
 import { apiFetch } from './api';
 import { upsertHealthEntry } from './health';
 import { esc, formatDuration, toast } from './utils';
-import { settings } from './settings';
+import { normalizeRecordingIntervalMinutes, settings } from './settings';
 import { Modal } from './bootstrap-shim';
 import { addTaskCard, startPolling, currentRequest } from './tasks';
 import type { StreamInfo, Channel } from './types';
@@ -129,6 +129,20 @@ function downloadButton(isLive = false): string {
          <i class="fas fa-download me-2"></i>Start download
        </button>`;
   return `<div class="mt-3 pt-3 border-top">
+    ${isLive ? `
+      <div class="grid grid-cols-12 gap-3 mb-3">
+        <div class="col-span-6">
+          <label class="form-label text-gh-muted text-sm">Recording interval (minutes)</label>
+          <input type="number" class="form-control" id="recordingIntervalInput" min="1" max="1440" step="1" value="${settings.recordingIntervalMinutes}" />
+        </div>
+        <div class="col-span-6">
+          <label class="form-label text-gh-muted text-sm d-block">After each interval</label>
+          <label class="inline-flex items-center gap-2 text-sm mt-2">
+            <input type="checkbox" id="recordingAutoRestartInput" ${settings.recordingAutoRestart ? 'checked' : ''} />
+            <span>Save and start a new recording</span>
+          </label>
+        </div>
+      </div>` : ''}
     <div class="d-flex align-items-center gap-2 flex-wrap">
       ${startBtn}
       <button class="btn btn-outline-info" id="watchStreamBtn" type="button">
@@ -149,6 +163,15 @@ export async function startDownload(): Promise<void> {
   const concurrencyEl = document.getElementById('concurrency') as HTMLInputElement | null;
   const outputName    = outputNameEl?.value.trim() || null;
   const concurrency   = parseInt(concurrencyEl?.value || '8', 10);
+  const isLive        = currentStreamInfo?.is_live === true;
+  const recordingIntervalEl = document.getElementById('recordingIntervalInput') as HTMLInputElement | null;
+  const recordingAutoRestartEl = document.getElementById('recordingAutoRestartInput') as HTMLInputElement | null;
+  const recordingIntervalMinutes = isLive
+    ? normalizeRecordingIntervalMinutes(recordingIntervalEl?.value || settings.recordingIntervalMinutes)
+    : undefined;
+  const recordingAutoRestart = isLive
+    ? (recordingAutoRestartEl?.checked ?? settings.recordingAutoRestart)
+    : false;
 
   let quality = 'best';
   if (currentStreamInfo?.kind === 'master') {
@@ -169,6 +192,8 @@ export async function startDownload(): Promise<void> {
         output_name: outputName,
         quality,
         concurrency,
+        recording_interval_minutes: isLive ? recordingIntervalMinutes : undefined,
+        recording_auto_restart: isLive ? recordingAutoRestart : false,
       }),
     });
     const data = await res.json();
@@ -176,17 +201,17 @@ export async function startDownload(): Promise<void> {
 
     addTaskCard(data.task_id, currentRequest.url);
     startPolling(data.task_id);
+    Modal.getOrCreateInstance(document.getElementById('addStreamModal')!)?.hide();
     showDownloadsTab();
     toast('Download task added', 'info');
   } catch (e) {
     toast((e as Error).message, 'danger');
   } finally {
-    if (btn) {
-      btn.disabled = false;
-      const isLive = currentStreamInfo?.is_live === true;
-      btn.innerHTML = isLive
-        ? '<i class="fas fa-circle me-2"></i>Start recording'
-        : '<i class="fas fa-download me-2"></i>Start download';
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = isLive
+          ? '<i class="fas fa-circle me-2"></i>Start recording'
+          : '<i class="fas fa-download me-2"></i>Start download';
     }
   }
 }

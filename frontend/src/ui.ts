@@ -9,7 +9,7 @@ import { currentStreamInfo as _csi, showStreamInfo, showError } from './player';
 import { loadPlaylists } from './playlists';
 
 // ── Section management ────────────────────────────────────────────────────────
-const ALL_SECTIONS = ['mainPanels', 'urlSettingsSection', 'favoritesSection', 'downloadsSection'];
+const ALL_SECTIONS = ['mainPanels', 'favoritesSection', 'downloadsSection'];
 
 function showSection(id: string): void {
   ALL_SECTIONS.forEach((s) => {
@@ -50,27 +50,18 @@ function showPlaylistTab(): void {
   setNavActive('playlist-tab');
 }
 
-function showUrlSection(): void {
-  showSection('urlSettingsSection');
-  setNavActive('url-nav-btn');
+function openAddStreamModal(): void {
+  const modalEl = document.getElementById('addStreamModal');
+  if (!modalEl) return;
+  showDownloadsTab();
+  Modal.getOrCreateInstance(modalEl)?.show();
 }
 
 // ── Bottom nav listeners ──────────────────────────────────────────────────────
 document.getElementById('favorites-tab')?.addEventListener('click', showFavoritesTab);
 document.getElementById('playlist-tab')?.addEventListener('click', showPlaylistTab);
 document.getElementById('downloads-tab')?.addEventListener('click', showDownloadsTab);
-document.getElementById('url-nav-btn')?.addEventListener('click', showUrlSection);
-
-// url-tab / curl-tab are sub-tabs inside urlSettingsSection — just switch panes
-// (bootstrap-shim Tab handles .tab-pane-active toggling)
-// When clicking these sub-tabs ensure urlSettingsSection is visible
-['url-tab', 'curl-tab'].forEach((id) => {
-  document.getElementById(id)?.addEventListener('click', () => {
-    if (document.getElementById('urlSettingsSection')?.classList.contains('d-none')) {
-      showUrlSection();
-    }
-  });
-});
+document.getElementById('openAddStreamBtn')?.addEventListener('click', openAddStreamModal);
 
 // ── Header rows ───────────────────────────────────────────────────────────────
 function addHeaderRow(key = '', val = ''): void {
@@ -172,6 +163,10 @@ document.getElementById('parseBtn')?.addEventListener('click', async () => {
     if (toggleHealth) toggleHealth.checked = settings.healthOnlyFilter;
     const recentLimitInput = document.getElementById('settingRecentLimit') as HTMLInputElement | null;
     if (recentLimitInput) recentLimitInput.value = String(settings.recentLimit);
+    const recordingIntervalInput = document.getElementById('settingRecordingIntervalMinutes') as HTMLInputElement | null;
+    if (recordingIntervalInput) recordingIntervalInput.value = String(settings.recordingIntervalMinutes);
+    const recordingAutoRestart = document.getElementById('settingRecordingAutoRestart') as HTMLInputElement | null;
+    if (recordingAutoRestart) recordingAutoRestart.checked = settings.recordingAutoRestart;
     settingsModal.show();
   });
 
@@ -203,6 +198,19 @@ document.getElementById('parseBtn')?.addEventListener('click', async () => {
       renderRecentChannels();
     });
   });
+
+  document.getElementById('settingRecordingIntervalMinutes')?.addEventListener('change', (e) => {
+    const input = e.target as HTMLInputElement;
+    const parsed = Number.parseInt(input.value || '', 10);
+    const value = Number.isFinite(parsed) ? Math.min(1440, Math.max(1, parsed)) : settings.recordingIntervalMinutes;
+    input.value = String(value);
+    void saveSettings({ recordingIntervalMinutes: value });
+  });
+
+  document.getElementById('settingRecordingAutoRestart')?.addEventListener('change', (e) => {
+    const value = (e.target as HTMLInputElement).checked;
+    void saveSettings({ recordingAutoRestart: value });
+  });
 })();
 
 // ── Page load initialization ──────────────────────────────────────────────────
@@ -220,7 +228,7 @@ document.getElementById('parseBtn')?.addEventListener('click', async () => {
     taskList.forEach((task: { id: string; url?: string; status: string }) => {
       addTaskCard(task.id, task.url || '');
       updateTaskCard(task.id, task as Parameters<typeof updateTaskCard>[1]);
-      if (['downloading', 'queued', 'merging', 'recording', 'stopping'].includes(task.status)) {
+      if (['downloading', 'queued', 'merging', 'recording', 'stopping', 'clipping'].includes(task.status)) {
         startPolling(task.id);
       }
     });

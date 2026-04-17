@@ -90,83 +90,87 @@
 
   </div><!-- /#mainPanels -->
 
-  <!-- ── ADD STREAM section (URL / cURL) ────────────────────────────── -->
-  <div class="tv-section flex-1 flex flex-col overflow-hidden d-none" id="urlSettingsSection">
-
-    <!-- URL / cURL sub-tabs -->
-    <div class="tab-nav bg-gh-surface px-3 shrink-0">
-      <button class="tab-btn tab-active" id="url-tab" data-bs-toggle="tab" data-bs-target="#urlPane" type="button">
-        <i class="fas fa-link mr-1"></i>URL
-      </button>
-      <button class="tab-btn" id="curl-tab" data-bs-toggle="tab" data-bs-target="#curlPane" type="button">
-        <i class="fas fa-terminal mr-1"></i>cURL
-      </button>
-    </div>
-
-    <!-- Scrollable form area -->
-    <div class="flex-shrink-0 overflow-y-auto p-3">
-
-      <!-- URL pane -->
-      <div class="tab-pane tab-pane-active" id="urlPane">
-        <div class="mb-3">
-          <label class="form-label text-gh-muted text-sm">M3U8 URL</label>
-          <input type="url" class="form-control font-mono" id="urlInput" placeholder="https://example.com/stream.m3u8?token=..." spellcheck="false" />
+  <!-- Add Stream modal -->
+  <div class="tw-modal hidden" id="addStreamModal" tabindex="-1">
+    <div class="tw-modal-dialog tw-modal-dialog-xl">
+      <div class="tw-modal-content">
+        <div class="tw-modal-header">
+          <h6 class="tw-modal-title"><i class="fas fa-plus-circle mr-2 text-gh-blue-light"></i>Add Stream</h6>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
-        <label class="form-label text-gh-muted text-sm">Custom Headers</label>
-        <div id="headersList"></div>
-        <button class="inline-flex items-center px-2 py-1 mb-2 border border-[#444c56] text-gh-muted hover:bg-gh-surface2 hover:text-gh-text rounded text-sm transition-colors mt-2" id="addHeaderBtn" type="button">
-          <i class="fas fa-plus mr-1"></i>Add Header
-        </button>
-      </div>
+        <div class="tw-modal-body p-0">
+          <div class="flex flex-col md:flex-row" style="min-height:min(78vh, 900px)">
+            <div class="flex-1 flex flex-col overflow-hidden border-b border-gh-border md:border-b-0 md:border-r border-gh-border" id="urlSettingsSection">
+              <div class="tab-nav bg-gh-surface px-3 shrink-0">
+                <button class="tab-btn tab-active" id="url-tab" data-bs-toggle="tab" data-bs-target="#urlPane" type="button">
+                  <i class="fas fa-link mr-1"></i>URL
+                </button>
+                <button class="tab-btn" id="curl-tab" data-bs-toggle="tab" data-bs-target="#curlPane" type="button">
+                  <i class="fas fa-terminal mr-1"></i>cURL
+                </button>
+              </div>
 
-      <!-- cURL pane -->
-      <div class="tab-pane" id="curlPane">
-        <label class="form-label text-gh-muted text-sm">Paste cURL command copied from browser DevTools</label>
-        <textarea class="form-control font-mono" id="curlInput" rows="9" placeholder="curl 'https://example.com/stream.m3u8' \&#10;  -H 'user-agent: Mozilla/5.0 ...' \&#10;  -H 'referer: https://...' \&#10;  ..." spellcheck="false"></textarea>
-      </div>
+              <div class="flex-shrink-0 overflow-y-auto p-3">
+                <div class="tab-pane tab-pane-active" id="urlPane">
+                  <div class="mb-3">
+                    <label class="form-label text-gh-muted text-sm">M3U8 URL</label>
+                    <input type="url" class="form-control font-mono" id="urlInput" placeholder="https://example.com/stream.m3u8?token=..." spellcheck="false" />
+                  </div>
+                  <label class="form-label text-gh-muted text-sm">Custom Headers</label>
+                  <div id="headersList"></div>
+                  <button class="inline-flex items-center px-2 py-1 mb-2 border border-[#444c56] text-gh-muted hover:bg-gh-surface2 hover:text-gh-text rounded text-sm transition-colors mt-2" id="addHeaderBtn" type="button">
+                    <i class="fas fa-plus mr-1"></i>Add Header
+                  </button>
+                </div>
 
-      <!-- Output settings -->
-      <div id="outputSettingsRow">
-        <div class="grid grid-cols-12 gap-3 items-end mt-3">
-          <div class="col-span-7">
-            <label class="form-label text-gh-muted text-sm">Output filename (optional)</label>
-            <div class="input-group">
-              <input type="text" class="form-control" id="outputName" placeholder="video_output" />
-              <span class="input-group-text">.mp4</span>
+                <div class="tab-pane" id="curlPane">
+                  <label class="form-label text-gh-muted text-sm">Paste cURL command copied from browser DevTools</label>
+                  <textarea class="form-control font-mono" id="curlInput" rows="9" placeholder="curl 'https://example.com/stream.m3u8' \&#10;  -H 'user-agent: Mozilla/5.0 ...' \&#10;  -H 'referer: https://...' \&#10;  ..." spellcheck="false"></textarea>
+                </div>
+
+                <div id="outputSettingsRow">
+                  <div class="grid grid-cols-12 gap-3 items-end mt-3">
+                    <div class="col-span-7">
+                      <label class="form-label text-gh-muted text-sm">Output filename (optional)</label>
+                      <div class="input-group">
+                        <input type="text" class="form-control" id="outputName" placeholder="video_output" />
+                        <span class="input-group-text">.mp4</span>
+                      </div>
+                    </div>
+                    <div class="col-span-5">
+                      <label class="form-label text-gh-muted text-sm">Concurrency: <span id="concurrencyVal">8</span></label>
+                      <input type="range" class="form-range" id="concurrency" min="1" max="32" value="8" />
+                    </div>
+                  </div>
+                </div>
+
+                <div class="mt-3 flex gap-2" id="parseBtnGroup">
+                  <button class="inline-flex items-center px-3 py-1.5 bg-[#1f6feb] hover:bg-gh-blue text-white rounded text-sm font-medium transition-colors" id="parseBtn" type="button">
+                    <i class="fas fa-search mr-1"></i>Parse stream
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="flex-1 flex flex-col overflow-hidden d-none" id="streamInfoPanel">
+              <div id="streamInfoCard" class="flex-1 flex flex-col overflow-hidden">
+                <div class="flex items-center justify-between px-4 py-2 border-b border-gh-border shrink-0">
+                  <span><i class="fas fa-info-circle mr-2"></i>Stream info</span>
+                  <span id="streamTypeBadge"></span>
+                </div>
+                <div class="p-4 flex-1 overflow-y-auto" id="streamInfoBody">
+                  <div class="text-center text-gh-muted py-16" id="streamPlaceholder">
+                    <i class="fas fa-play-circle fa-3x mb-3 d-block opacity-25"></i>
+                    <p class="mb-0">Stream info will appear here after parsing</p>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
-          <div class="col-span-5">
-            <label class="form-label text-gh-muted text-sm">Concurrency: <span id="concurrencyVal">8</span></label>
-            <input type="range" class="form-range" id="concurrency" min="1" max="32" value="8" />
-          </div>
-        </div>
-      </div>
-
-      <div class="mt-3 flex gap-2" id="parseBtnGroup">
-        <button class="inline-flex items-center px-3 py-1.5 bg-[#1f6feb] hover:bg-gh-blue text-white rounded text-sm font-medium transition-colors" id="parseBtn" type="button">
-          <i class="fas fa-search mr-1"></i>Parse stream
-        </button>
-      </div>
-
-    </div>
-
-    <!-- Stream info panel (shown after parse) -->
-    <div class="flex-1 flex flex-col overflow-hidden d-none" id="streamInfoPanel">
-      <div id="streamInfoCard" class="flex-1 flex flex-col overflow-hidden">
-        <div class="flex items-center justify-between px-4 py-2 border-b border-gh-border shrink-0">
-          <span><i class="fas fa-info-circle mr-2"></i>Stream info</span>
-          <span id="streamTypeBadge"></span>
-        </div>
-        <div class="p-4 flex-1 overflow-y-auto" id="streamInfoBody">
-          <div class="text-center text-gh-muted py-16" id="streamPlaceholder">
-            <i class="fas fa-play-circle fa-3x mb-3 d-block opacity-25"></i>
-            <p class="mb-0">Stream info will appear here after parsing</p>
-          </div>
         </div>
       </div>
     </div>
-
-  </div><!-- /#urlSettingsSection -->
+  </div>
 
   <!-- ── RECENTS section ────────────────────────────────────────────── -->
   <div class="tv-section flex-1 flex flex-col overflow-hidden d-none" id="favoritesSection">
@@ -193,9 +197,14 @@
   <div class="tv-section flex-1 flex flex-col overflow-hidden d-none" id="downloadsSection">
     <div class="flex-1 flex flex-col overflow-hidden bg-gh-surface">
       <div class="flex items-center justify-between px-4 py-2 border-b border-gh-border flex-wrap gap-2 shrink-0">
-        <span class="font-medium">
-          <i class="fas fa-tasks mr-2"></i>Tasks
-        </span>
+        <div class="flex items-center gap-2">
+          <span class="font-medium">
+            <i class="fas fa-tasks mr-2"></i>Tasks
+          </span>
+          <button class="inline-flex items-center px-3 py-1.5 bg-[#1f6feb] hover:bg-gh-blue text-white rounded text-sm font-medium transition-colors" id="openAddStreamBtn" type="button">
+            <i class="fas fa-plus mr-1"></i>Add Stream
+          </button>
+        </div>
         <div class="flex items-center gap-1">
           <span class="text-gh-muted text-sm mr-1">Sort:</span>
           <button class="sort-btn active" data-field="created_at">
@@ -655,16 +664,34 @@
               </div>
             </div>
 
-            <div class="settings-row">
-              <div class="settings-row-info">
-                <div class="settings-row-label">Auto fullscreen on playback</div>
-                <div class="settings-row-desc">When enabled, opening the web player tries to enter fullscreen automatically after playback starts.</div>
-              </div>
-              <div class="form-check form-switch mb-0">
-                <input class="form-check-input" type="checkbox" role="switch" id="settingAutoFullscreen" />
-              </div>
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <div class="settings-row-label">Auto fullscreen on playback</div>
+              <div class="settings-row-desc">When enabled, opening the web player tries to enter fullscreen automatically after playback starts.</div>
+            </div>
+            <div class="form-check form-switch mb-0">
+              <input class="form-check-input" type="checkbox" role="switch" id="settingAutoFullscreen" />
             </div>
           </div>
+
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <div class="settings-row-label">Recording interval (minutes)</div>
+              <div class="settings-row-desc">Default segment length for live recordings. Automatic restart uses this interval when rolling over to the next file.</div>
+            </div>
+            <input class="form-control form-control-sm settings-number-input" type="number" min="1" max="1440" step="1" id="settingRecordingIntervalMinutes" />
+          </div>
+
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <div class="settings-row-label">Save and start a new recording</div>
+              <div class="settings-row-desc">When enabled, live recordings automatically save the current file and start a fresh one after each interval.</div>
+            </div>
+            <div class="form-check form-switch mb-0">
+              <input class="form-check-input" type="checkbox" role="switch" id="settingRecordingAutoRestart" />
+            </div>
+          </div>
+        </div>
 
           <!-- Section: Channels -->
           <div class="settings-section">
@@ -722,10 +749,6 @@
     <button class="tv-nav-btn" id="playlist-tab" type="button" tabindex="0">
       <i class="fas fa-tv"></i>
       <span>Channels</span>
-    </button>
-    <button class="tv-nav-btn" id="url-nav-btn" type="button" tabindex="0">
-      <i class="fas fa-plus-circle"></i>
-      <span>Add Stream</span>
     </button>
     <button class="tv-nav-btn" id="downloads-tab" type="button" tabindex="0">
       <i class="fas fa-tasks"></i>

@@ -82,11 +82,11 @@ document.addEventListener('keydown', (e: KeyboardEvent) => {
 
   if (!isArrow && !isEnter && !isEscape) return;
 
-  // Escape: collapse URL section back to channels
+  // Escape: close Add Stream modal when open
   if (isEscape) {
-    const urlSection = document.getElementById('urlSettingsSection');
-    if (urlSection && !urlSection.classList.contains('d-none')) {
-      document.getElementById('playlist-tab')?.click();
+    const addStreamModal = document.getElementById('addStreamModal');
+    if (addStreamModal?.classList.contains('show')) {
+      (addStreamModal.querySelector('[data-bs-dismiss="modal"]') as HTMLButtonElement | null)?.click();
       e.preventDefault();
     }
     return;

@@ -176,12 +176,14 @@ textarea.form-control {
   border-bottom: 1px solid #30363d;
   gap: 0;
   overflow-x: auto;
-  scrollbar-width: none;           /* Firefox: hide horizontal scrollbar */
+  scrollbar-width: none;
+  /* Firefox: hide horizontal scrollbar */
   -ms-overflow-style: none;
 }
 
 .tab-nav::-webkit-scrollbar {
-  display: none;                   /* Chrome/Safari: hide horizontal scrollbar */
+  display: none;
+  /* Chrome/Safari: hide horizontal scrollbar */
 }
 
 .tab-btn {
@@ -664,10 +666,10 @@ textarea.form-control {
 .recent-remove-btn {
   width: 20px;
   height: 20px;
-  border: 1px solid rgba(248, 81, 73, 0.35);
+  border: 1px solid rgb(0 0 0 / 35%);
   border-radius: 999px;
-  background: rgba(248, 81, 73, 0.12);
-  color: #f85149;
+  background: rgb(255 255 255 / 12%);
+  color: #000000;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1024,7 +1026,7 @@ textarea.form-control {
 :root {
   --plyr-color-main: #6ea8fe;
   --plyr-video-background: transparent;
-  --plyr-video-controls-background: linear-gradient(rgba(0,0,0,0), rgba(0,0,0,0.75));
+  --plyr-video-controls-background: linear-gradient(rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.75));
   --plyr-control-radius: 6px;
   --plyr-range-thumb-background: #6ea8fe;
   --plyr-range-fill-background: #6ea8fe;
@@ -1454,6 +1456,7 @@ textarea.form-control {
 
 /* ── Tablet channel layout (641-900px): 2-col grid ──────────────────────── */
 @media (min-width: 641px) and (max-width: 900px) {
+
   #channelGrid,
   .channel-grid {
     grid-template-columns: repeat(2, 1fr);
@@ -1462,6 +1465,7 @@ textarea.form-control {
 
 /* ── Mobile channel layout (≤640px): compact grid ──────────────────────── */
 @media (max-width: 640px) {
+
   #channelGrid,
   .channel-grid {
     grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
@@ -1833,7 +1837,7 @@ textarea.form-control {
 .channel-card:focus {
   outline: 3px solid #388bfd;
   outline-offset: 2px;
-  box-shadow: 0 0 0 6px rgba(56, 139, 253, 0.25), 0 4px 20px rgba(0,0,0,0.5);
+  box-shadow: 0 0 0 6px rgba(56, 139, 253, 0.25), 0 4px 20px rgba(0, 0, 0, 0.5);
   border-color: #388bfd !important;
   transform: scale(1.04);
   z-index: 2;
@@ -1948,7 +1952,8 @@ textarea.form-control {
 
 /* ── URL settings section scrollable area ───────────────────────────────── */
 #urlSettingsSection .flex-shrink-0.overflow-y-auto {
-  max-height: calc(100dvh - 44px - 68px - 40px - env(safe-area-inset-bottom, 0px)); /* topbar + bottomnav + tab-nav */
+  max-height: calc(100dvh - 44px - 68px - 40px - env(safe-area-inset-bottom, 0px));
+  /* topbar + bottomnav + tab-nav */
 }
 
 
@@ -2045,7 +2050,7 @@ textarea.form-control {
   height: 30px;
   object-fit: contain;
   border-radius: 5px;
-  background: rgba(255,255,255,0.06);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .ch-osd-logo-lg {
@@ -2061,8 +2066,8 @@ textarea.form-control {
   align-items: center;
   gap: 12px;
   padding: 10px 14px;
-  border-top: 1px solid rgba(255,255,255,0.09);
-  border-bottom: 1px solid rgba(255,255,255,0.09);
+  border-top: 1px solid rgba(255, 255, 255, 0.09);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.09);
 }
 
 .ch-osd-main {
@@ -2111,5 +2116,6 @@ textarea.form-control {
   top: 50%;
   bottom: auto;
   left: auto;
-  z-index: 10001; /* above Plyr's z-index: 10000 in fallback mode */
+  z-index: 10001;
+  /* above Plyr's z-index: 10000 in fallback mode */
 }
