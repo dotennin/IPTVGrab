@@ -17,6 +17,7 @@ Media Nest assumes you are working with sources you control or are authorised to
 - Offline archiving, clipping, preview playback, and export workflows
 - Playlist and channel management with merged editing and health checks
 - Local-first mobile flow powered by an embedded localhost server
+- `ffmpeg` should be available on your `PATH` for merge, clip, and export workflows
 
 ## Architecture
 
@@ -28,6 +29,7 @@ Media Nest assumes you are working with sources you control or are authorised to
 ## Web app quick start
 
 ```bash
+make frontend-install
 make frontend-build
 cargo run -p server
 ```
@@ -38,15 +40,25 @@ cargo run -p server
 make flutter-run-macos
 ```
 
-For Android, iOS, and macOS native artifacts, use `make flutter-prepare`.
+Use `make flutter-prepare` to prepare the Rust native libraries/frameworks that Flutter targets load.
 
 ## Build and test
 
+Rust/web checks:
+
 ```bash
-make test
 cargo check -p server
+make test-rust
 ./tests/test_api.sh
 ```
+
+Full-stack suite (includes Flutter tests):
+
+```bash
+make test
+```
+
+Use `make test-rust` for Rust/web contributor checks. `make test` runs the full stack, including Flutter tests.
 
 ## Should this project use Pretext?
 
