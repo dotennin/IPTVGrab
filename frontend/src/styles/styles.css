@@ -963,6 +963,7 @@ textarea.form-control {
   flex: 1;
   min-width: 0;
   overflow-y: auto;
+  height: calc(100dvh - 150px);
 }
 
 /* ── Sort buttons ────────────────────────────────────────────────────────── */
