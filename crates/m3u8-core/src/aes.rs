@@ -79,12 +79,8 @@ mod tests {
         let plaintext = b"Prefixed IV test";
 
         let ciphertext = encrypt_aes128_cbc(plaintext, key, &iv);
-        let result = decrypt_aes128(
-            &ciphertext,
-            key,
-            Some("0x00000000000000000000000000000000"),
-        )
-        .unwrap();
+        let result =
+            decrypt_aes128(&ciphertext, key, Some("0x00000000000000000000000000000000")).unwrap();
         assert_eq!(result, plaintext);
     }
 
@@ -95,12 +91,8 @@ mod tests {
         let plaintext = b"UPPERCASE prefix";
 
         let ciphertext = encrypt_aes128_cbc(plaintext, key, &iv);
-        let result = decrypt_aes128(
-            &ciphertext,
-            key,
-            Some("0X00000000000000000000000000000000"),
-        )
-        .unwrap();
+        let result =
+            decrypt_aes128(&ciphertext, key, Some("0X00000000000000000000000000000000")).unwrap();
         assert_eq!(result, plaintext);
     }
 
@@ -140,7 +132,10 @@ mod tests {
     fn decrypt_fails_with_invalid_padding() {
         let key = b"0123456789abcdef";
         // Random bytes that won't have valid PKCS7 padding after decryption
-        let garbled = vec![0xdeu8, 0xad, 0xbe, 0xef, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb];
+        let garbled = vec![
+            0xdeu8, 0xad, 0xbe, 0xef, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99,
+            0xaa, 0xbb,
+        ];
 
         let err = decrypt_aes128(&garbled, key, None).unwrap_err();
         assert!(matches!(err, DownloadError::Decryption(_)));

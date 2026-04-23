@@ -74,12 +74,18 @@ fn build_clip_ffmpeg_args(
         let clip_path = downloads_dir.join(clip_name);
         return Ok(vec![
             "-y".into(),
-            "-ss".into(), start.to_string(),
-            "-i".into(), input_path.to_string_lossy().to_string(),
-            "-t".into(), duration.to_string(),
-            "-map".into(), "0".into(),
-            "-avoid_negative_ts".into(), "make_zero".into(),
-            "-c".into(), "copy".into(),
+            "-ss".into(),
+            start.to_string(),
+            "-i".into(),
+            input_path.to_string_lossy().to_string(),
+            "-t".into(),
+            duration.to_string(),
+            "-map".into(),
+            "0".into(),
+            "-avoid_negative_ts".into(),
+            "make_zero".into(),
+            "-c".into(),
+            "copy".into(),
             clip_path.to_string_lossy().to_string(),
         ]);
     }
@@ -161,32 +167,41 @@ fn build_clip_ffmpeg_args(
 
         let mut args: Vec<String> = vec![
             "-y".into(),
-            "-ss".into(), start.to_string(),
-            "-i".into(), raw_path.to_string_lossy().to_string(),
+            "-ss".into(),
+            start.to_string(),
+            "-i".into(),
+            raw_path.to_string_lossy().to_string(),
         ];
         if let Some(ref ap) = raw_audio_path {
             args.extend([
-                "-i".into(), ap.to_string_lossy().to_string(),
-                "-map".into(), "0:v".into(),
-                "-map".into(), "1:a".into(),
+                "-i".into(),
+                ap.to_string_lossy().to_string(),
+                "-map".into(),
+                "0:v".into(),
+                "-map".into(),
+                "1:a".into(),
             ]);
         } else {
             args.extend(["-map".into(), "0".into()]);
         }
-        args.extend([
-            "-t".into(), duration.to_string(),
-        ]);
+        args.extend(["-t".into(), duration.to_string()]);
         if raw_audio_path.is_some() {
             args.extend([
-                "-reset_timestamps".into(), "1".into(),
-                "-c:v".into(), "copy".into(),
-                "-c:a".into(), "aac".into(),
+                "-reset_timestamps".into(),
+                "1".into(),
+                "-c:v".into(),
+                "copy".into(),
+                "-c:a".into(),
+                "aac".into(),
             ]);
         } else {
             args.extend([
-                "-avoid_negative_ts".into(), "make_zero".into(),
-                "-reset_timestamps".into(), "1".into(),
-                "-c".into(), "copy".into(),
+                "-avoid_negative_ts".into(),
+                "make_zero".into(),
+                "-reset_timestamps".into(),
+                "1".into(),
+                "-c".into(),
+                "copy".into(),
             ]);
         }
         args.push(clip_path_str);
@@ -242,20 +257,28 @@ fn build_clip_ffmpeg_args(
 
     let mut args: Vec<String> = vec![
         "-y".into(),
-        "-f".into(), "concat".into(),
-        "-safe".into(), "0".into(),
-        "-i".into(), list_file.to_string_lossy().to_string(),
+        "-f".into(),
+        "concat".into(),
+        "-safe".into(),
+        "0".into(),
+        "-i".into(),
+        list_file.to_string_lossy().to_string(),
     ];
     if let Some(ref alf) = audio_list_file {
         args.extend([
-            "-f".into(), "concat".into(),
-            "-safe".into(), "0".into(),
-            "-i".into(), alf.to_string_lossy().to_string(),
+            "-f".into(),
+            "concat".into(),
+            "-safe".into(),
+            "0".into(),
+            "-i".into(),
+            alf.to_string_lossy().to_string(),
         ]);
     }
     args.extend([
-        "-ss".into(), start.to_string(),
-        "-t".into(), duration.to_string(),
+        "-ss".into(),
+        start.to_string(),
+        "-t".into(),
+        duration.to_string(),
     ]);
     if audio_list_file.is_some() {
         args.extend(["-map".into(), "0:v".into(), "-map".into(), "1:a".into()]);
@@ -264,15 +287,21 @@ fn build_clip_ffmpeg_args(
     }
     if audio_list_file.is_some() {
         args.extend([
-            "-reset_timestamps".into(), "1".into(),
-            "-c:v".into(), "copy".into(),
-            "-c:a".into(), "aac".into(),
+            "-reset_timestamps".into(),
+            "1".into(),
+            "-c:v".into(),
+            "copy".into(),
+            "-c:a".into(),
+            "aac".into(),
         ]);
     } else {
         args.extend([
-            "-avoid_negative_ts".into(), "make_zero".into(),
-            "-reset_timestamps".into(), "1".into(),
-            "-c".into(), "copy".into(),
+            "-avoid_negative_ts".into(),
+            "make_zero".into(),
+            "-reset_timestamps".into(),
+            "1".into(),
+            "-c".into(),
+            "copy".into(),
         ]);
     }
     args.push(clip_path_str);
@@ -283,7 +312,9 @@ fn build_clip_ffmpeg_args(
 async fn broadcast_task(state: &AppState, task_id: &str) {
     let json = {
         let tasks = state.tasks.read().await;
-        tasks.get(task_id).and_then(|t| serde_json::to_string(t).ok())
+        tasks
+            .get(task_id)
+            .and_then(|t| serde_json::to_string(t).ok())
     };
     if let Some(j) = json {
         let subs = state.ws_subs.lock().await;
@@ -485,10 +516,17 @@ pub(crate) async fn clip_task(
             }
             Ok(s) => (
                 "failed".to_string(),
-                Some(format!("ffmpeg exited with code {}", s.code().unwrap_or(-1))),
+                Some(format!(
+                    "ffmpeg exited with code {}",
+                    s.code().unwrap_or(-1)
+                )),
                 0,
             ),
-            Err(e) => ("failed".to_string(), Some(format!("ffmpeg not found: {e}")), 0),
+            Err(e) => (
+                "failed".to_string(),
+                Some(format!("ffmpeg not found: {e}")),
+                0,
+            ),
         };
 
         {
@@ -576,10 +614,8 @@ mod tests {
     }
 
     fn temp_test_dir(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "iptvgrab-{name}-{}",
-            uuid::Uuid::new_v4().simple()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("iptvgrab-{name}-{}", uuid::Uuid::new_v4().simple()));
         std::fs::create_dir_all(&dir).expect("create temp test dir");
         dir
     }
@@ -661,8 +697,10 @@ mod tests {
 
         let audio_dir = tmpdir.join("audio");
         std::fs::create_dir_all(&audio_dir).expect("create audio dir");
-        std::fs::copy(fixture_dir.join("init_0.mp4"), tmpdir.join("init.mp4")).expect("copy video init");
-        std::fs::copy(fixture_dir.join("init_1.mp4"), audio_dir.join("init.mp4")).expect("copy audio init");
+        std::fs::copy(fixture_dir.join("init_0.mp4"), tmpdir.join("init.mp4"))
+            .expect("copy video init");
+        std::fs::copy(fixture_dir.join("init_1.mp4"), audio_dir.join("init.mp4"))
+            .expect("copy audio init");
 
         let mut video_segments: Vec<_> = std::fs::read_dir(&fixture_dir)
             .expect("read fixture dir")
@@ -676,7 +714,8 @@ mod tests {
             .collect();
         video_segments.sort();
         for (index, path) in video_segments.iter().enumerate() {
-            std::fs::copy(path, tmpdir.join(format!("seg_{index:06}.m4s"))).expect("copy video segment");
+            std::fs::copy(path, tmpdir.join(format!("seg_{index:06}.m4s")))
+                .expect("copy video segment");
         }
 
         let mut audio_segments: Vec<_> = std::fs::read_dir(&fixture_dir)
@@ -691,7 +730,8 @@ mod tests {
             .collect();
         audio_segments.sort();
         for (index, path) in audio_segments.iter().enumerate() {
-            std::fs::copy(path, audio_dir.join(format!("seg_{index:06}.m4s"))).expect("copy audio segment");
+            std::fs::copy(path, audio_dir.join(format!("seg_{index:06}.m4s")))
+                .expect("copy audio segment");
         }
 
         let _ = std::fs::remove_dir_all(fixture_dir);
@@ -712,7 +752,10 @@ mod tests {
             .arg(path)
             .output()
             .expect("run ffprobe");
-        assert!(output.status.success(), "ffprobe should inspect clip output");
+        assert!(
+            output.status.success(),
+            "ffprobe should inspect clip output"
+        );
         String::from_utf8_lossy(&output.stdout)
             .lines()
             .find_map(|line| line.trim().parse::<f64>().ok())

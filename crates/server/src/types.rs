@@ -140,9 +140,15 @@ pub(crate) struct HealthEntry {
     pub(crate) latency_ms: Option<u32>,
 }
 
-fn default_true() -> bool { true }
-fn default_recent_limit() -> usize { 20 }
-fn default_recording_interval_minutes() -> usize { 60 }
+fn default_true() -> bool {
+    true
+}
+fn default_recent_limit() -> usize {
+    20
+}
+fn default_recording_interval_minutes() -> usize {
+    60
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct AppSettings {

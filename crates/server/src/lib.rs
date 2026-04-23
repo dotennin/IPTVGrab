@@ -9,5 +9,5 @@ pub(crate) mod types;
 
 // Public re-exports for consumers (mobile-ffi, main.rs)
 pub use router::{
-    EmbeddedServer, EmbeddedServerConfig, init_tracing, run_from_env, start_embedded_server,
+    init_tracing, run_from_env, start_embedded_server, EmbeddedServer, EmbeddedServerConfig,
 };

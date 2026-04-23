@@ -15,6 +15,7 @@ use tower_http::{
 use tracing::info;
 
 use crate::auth::auth_middleware;
+use crate::auth::{api_login, api_logout, auth_status, get_export_token, login_page};
 use crate::handlers::{
     clip::{clip_task, complete_local_merge},
     health::{get_health_check, mark_invalid_health, post_health_check},
@@ -39,7 +40,6 @@ use crate::handlers::{
         serve_download, serve_segment, ws_task_handler,
     },
 };
-use crate::auth::{api_login, api_logout, auth_status, get_export_token, login_page};
 use crate::persistence::{
     load_app_settings, load_health_cache, load_merged_config, load_playlists, load_recents,
     load_tasks,
@@ -185,7 +185,9 @@ pub(crate) fn build_state(
         merged_config: Arc::new(tokio::sync::RwLock::new(load_merged_config(&downloads_dir))),
         health_cache: Arc::new(tokio::sync::RwLock::new(load_health_cache(&downloads_dir))),
         health_state: Arc::new(tokio::sync::RwLock::new(HealthState::default())),
-        watch_cache: Arc::new(tokio::sync::RwLock::new(HashMap::<String, WatchCacheEntry>::new())),
+        watch_cache: Arc::new(tokio::sync::RwLock::new(
+            HashMap::<String, WatchCacheEntry>::new(),
+        )),
         transcodes: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         app_settings: Arc::new(tokio::sync::RwLock::new(load_app_settings(&downloads_dir))),
         ws_subs: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
@@ -212,8 +214,14 @@ pub(crate) fn build_api_router() -> Router<AppState> {
         .route("/api/tasks/:id/fork", post(fork_recording))
         .route("/api/tasks/:id/restart", post(restart_task))
         .route("/api/tasks/:id/preview.m3u8", get(preview_playlist))
-        .route("/api/tasks/:id/preview-video.m3u8", get(preview_video_playlist))
-        .route("/api/tasks/:id/preview-audio.m3u8", get(preview_audio_playlist))
+        .route(
+            "/api/tasks/:id/preview-video.m3u8",
+            get(preview_video_playlist),
+        )
+        .route(
+            "/api/tasks/:id/preview-audio.m3u8",
+            get(preview_audio_playlist),
+        )
         .route("/api/tasks/:id/seg/:filename", get(serve_segment))
         .route("/api/tasks/:id/audio/:filename", get(serve_audio_segment))
         .route("/api/watch/proxy", get(watch_proxy))
@@ -249,7 +257,10 @@ pub(crate) fn build_api_router() -> Router<AppState> {
         )
         .route("/api/health-check/invalid", post(mark_invalid_health))
         .route("/api/watch/transcode", post(start_transcode))
-        .route("/api/watch/transcode/:id/index.m3u8", get(transcode_playlist))
+        .route(
+            "/api/watch/transcode/:id/index.m3u8",
+            get(transcode_playlist),
+        )
         .route("/api/watch/transcode/:id/:seg", get(transcode_segment))
         .route("/api/watch/transcode/:id", delete(stop_transcode))
         .route("/ws/tasks/:id", get(ws_task_handler))
@@ -280,8 +291,7 @@ pub(crate) fn build_app(state: AppState, static_dir: Option<PathBuf>) -> Router 
                     map.iter()
                         .filter(|(_, s)| {
                             now.saturating_sub(
-                                s.last_accessed
-                                    .load(std::sync::atomic::Ordering::Relaxed),
+                                s.last_accessed.load(std::sync::atomic::Ordering::Relaxed),
                             ) > 60
                         })
                         .map(|(k, _)| k.clone())
@@ -329,9 +339,7 @@ fn log_network_ips(port: u16) {
 
 // ── Public server entry points ────────────────────────────────────────────────
 
-pub async fn start_embedded_server(
-    config: EmbeddedServerConfig,
-) -> anyhow::Result<EmbeddedServer> {
+pub async fn start_embedded_server(config: EmbeddedServerConfig) -> anyhow::Result<EmbeddedServer> {
     init_tracing();
     std::fs::create_dir_all(&config.downloads_dir)?;
 
@@ -386,7 +394,11 @@ pub async fn run_from_env() -> anyhow::Result<()> {
     let static_dir = {
         let base = PathBuf::from(std::env::var("STATIC_DIR").unwrap_or_else(|_| "static".into()));
         let dist = base.join("dist");
-        if dist.is_dir() { dist } else { base }
+        if dist.is_dir() {
+            dist
+        } else {
+            base
+        }
     };
 
     let server = start_embedded_server(EmbeddedServerConfig {
@@ -467,8 +479,8 @@ mod tests {
 
     #[tokio::test]
     async fn embedded_server_serves_auth_status_on_localhost() {
-        let tmpdir = std::env::temp_dir()
-            .join(format!("m3u8-server-test-{}", uuid::Uuid::new_v4()));
+        let tmpdir =
+            std::env::temp_dir().join(format!("m3u8-server-test-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&tmpdir).unwrap();
 
         let server = spawn_test_server(&tmpdir).await;
@@ -488,8 +500,8 @@ mod tests {
 
     #[tokio::test]
     async fn recents_post_dedupes_and_sorts_latest_first() {
-        let tmpdir = std::env::temp_dir()
-            .join(format!("m3u8-server-test-{}", uuid::Uuid::new_v4()));
+        let tmpdir =
+            std::env::temp_dir().join(format!("m3u8-server-test-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&tmpdir).unwrap();
         let server = spawn_test_server(&tmpdir).await;
         let client = reqwest::Client::new();
@@ -507,9 +519,24 @@ mod tests {
             "group": "Sports"
         });
 
-        client.post(format!("{}/api/recents", server.base_url())).json(&alpha).send().await.unwrap();
-        client.post(format!("{}/api/recents", server.base_url())).json(&beta).send().await.unwrap();
-        client.post(format!("{}/api/recents", server.base_url())).json(&alpha).send().await.unwrap();
+        client
+            .post(format!("{}/api/recents", server.base_url()))
+            .json(&alpha)
+            .send()
+            .await
+            .unwrap();
+        client
+            .post(format!("{}/api/recents", server.base_url()))
+            .json(&beta)
+            .send()
+            .await
+            .unwrap();
+        client
+            .post(format!("{}/api/recents", server.base_url()))
+            .json(&alpha)
+            .send()
+            .await
+            .unwrap();
 
         let response = client
             .get(format!("{}/api/recents", server.base_url()))
@@ -529,8 +556,8 @@ mod tests {
 
     #[tokio::test]
     async fn recents_delete_removes_one_entry() {
-        let tmpdir = std::env::temp_dir()
-            .join(format!("m3u8-server-test-{}", uuid::Uuid::new_v4()));
+        let tmpdir =
+            std::env::temp_dir().join(format!("m3u8-server-test-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&tmpdir).unwrap();
         let server = spawn_test_server(&tmpdir).await;
         let client = reqwest::Client::new();
@@ -574,8 +601,8 @@ mod tests {
 
     #[tokio::test]
     async fn app_settings_round_trip_includes_recent_limit() {
-        let tmpdir = std::env::temp_dir()
-            .join(format!("m3u8-server-test-{}", uuid::Uuid::new_v4()));
+        let tmpdir =
+            std::env::temp_dir().join(format!("m3u8-server-test-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&tmpdir).unwrap();
         let server = spawn_test_server(&tmpdir).await;
         let client = reqwest::Client::new();
@@ -605,8 +632,8 @@ mod tests {
 
     #[tokio::test]
     async fn app_settings_round_trip_includes_auto_fullscreen() {
-        let tmpdir = std::env::temp_dir()
-            .join(format!("m3u8-server-test-{}", uuid::Uuid::new_v4()));
+        let tmpdir =
+            std::env::temp_dir().join(format!("m3u8-server-test-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&tmpdir).unwrap();
         let server = spawn_test_server(&tmpdir).await;
         let client = reqwest::Client::new();
@@ -636,8 +663,8 @@ mod tests {
 
     #[tokio::test]
     async fn recents_respect_recent_limit_setting() {
-        let tmpdir = std::env::temp_dir()
-            .join(format!("m3u8-server-test-{}", uuid::Uuid::new_v4()));
+        let tmpdir =
+            std::env::temp_dir().join(format!("m3u8-server-test-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&tmpdir).unwrap();
         let server = spawn_test_server(&tmpdir).await;
         let client = reqwest::Client::new();
@@ -686,8 +713,8 @@ mod tests {
 
     #[tokio::test]
     async fn live_clip_returns_before_segment_snapshot_finishes() {
-        let tmpdir = std::env::temp_dir()
-            .join(format!("m3u8-server-test-{}", uuid::Uuid::new_v4()));
+        let tmpdir =
+            std::env::temp_dir().join(format!("m3u8-server-test-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&tmpdir).unwrap();
 
         let recording_tmpdir = tmpdir.join("recording-task");
@@ -702,7 +729,10 @@ mod tests {
         let task_id = uuid::Uuid::new_v4().to_string();
         let tasks = HashMap::from([(
             task_id.clone(),
-            sample_task(&task_id, Some(recording_tmpdir.to_string_lossy().to_string())),
+            sample_task(
+                &task_id,
+                Some(recording_tmpdir.to_string_lossy().to_string()),
+            ),
         )]);
         std::fs::write(
             tmpdir.join("tasks.json"),
@@ -744,8 +774,8 @@ mod tests {
 
     #[tokio::test]
     async fn app_settings_round_trip_includes_recording_interval_fields() {
-        let tmpdir = std::env::temp_dir()
-            .join(format!("m3u8-server-test-{}", uuid::Uuid::new_v4()));
+        let tmpdir =
+            std::env::temp_dir().join(format!("m3u8-server-test-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&tmpdir).unwrap();
         let server = spawn_test_server(&tmpdir).await;
         let client = reqwest::Client::new();
@@ -780,8 +810,8 @@ mod tests {
 
     #[tokio::test]
     async fn start_download_persists_recording_preferences_and_timestamps_name() {
-        let tmpdir = std::env::temp_dir()
-            .join(format!("m3u8-server-test-{}", uuid::Uuid::new_v4()));
+        let tmpdir =
+            std::env::temp_dir().join(format!("m3u8-server-test-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&tmpdir).unwrap();
         let server = spawn_test_server(&tmpdir).await;
         let client = reqwest::Client::new();
@@ -836,8 +866,8 @@ mod tests {
 
     #[tokio::test]
     async fn mark_invalid_updates_health_cache() {
-        let tmpdir = std::env::temp_dir()
-            .join(format!("m3u8-server-test-{}", uuid::Uuid::new_v4()));
+        let tmpdir =
+            std::env::temp_dir().join(format!("m3u8-server-test-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&tmpdir).unwrap();
         let server = spawn_test_server(&tmpdir).await;
         let client = reqwest::Client::new();
@@ -861,6 +891,54 @@ mod tests {
             payload["cache"]["http://example.com/live.m3u8"]["status"],
             "invalid"
         );
+
+        server.stop().await.unwrap();
+        let _ = std::fs::remove_dir_all(&tmpdir);
+    }
+
+    #[tokio::test]
+    async fn deleting_completed_task_removes_task_cache_dir() {
+        let tmpdir =
+            std::env::temp_dir().join(format!("m3u8-server-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&tmpdir).unwrap();
+
+        let task_id = uuid::Uuid::new_v4().to_string();
+        let cache_dir = tmpdir.join(".cache").join(&task_id);
+        std::fs::create_dir_all(&cache_dir).unwrap();
+        std::fs::write(cache_dir.join("preview_sections.json"), b"[]").unwrap();
+        std::fs::write(cache_dir.join("seg_000000.m4s"), b"segment").unwrap();
+
+        let output_name = "finished.mp4";
+        std::fs::write(tmpdir.join(output_name), b"mp4").unwrap();
+
+        let mut task = sample_task(&task_id, Some(cache_dir.to_string_lossy().to_string()));
+        task.status = "completed".into();
+        task.output = Some(output_name.into());
+        task.size = 3;
+        task.duration_sec = Some(1.0);
+
+        std::fs::write(
+            tmpdir.join("tasks.json"),
+            serde_json::to_vec(&HashMap::from([(task_id.clone(), task)])).unwrap(),
+        )
+        .unwrap();
+
+        let server = spawn_test_server(&tmpdir).await;
+        let client = reqwest::Client::new();
+
+        let response = client
+            .delete(format!("{}/api/tasks/{}", server.base_url(), task_id))
+            .send()
+            .await
+            .unwrap();
+        assert!(response.status().is_success());
+        assert_eq!(
+            response.json::<serde_json::Value>().await.unwrap()["status"],
+            "deleted"
+        );
+
+        assert!(!cache_dir.exists());
+        assert!(!tmpdir.join(output_name).exists());
 
         server.stop().await.unwrap();
         let _ = std::fs::remove_dir_all(&tmpdir);

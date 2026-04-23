@@ -148,7 +148,9 @@ impl Downloader {
         let mut info = crate::parser::playlist_to_info(&playlist, &content, &self.config.url);
         if let Playlist::MasterPlaylist(master) = &playlist {
             let chosen_url = pick_quality(master, &content, &Quality::Best, &self.config.url);
-            if let Ok(media_content) = fetch_text_retry(&client, &chosen_url, self.config.retry).await {
+            if let Ok(media_content) =
+                fetch_text_retry(&client, &chosen_url, self.config.retry).await
+            {
                 if let Ok(Playlist::MediaPlaylist(media)) = parse_playlist(&media_content) {
                     info.is_live = !media.end_list;
                 }
@@ -374,12 +376,7 @@ impl Downloader {
             }
 
             // 15 s per-chunk timeout to detect a dead/stalled stream
-            match tokio::time::timeout(
-                std::time::Duration::from_secs(15),
-                stream.next(),
-            )
-            .await
-            {
+            match tokio::time::timeout(std::time::Duration::from_secs(15), stream.next()).await {
                 Ok(Some(Ok(chunk))) => {
                     file.write_all(&chunk).await?;
                     bytes_downloaded += chunk.len() as u64;
@@ -1251,8 +1248,13 @@ mod tests {
     #[test]
     fn make_client_succeeds_with_valid_headers() {
         let mut config = DownloadConfig::default();
-        config.headers.insert("User-Agent".to_string(), "TestAgent/1.0".to_string());
-        config.headers.insert("Accept".to_string(), "application/vnd.apple.mpegurl".to_string());
+        config
+            .headers
+            .insert("User-Agent".to_string(), "TestAgent/1.0".to_string());
+        config.headers.insert(
+            "Accept".to_string(),
+            "application/vnd.apple.mpegurl".to_string(),
+        );
 
         let dl = Downloader::new(config);
         assert!(dl.make_client().is_ok());
@@ -1262,8 +1264,12 @@ mod tests {
     fn make_client_silently_skips_invalid_header_names() {
         // Invalid header names are silently skipped (not an error).
         let mut config = DownloadConfig::default();
-        config.headers.insert("invalid header name!".to_string(), "value".to_string());
-        config.headers.insert("Valid-Header".to_string(), "ok".to_string());
+        config
+            .headers
+            .insert("invalid header name!".to_string(), "value".to_string());
+        config
+            .headers
+            .insert("Valid-Header".to_string(), "ok".to_string());
 
         let dl = Downloader::new(config);
         // should still succeed — bad header is skipped
@@ -1333,7 +1339,10 @@ mod tests {
         server.abort();
 
         assert!(matches!(info.kind, StreamKind::Master));
-        assert!(info.is_live, "master playlist should inherit live state from its variant");
+        assert!(
+            info.is_live,
+            "master playlist should inherit live state from its variant"
+        );
     }
 }
 

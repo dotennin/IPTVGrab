@@ -17,8 +17,7 @@ pub(crate) async fn watch_probe(
     Query(query): Query<WatchProxyQuery>,
 ) -> impl IntoResponse {
     if !query.url.starts_with("http://") && !query.url.starts_with("https://") {
-        return Json(serde_json::json!({"kind": "unknown", "content_type": ""}))
-            .into_response();
+        return Json(serde_json::json!({"kind": "unknown", "content_type": ""})).into_response();
     }
 
     let resp = state
@@ -57,8 +56,10 @@ pub(crate) async fn watch_probe(
     let fin = final_url.to_lowercase();
     let kind = if content_type_is_flv(&ct) || fin.contains(".flv") || orig.contains(".flv") {
         "flv"
-    } else if ct.contains("mpegurl") || ct.contains("x-mpegurl")
-        || fin.contains(".m3u8") || orig.contains(".m3u8")
+    } else if ct.contains("mpegurl")
+        || ct.contains("x-mpegurl")
+        || fin.contains(".m3u8")
+        || orig.contains(".m3u8")
     {
         "hls"
     } else {
@@ -78,12 +79,7 @@ pub(crate) async fn watch_proxy(
     }
 
     if url_is_media_segment(&query.url) {
-        let resp = match state
-            .proxy_client
-            .get(&query.url)
-            .send()
-            .await
-        {
+        let resp = match state.proxy_client.get(&query.url).send().await {
             Ok(r) => r,
             Err(_) => return (StatusCode::BAD_GATEWAY, "Upstream request failed").into_response(),
         };
@@ -111,7 +107,11 @@ pub(crate) async fn watch_proxy(
             .map(|s| s.to_string());
 
         let stream = resp.bytes_stream();
-        let cache_control = if content_type_is_flv(&content_type) { "no-store" } else { "public, max-age=120" };
+        let cache_control = if content_type_is_flv(&content_type) {
+            "no-store"
+        } else {
+            "public, max-age=120"
+        };
         let mut builder = Response::builder()
             .status(StatusCode::OK)
             .header(header::CONTENT_TYPE, content_type)
@@ -415,13 +415,15 @@ mod tests {
 
     #[test]
     fn is_master_playlist_detects_stream_inf_without_extinf() {
-        let master = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=4000000\nhttps://cdn.example.com/hi/index.m3u8";
+        let master =
+            "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=4000000\nhttps://cdn.example.com/hi/index.m3u8";
         assert!(is_master_playlist(master));
     }
 
     #[test]
     fn is_master_playlist_returns_false_for_media_playlist() {
-        let media = "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:6.0,\nseg0.ts";
+        let media =
+            "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:6.0,\nseg0.ts";
         assert!(!is_master_playlist(media));
     }
 
@@ -429,14 +431,20 @@ mod tests {
     fn pick_best_variant_url_chooses_highest_bandwidth() {
         let master = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000\nlow.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=4000000\nhigh.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=2000000\nmid.m3u8";
         let best = pick_best_variant_url(master, "https://cdn.example.com/live/index.m3u8");
-        assert_eq!(best, Some("https://cdn.example.com/live/high.m3u8".to_string()));
+        assert_eq!(
+            best,
+            Some("https://cdn.example.com/live/high.m3u8".to_string())
+        );
     }
 
     #[test]
     fn pick_best_variant_url_falls_back_to_first_when_no_bandwidth() {
         let master = "#EXTM3U\n#EXT-X-STREAM-INF:PROGRAM-ID=1\nstream.m3u8";
         let best = pick_best_variant_url(master, "https://cdn.example.com/live/index.m3u8");
-        assert_eq!(best, Some("https://cdn.example.com/live/stream.m3u8".to_string()));
+        assert_eq!(
+            best,
+            Some("https://cdn.example.com/live/stream.m3u8".to_string())
+        );
     }
 
     #[test]
@@ -444,8 +452,12 @@ mod tests {
         let src = "#EXTM3U\n#EXT-X-MAP:URI=\"init.mp4\"\n#EXT-X-KEY:METHOD=AES-128,URI=\"keys/key.bin\"\n#EXTINF:6.0,\nseg_000001.ts";
         let out = rewrite_watch_playlist(src, "https://example.com/live/index.m3u8");
         assert!(out.contains("/api/watch/proxy?url=https%3A%2F%2Fexample.com%2Flive%2Finit.mp4"));
-        assert!(out.contains("/api/watch/proxy?url=https%3A%2F%2Fexample.com%2Flive%2Fkeys%2Fkey.bin"));
-        assert!(out.contains("/api/watch/proxy?url=https%3A%2F%2Fexample.com%2Flive%2Fseg_000001.ts"));
+        assert!(
+            out.contains("/api/watch/proxy?url=https%3A%2F%2Fexample.com%2Flive%2Fkeys%2Fkey.bin")
+        );
+        assert!(
+            out.contains("/api/watch/proxy?url=https%3A%2F%2Fexample.com%2Flive%2Fseg_000001.ts")
+        );
     }
 
     #[test]

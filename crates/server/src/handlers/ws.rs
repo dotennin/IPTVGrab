@@ -13,8 +13,8 @@ use tokio_util::io::ReaderStream;
 use crate::helpers::{
     build_preview_master_m3u8, build_preview_media_playlist, contiguous_segments,
     preview_audio_dir, preview_audio_map_uri, preview_manifest_response, preview_map_uri,
-    preview_segment_content_type, preview_task_context, scan_sections_async,
-    save_preview_sections, serve_preview_file,
+    preview_segment_content_type, preview_task_context, save_preview_sections, scan_sections_async,
+    serve_preview_file,
 };
 use crate::state::AppState;
 

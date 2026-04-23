@@ -3,8 +3,7 @@ use uuid::Uuid;
 
 #[tokio::test]
 async fn clip_interrupted_allows_clip_when_segments_exist() {
-    let tmpdir = std::env::temp_dir()
-        .join(format!("m3u8-server-test-{}", Uuid::new_v4()));
+    let tmpdir = std::env::temp_dir().join(format!("m3u8-server-test-{}", Uuid::new_v4()));
     std::fs::create_dir_all(&tmpdir).unwrap();
 
     let segdir = tmpdir.join("segments");
@@ -44,11 +43,16 @@ async fn clip_interrupted_allows_clip_when_segments_exist() {
     let mut map = serde_json::Map::new();
     map.insert(task_id.clone(), task);
 
-    std::fs::write(tmpdir.join("tasks.json"), serde_json::to_string_pretty(&map).unwrap()).unwrap();
+    std::fs::write(
+        tmpdir.join("tasks.json"),
+        serde_json::to_string_pretty(&map).unwrap(),
+    )
+    .unwrap();
 
-    let server = server::start_embedded_server(server::EmbeddedServerConfig::local_device(tmpdir.clone()))
-        .await
-        .unwrap();
+    let server =
+        server::start_embedded_server(server::EmbeddedServerConfig::local_device(tmpdir.clone()))
+            .await
+            .unwrap();
 
     let client = reqwest::Client::new();
     let res = client

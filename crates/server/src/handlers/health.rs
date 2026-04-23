@@ -24,7 +24,9 @@ pub(crate) async fn get_health_check(State(state): State<AppState>) -> impl Into
     }))
 }
 
-fn default_true() -> bool { true }
+fn default_true() -> bool {
+    true
+}
 
 #[derive(Deserialize, Default)]
 pub(crate) struct HealthCheckQuery {
@@ -77,10 +79,13 @@ pub(crate) async fn trigger_health_check(state: AppState, urls: Vec<String>, dee
                     .duration_since(UNIX_EPOCH)
                     .unwrap()
                     .as_secs_f64();
-                sc.health_cache
-                    .write()
-                    .await
-                    .insert(u, HealthEntry { checked_at: now, ..entry });
+                sc.health_cache.write().await.insert(
+                    u,
+                    HealthEntry {
+                        checked_at: now,
+                        ..entry
+                    },
+                );
                 sc.health_state.write().await.done += 1;
                 drop(permit);
             }));

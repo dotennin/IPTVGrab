@@ -232,7 +232,11 @@ pub(crate) async fn stop_transcode(
 ) -> impl IntoResponse {
     let session = {
         let mut map = state.transcodes.write().await;
-        if let Some(key) = map.values().find(|s| s.id == id).map(|s| s.source_url.clone()) {
+        if let Some(key) = map
+            .values()
+            .find(|s| s.id == id)
+            .map(|s| s.source_url.clone())
+        {
             map.remove(&key)
         } else {
             None

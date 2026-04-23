@@ -57,11 +57,7 @@ pub(crate) fn preview_map_uri(task: &Task, tmpdir: &Path, task_id: &str) -> Opti
     Some(format!("/api/tasks/{task_id}/seg/init.mp4"))
 }
 
-pub(crate) fn preview_audio_map_uri(
-    task: &Task,
-    tmpdir: &Path,
-    task_id: &str,
-) -> Option<String> {
+pub(crate) fn preview_audio_map_uri(task: &Task, tmpdir: &Path, task_id: &str) -> Option<String> {
     if task.is_cmaf != Some(true) {
         return None;
     }
@@ -164,7 +160,11 @@ pub(crate) async fn scan_sections_async(dir: PathBuf, ext: String) -> Vec<Sectio
 
         let expected_inc: u64 = if valid.len() >= 2 {
             let inc = valid[1].1.saturating_sub(valid[0].1);
-            if inc == 0 { u64::MAX } else { inc }
+            if inc == 0 {
+                u64::MAX
+            } else {
+                inc
+            }
         } else {
             u64::MAX
         };
@@ -183,7 +183,10 @@ pub(crate) async fn scan_sections_async(dir: PathBuf, ext: String) -> Vec<Sectio
             let (_, prev_pts) = window[0];
             let (idx, pts) = window[1];
             if pts.saturating_sub(prev_pts) > expected_inc * DISC_JUMP_FACTOR {
-                sections.push(SectionInfo { start_idx: idx, base_pts: pts });
+                sections.push(SectionInfo {
+                    start_idx: idx,
+                    base_pts: pts,
+                });
             }
         }
 
@@ -231,7 +234,13 @@ pub(crate) fn build_m3u8(
     let has_gaps = segs
         .iter()
         .any(|p| p.metadata().map(|m| m.len()).unwrap_or(u64::MAX) < PREVIEW_MIN_SEGMENT_BYTES);
-    let version = if has_gaps { 8 } else if map_uri.is_some() { 7 } else { 3 };
+    let version = if has_gaps {
+        8
+    } else if map_uri.is_some() {
+        7
+    } else {
+        3
+    };
     let mut lines = vec![
         "#EXTM3U".to_string(),
         format!("#EXT-X-VERSION:{version}"),
@@ -294,11 +303,7 @@ pub(crate) fn preview_segment_is_valid(filename: &str) -> bool {
 
 /// Recursively walk the MP4 box tree looking for a `tfdt` box.
 /// Returns `(byte_offset_of_time_field, baseMediaDecodeTime, version)`.
-pub(crate) fn find_tfdt_in_mp4(
-    data: &[u8],
-    start: usize,
-    end: usize,
-) -> Option<(usize, u64, u8)> {
+pub(crate) fn find_tfdt_in_mp4(data: &[u8], start: usize, end: usize) -> Option<(usize, u64, u8)> {
     let mut off = start;
     while off + 8 <= end {
         let size = u32::from_be_bytes(data[off..off + 4].try_into().ok()?) as usize;

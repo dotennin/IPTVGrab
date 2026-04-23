@@ -19,8 +19,8 @@ use crate::types::LoginRequest;
 /// recover the original password).
 pub(crate) fn derive_export_token(password: &str) -> String {
     type HmacSha256 = Hmac<Sha256>;
-    let mut mac = HmacSha256::new_from_slice(password.as_bytes())
-        .expect("HMAC accepts any key length");
+    let mut mac =
+        HmacSha256::new_from_slice(password.as_bytes()).expect("HMAC accepts any key length");
     mac.update(b"media-nest-export-v1");
     hex::encode(mac.finalize().into_bytes())
 }
@@ -52,10 +52,8 @@ pub(crate) async fn auth_middleware(
         .uri()
         .query()
         .and_then(|q| {
-            q.split('&').find_map(|part| {
-                part.strip_prefix("token=")
-                    .map(|v| urlencoding_decode(v))
-            })
+            q.split('&')
+                .find_map(|part| part.strip_prefix("token=").map(|v| urlencoding_decode(v)))
         })
         .unwrap_or_default();
     if !query_token.is_empty() && query_token == derive_export_token(&password) {

@@ -142,7 +142,8 @@ pub(crate) async fn start_download(
     Json(body): Json<DownloadRequest>,
 ) -> impl IntoResponse {
     let task_id = Uuid::new_v4().to_string();
-    let recording_interval_minutes = normalized_recording_interval_minutes(body.recording_interval_minutes);
+    let recording_interval_minutes =
+        normalized_recording_interval_minutes(body.recording_interval_minutes);
     let quality = match body.quality.as_str() {
         "worst" => Quality::Worst,
         s if s.parse::<usize>().is_ok() => Quality::Index(s.parse().unwrap()),
@@ -218,30 +219,32 @@ pub(crate) async fn start_download(
     Json(serde_json::json!({"task_id": task_id}))
 }
 
-pub(crate) async fn run_download(
-    state: AppState,
-    task_id: String,
-    dl: Arc<Downloader>,
-) {
+pub(crate) async fn run_download(state: AppState, task_id: String, dl: Arc<Downloader>) {
     let (tx, mut rx) = mpsc::channel::<ProgressEvent>(64);
 
     let state_clone = state.clone();
     let tid = task_id.clone();
     tokio::spawn(async move {
         while let Some(event) = rx.recv().await {
-            let json = {
+            let (json, tmpdir_to_cleanup) = {
                 let mut tasks = state_clone.tasks.write().await;
+                let mut tmpdir_to_cleanup = None;
                 if let Some(task) = tasks.get_mut(&tid) {
                     let already_terminal = matches!(
                         task.status.as_str(),
                         "cancelled" | "completed" | "failed" | "interrupted" | "paused"
                     );
                     if !already_terminal {
-                        apply_event(task, event.clone());
+                        tmpdir_to_cleanup =
+                            apply_event_and_collect_tmpdir_cleanup(task, event.clone());
                     }
                 }
-                tasks.get(&tid).and_then(|t| serde_json::to_string(t).ok())
+                (
+                    tasks.get(&tid).and_then(|t| serde_json::to_string(t).ok()),
+                    tmpdir_to_cleanup,
+                )
             };
+            cleanup_tmpdir_path(tmpdir_to_cleanup).await;
             if let Some(j) = json {
                 let subs = state_clone.ws_subs.lock().await;
                 if let Some(list) = subs.get(&tid) {
@@ -296,6 +299,16 @@ pub(crate) async fn run_download(
     }
 
     state.downloaders.write().await.remove(&task_id);
+}
+
+fn apply_event_and_collect_tmpdir_cleanup(task: &mut Task, event: ProgressEvent) -> Option<String> {
+    let should_cleanup = matches!(&event, ProgressEvent::Completed { .. });
+    apply_event(task, event);
+    if should_cleanup {
+        task.tmpdir.take()
+    } else {
+        None
+    }
 }
 
 pub(crate) fn apply_event(task: &mut Task, event: ProgressEvent) {
@@ -376,6 +389,12 @@ pub(crate) fn apply_event(task: &mut Task, event: ProgressEvent) {
     }
 }
 
+async fn cleanup_tmpdir_path(tmpdir: Option<String>) {
+    if let Some(dir) = tmpdir {
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+}
+
 pub(crate) async fn list_tasks(State(state): State<AppState>) -> impl IntoResponse {
     let tasks = state.tasks.read().await;
     let mut list: Vec<Task> = tasks.values().cloned().collect();
@@ -439,9 +458,10 @@ pub(crate) async fn cancel_task(
     }
 
     let output = task.output.clone();
+    let tmpdir = task.tmpdir.clone();
     tasks.remove(&task_id);
     drop(tasks);
-    cleanup_tmpdir(&state, &task_id).await;
+    cleanup_task_tmpdir(&state, &task_id, tmpdir).await;
     if let Some(name) = output {
         let path = state.downloads_dir.join(name);
         let _ = tokio::fs::remove_file(path).await;
@@ -457,8 +477,13 @@ pub(crate) async fn cleanup_tmpdir(state: &AppState, task_id: &str) {
         .await
         .get(task_id)
         .and_then(|t| t.tmpdir.clone());
-    if let Some(dir) = tmpdir {
-        let _ = tokio::fs::remove_dir_all(&dir).await;
+    cleanup_task_tmpdir(state, task_id, tmpdir).await;
+}
+
+async fn cleanup_task_tmpdir(state: &AppState, task_id: &str, tmpdir: Option<String>) {
+    let had_tmpdir = tmpdir.is_some();
+    cleanup_tmpdir_path(tmpdir).await;
+    if had_tmpdir {
         if let Some(t) = state.tasks.write().await.get_mut(task_id) {
             t.tmpdir = None;
         }
@@ -601,7 +626,10 @@ async fn queue_recording_successor(state: &AppState, task: &Task) -> String {
     new_id
 }
 
-async fn fork_recording_task(state: &AppState, task_id: &str) -> Result<(String, String), &'static str> {
+async fn fork_recording_task(
+    state: &AppState,
+    task_id: &str,
+) -> Result<(String, String), &'static str> {
     let task = {
         let tasks = state.tasks.read().await;
         match tasks.get(task_id) {
@@ -631,13 +659,13 @@ async fn fork_recording_task(state: &AppState, task_id: &str) -> Result<(String,
 }
 
 pub(crate) fn make_task(id: &str, task: &Task, now: f64) -> Task {
-    let recording_interval_minutes = normalized_recording_interval_minutes(task.recording_interval_minutes);
-    let recording_output_base = recording_interval_minutes
-        .map(|_| {
-            task.recording_output_base
-                .clone()
-                .unwrap_or_else(|| recording_output_base(task.output_name.as_deref(), &task.url))
-        });
+    let recording_interval_minutes =
+        normalized_recording_interval_minutes(task.recording_interval_minutes);
+    let recording_output_base = recording_interval_minutes.map(|_| {
+        task.recording_output_base
+            .clone()
+            .unwrap_or_else(|| recording_output_base(task.output_name.as_deref(), &task.url))
+    });
     Task {
         id: id.to_string(),
         url: task.url.clone(),
@@ -674,7 +702,13 @@ pub(crate) async fn spawn_task(state: &AppState, task_id: &str) {
     let (url, headers, quality_str, concurrency, output_name) = {
         let tasks = state.tasks.read().await;
         let t = tasks.get(task_id).cloned().unwrap();
-        (t.url, t.req_headers, t.quality, t.concurrency, t.output_name)
+        (
+            t.url,
+            t.req_headers,
+            t.quality,
+            t.concurrency,
+            t.output_name,
+        )
     };
     let quality = match quality_str.as_str() {
         "worst" => Quality::Worst,
@@ -821,4 +855,76 @@ pub(crate) async fn restart_task(
     state.save_tasks().await;
     spawn_task(&state, &task_id).await;
     Json(serde_json::json!({"task_id": task_id, "status": "queued"})).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::path::Path;
+
+    use m3u8_core::ProgressEvent;
+
+    use super::*;
+
+    fn sample_task(task_id: &str, tmpdir: Option<String>) -> Task {
+        Task {
+            id: task_id.to_string(),
+            url: "https://example.com/master.m3u8".into(),
+            status: "downloading".into(),
+            progress: 42,
+            total: 3,
+            downloaded: 1,
+            failed: 0,
+            speed_mbps: 1.5,
+            bytes_downloaded: 1024,
+            output: None,
+            size: 0,
+            error: None,
+            created_at: 1.0,
+            req_headers: HashMap::new(),
+            output_name: Some("demo".into()),
+            quality: "best".into(),
+            concurrency: 8,
+            tmpdir,
+            is_cmaf: Some(true),
+            seg_ext: Some(".m4s".into()),
+            target_duration: Some(6.0),
+            duration_sec: None,
+            recorded_segments: None,
+            elapsed_sec: None,
+            task_type: None,
+            recording_interval_minutes: None,
+            recording_auto_restart: false,
+            recording_output_base: None,
+        }
+    }
+
+    #[test]
+    fn completed_event_collects_tmpdir_for_cleanup() {
+        let tmpdir = std::env::temp_dir().join(format!(
+            "iptvgrab-task-event-cleanup-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&tmpdir).unwrap();
+        std::fs::write(tmpdir.join("seg_000000.m4s"), b"segment").unwrap();
+
+        let mut task = sample_task("task-1", Some(tmpdir.to_string_lossy().to_string()));
+
+        let cleanup = apply_event_and_collect_tmpdir_cleanup(
+            &mut task,
+            ProgressEvent::Completed {
+                output: "demo.mp4".into(),
+                size: 321,
+                duration_sec: 12.5,
+            },
+        );
+
+        assert_eq!(cleanup.as_deref(), Some(tmpdir.to_string_lossy().as_ref()));
+        assert_eq!(task.status, "completed");
+        assert_eq!(task.output.as_deref(), Some("demo.mp4"));
+        assert!(task.tmpdir.is_none());
+        assert!(Path::new(cleanup.as_deref().unwrap()).exists());
+
+        let _ = std::fs::remove_dir_all(tmpdir);
+    }
 }

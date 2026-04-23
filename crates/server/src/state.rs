@@ -99,8 +99,11 @@ impl AppState {
     pub(crate) async fn save_recents(&self) {
         let path = self.downloads_dir.join("recents.json");
         let recents = self.recents.read().await;
-        let _ =
-            tokio::fs::write(&path, serde_json::to_vec_pretty(&*recents).unwrap_or_default()).await;
+        let _ = tokio::fs::write(
+            &path,
+            serde_json::to_vec_pretty(&*recents).unwrap_or_default(),
+        )
+        .await;
     }
 
     pub(crate) async fn save_merged_config(&self) {

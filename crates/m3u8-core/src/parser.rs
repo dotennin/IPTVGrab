@@ -575,7 +575,8 @@ mod tests {
 
     #[test]
     fn find_audio_playlist_returns_none_for_media_playlist_without_audio() {
-        let media_m3u8 = "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6.0,\nseg1.ts\n#EXT-X-ENDLIST\n";
+        let media_m3u8 =
+            "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6.0,\nseg1.ts\n#EXT-X-ENDLIST\n";
         let playlist = parse_playlist(media_m3u8).unwrap();
         let Playlist::MediaPlaylist(_) = &playlist else {
             panic!("expected media playlist");
@@ -587,7 +588,12 @@ mod tests {
         };
 
         assert_eq!(
-            find_audio_playlist(&master, master_m3u8, "https://example.com/stream.m3u8", BASE_URL),
+            find_audio_playlist(
+                &master,
+                master_m3u8,
+                "https://example.com/stream.m3u8",
+                BASE_URL
+            ),
             None
         );
     }
@@ -612,10 +618,7 @@ mod tests {
 
     #[test]
     fn resolve_resolves_relative_uri_against_base() {
-        assert_eq!(
-            resolve("0.m3u8", BASE_URL),
-            "https://example.com/0.m3u8"
-        );
+        assert_eq!(resolve("0.m3u8", BASE_URL), "https://example.com/0.m3u8");
     }
 
     #[test]
@@ -697,7 +700,8 @@ mod tests {
 
     #[test]
     fn is_cmaf_detects_m4s_segments() {
-        let m3u8 = "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6.0,\nseg_000001.m4s\n#EXT-X-ENDLIST\n";
+        let m3u8 =
+            "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6.0,\nseg_000001.m4s\n#EXT-X-ENDLIST\n";
         let Playlist::MediaPlaylist(media) = parse_playlist(m3u8).unwrap() else {
             panic!("expected media playlist");
         };
@@ -715,7 +719,8 @@ mod tests {
 
     #[test]
     fn is_cmaf_returns_false_for_ts_segments() {
-        let m3u8 = "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6.0,\nseg_000001.ts\n#EXT-X-ENDLIST\n";
+        let m3u8 =
+            "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6.0,\nseg_000001.ts\n#EXT-X-ENDLIST\n";
         let Playlist::MediaPlaylist(media) = parse_playlist(m3u8).unwrap() else {
             panic!("expected media playlist");
         };

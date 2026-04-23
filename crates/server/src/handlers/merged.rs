@@ -103,8 +103,7 @@ pub(crate) fn build_merged_view(
         } else if let Some(fresh) = sourced.get(&eg.name) {
             let fresh_map: HashMap<_, _> = fresh.iter().map(|c| (c.id.clone(), c)).collect();
             let mut ng = eg.clone();
-            let mut seen_ids: std::collections::HashSet<String> =
-                std::collections::HashSet::new();
+            let mut seen_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
             ng.channels = eg
                 .channels
                 .iter()
