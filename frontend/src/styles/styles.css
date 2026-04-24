@@ -9,7 +9,15 @@
 
 html,
 body {
-  min-height: 100%;
+  display: grid;
+  grid-template-rows: auto 1fr auto; /* header auto, main fill max height, footer auto*/
+  height: 100dvh;
+}
+
+.body-content {
+  grid-row: 2;      /* specfic to 1fr area */
+  min-height: 0;    /* unlimit min height */
+  overflow: hidden; /* prevent content overflow from breaking layout */
 }
 
 .app-shell {
@@ -963,7 +971,7 @@ textarea.form-control {
   flex: 1;
   min-width: 0;
   overflow-y: auto;
-  height: calc(100dvh - 150px);
+  height: 100%;
 }
 
 /* ── Sort buttons ────────────────────────────────────────────────────────── */
