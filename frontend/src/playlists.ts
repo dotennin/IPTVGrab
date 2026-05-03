@@ -111,8 +111,12 @@ function _populateGroupFilter(
     ? orderedGroups
     : [...new Set(channels.map((c) => c.group).filter(Boolean) as string[])].sort();
   list.innerHTML = `<li class="channel-group-item" data-group="">All</li>`;
-  // default to first group if active group not present in new list
-  if (groups.length > 0 && !_activeGroup) _activeGroup = groups[0];
+  // default to first group if there are groups, otherwise reset to empty to show all
+  if (groups.length > 0) {
+    if (!_activeGroup) _activeGroup = groups[0];
+  } else {
+    _activeGroup = '';
+  }
   for (const g of groups) {
     const li = document.createElement('li');
     li.className = 'channel-group-item' + (g === _activeGroup ? ' active' : '');
