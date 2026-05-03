@@ -673,7 +673,7 @@ document.getElementById('savePlaylistBtn')?.addEventListener('click', async () =
     const res = await apiFetch('/api/playlists', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ name, url, text }),
+      body:    JSON.stringify({ name, url, raw: text }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || 'Failed to add playlist');
